@@ -169,7 +169,83 @@ npm run dev
 
 Frontend will be available at: `http://localhost:5173`
 
-## 📁 Project Structure
+## � Docker Commands (Recommended)
+
+### Quick Start with Docker
+
+1. **Clone and setup:**
+   ```bash
+   git clone https://github.com/wbin04/SQLTuner.git
+   cd SQLTuner
+   cp .env.example .env
+   ```
+
+2. **Start all services:**
+   ```bash
+   docker-compose up --build -d
+   ```
+
+3. **Check status:**
+   ```bash
+   curl http://localhost:8000/health
+   ```
+
+### Basic Operations
+```bash
+# Start all services (build if needed)
+docker-compose up --build -d
+
+# View logs
+docker-compose logs -f backend
+docker-compose logs -f sqltuner-server
+
+# Stop all services
+docker-compose down
+
+# Stop and remove volumes (⚠️  deletes database data)
+docker-compose down -v
+```
+
+### Service Management
+```bash
+# Restart backend only
+docker-compose restart backend
+
+# Restart database only
+docker-compose restart sqltuner-server
+
+# Restart all services
+docker-compose restart
+```
+
+### Development
+```bash
+# Run in foreground (see logs)
+docker-compose up
+
+# Rebuild after code changes
+docker-compose up --build
+
+# Execute into backend container
+docker-compose exec backend bash
+
+# Execute into database container
+docker-compose exec sqltuner-server psql -U postgres -d sqltuner_db
+```
+
+### Troubleshooting
+```bash
+# Check service status
+docker-compose ps
+
+# View all logs
+docker-compose logs
+
+# Clean up (remove containers, networks, images)
+docker system prune -a --volumes
+```
+
+## �📁 Project Structure
 
 ```
 SQLTuner/
