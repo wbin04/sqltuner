@@ -1,0 +1,26 @@
+# 1. Đường dẫn tới file model (Nếu file gguf nằm cùng thư mục thì để như dưới)
+FROM ./sqlcoder-7b.Q4_K_M.gguf
+
+# 2. Thiết lập độ "sáng tạo". 
+# Với code SQL, ta cần chính xác tuyệt đối nên để temperature = 0
+PARAMETER temperature 0.0
+
+# 3. Ký tự dừng (Stop words) để model không viết nhảm sau khi xong code
+PARAMETER stop "```"
+PARAMETER stop "; "
+
+# 4. Template hội thoại (QUAN TRỌNG NHẤT)
+# Đây là format mà Defog dùng để train model này. Không sửa dòng này.
+TEMPLATE """
+### Task
+Generate a SQL query to answer the following question:
+{{ .Prompt }}
+
+### Database Schema
+The query will run on a database with the following schema:
+{{ .System }}
+
+### Answer
+Given the database schema, here is the SQL query that answers the question:
+```sql
+"""
