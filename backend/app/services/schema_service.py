@@ -193,7 +193,7 @@ class SchemaService:
             
             # Decrypt password
             try:
-                plain_password = decrypt_password(connection.encrypted_password)
+                plain_password = decrypt_password(connection.db_password)
             except Exception as e:
                 raise ValueError(f"Failed to decrypt password: {str(e)}")
             

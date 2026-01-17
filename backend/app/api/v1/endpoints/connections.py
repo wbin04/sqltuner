@@ -37,7 +37,7 @@ async def create_connection(
     user_id = "00000000-0000-0000-0000-000000000001"  # Placeholder
     
     # Encrypt password
-    encrypted_password = encrypt_password(connection_data.password)
+    db_password = encrypt_password(connection_data.password)
     
     # Create connection object
     db_connection = DBConnection(
@@ -46,7 +46,7 @@ async def create_connection(
         host=connection_data.host,
         port=connection_data.port,
         username=connection_data.username,
-        encrypted_password=encrypted_password,
+        db_password=db_password,
         db_name=connection_data.db_name,
         db_type=connection_data.db_type,
     )
@@ -122,7 +122,7 @@ async def update_connection(
     
     # Handle password encryption if password is being updated
     if "password" in update_data:
-        update_data["encrypted_password"] = encrypt_password(update_data.pop("password"))
+        update_data["db_password"] = encrypt_password(update_data.pop("password"))
     
     for field, value in update_data.items():
         setattr(connection, field, value)

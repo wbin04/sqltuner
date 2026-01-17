@@ -33,7 +33,7 @@ class User(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email = Column(String(255), nullable=False, unique=True, index=True)
-    hashed_password = Column(String(255), nullable=False)
+    password = Column(String(255), nullable=False)
     role = Column(SQLEnum(UserRole, name="user_role"), default=UserRole.USER)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
@@ -50,7 +50,7 @@ class DBConnection(Base):
     host = Column(String(255), nullable=False)
     port = Column(Integer, default=5432)
     username = Column(String(100))
-    encrypted_password = Column(String(500), nullable=False)
+    db_password = Column(String(500), nullable=False)
     db_name = Column(String(100), nullable=False)
     db_type = Column(SQLEnum(DBType, name="db_type"), default=DBType.POSTGRES)
     metadata_cache = Column(JSONB, nullable=True)  # Cache for schema metadata

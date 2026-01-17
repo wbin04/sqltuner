@@ -13,7 +13,7 @@ CREATE TYPE chat_role AS ENUM ('user', 'assistant');
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     email VARCHAR(255) NOT NULL UNIQUE,
-    hashed_password VARCHAR(255) NOT NULL,
+    password VARCHAR(255) NOT NULL,
     role user_role DEFAULT 'user',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -26,7 +26,7 @@ CREATE TABLE db_connections (
     host VARCHAR(255) NOT NULL,
     port INT DEFAULT 5432,
     username VARCHAR(100),
-    encrypted_password VARCHAR(500) NOT NULL,
+    db_password VARCHAR(500) NOT NULL,
     db_name VARCHAR(100) NOT NULL,
     db_type db_type DEFAULT 'postgres',
     created_at TIMESTAMPTZ DEFAULT NOW()
