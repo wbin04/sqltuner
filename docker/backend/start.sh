@@ -2,7 +2,7 @@
 set -e
 
 # Extract DB connection details from DATABASE_URL or use defaults
-DB_HOST="${DB_HOST:-sqltuner-server}"
+DB_HOST="${DB_HOST:-database}"
 DB_PORT="${DB_PORT:-5432}"
 
 echo "Waiting for database to be ready..."

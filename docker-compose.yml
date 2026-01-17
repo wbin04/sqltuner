@@ -1,5 +1,7 @@
+name: sqltuner
+
 services:
-  sqltuner-server:
+  database:
     build:
       context: ./docker/database
     container_name: sqltuner_db
@@ -14,7 +16,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
-      - sqltuner_net
+      - net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 10s
@@ -33,18 +35,18 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@sqltuner-server:5432/${POSTGRES_DB:-sqltuner_db}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@database:5432/${POSTGRES_DB:-sqltuner_db}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       DEV_MODE: ${DEV_MODE:-true}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
     depends_on:
-      sqltuner-server:
+      database:
         condition: service_healthy
     networks:
-      - sqltuner_net
+      - net
 
 networks:
-  sqltuner_net:
+  net:
     driver: bridge
 
 volumes:
