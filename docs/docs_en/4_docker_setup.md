@@ -20,7 +20,7 @@ Generate the configuration files for this modular structure.
 # Requirements
 
 1. **docker/database/Dockerfile**:
-   - Base image: `pgvector/pgvector:pg16`.
+   - Base image: `pgvector/pgvector:pg17`.
    - Install build dependencies (git, make, gcc, postgresql-server-dev-16).
    - Clone and install `hypopg` from source.
    - Copy `init.sql` to `/docker-entrypoint-initdb.d/`.

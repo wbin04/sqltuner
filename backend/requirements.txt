@@ -7,5 +7,8 @@ pydantic-settings==2.1.0
 python-dotenv==1.0.0
 httpx==0.26.0
 python-multipart==0.0.6
-psycopg2==2.9.11
-pydantic-settings==2.1.0
+psycopg2-binary==2.9.9
+pydantic[email]==2.5.3
+passlib[bcrypt]==1.7.4
+cryptography==42.0.0
+pymysql==1.1.0

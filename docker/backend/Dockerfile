@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y \
     libpq-dev \
     gcc \
     curl \
+    netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies (for layer caching)
@@ -15,14 +16,17 @@ COPY backend/requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy backend source code
-COPY backend/ /app/
+COPY backend/ /app/backend
+
+# Set PYTHONPATH
+ENV PYTHONPATH=/app
 
 # Copy and make entrypoint script executable
-COPY docker/backend/start.sh /usr/local/bin/start.sh
-RUN chmod +x /usr/local/bin/start.sh
+COPY docker/backend/start.sh /app/start.sh
+RUN chmod +x /app/start.sh
 
 # Expose port
 EXPOSE 8000
 
 # Set entrypoint
-ENTRYPOINT ["/usr/local/bin/start.sh"]
+ENTRYPOINT ["./start.sh"]

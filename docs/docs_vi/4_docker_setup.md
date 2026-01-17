@@ -20,7 +20,7 @@ Tạo các file cấu hình cho cấu trúc modular này.
 # Yêu cầu
 
 1. **docker/database/Dockerfile**:
-   - Base image: `pgvector/pgvector:pg16`.
+   - Base image: `pgvector/pgvector:pg17`.
    - Cài đặt build dependencies (git, make, gcc, postgresql-server-dev-16).
    - Clone và cài đặt `hypopg` từ source.
    - Copy `init.sql` vào `/docker-entrypoint-initdb.d/`.

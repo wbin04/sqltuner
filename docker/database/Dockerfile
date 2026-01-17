@@ -1,11 +1,11 @@
-FROM pgvector/pgvector:pg16
+FROM pgvector/pgvector:pg17
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
     git \
     make \
     gcc \
-    postgresql-server-dev-16 \
+    postgresql-server-dev-17 \
     && rm -rf /var/lib/apt/lists/*
 
 # Clone and install HypoPG

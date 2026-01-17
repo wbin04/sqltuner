@@ -31,7 +31,7 @@ function App() {
         {/* Header */}
         <div className="text-center mb-12">
           <h1 className="text-5xl font-bold mb-4 bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
-            Smart SQL Tuner
+            SQLTuner
           </h1>
           <p className="text-gray-400 text-lg">
             AI-powered SQL optimization using Local LLM

@@ -1,8 +1,6 @@
--- Initialize database extensions
+```sql
+-- Kích hoạt extension UUID
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS vector;
-CREATE EXTENSION IF NOT EXISTS hypopg;
-CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 
 -- 1. Tạo các kiểu ENUM
 CREATE TYPE user_role AS ENUM ('admin', 'user');
@@ -75,3 +73,4 @@ CREATE TABLE performance_analysis (
 );
 -- Tạo Index cho JSONB để sau này query nhanh các node Seq Scan
 CREATE INDEX idx_explain_plan ON performance_analysis USING gin (explain_plan);
+```

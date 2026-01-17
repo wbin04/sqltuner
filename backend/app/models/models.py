@@ -1,0 +1,119 @@
+"""
+SQLAlchemy models for SQLTuner application
+"""
+from sqlalchemy import Column, String, Integer, Text, Float, ForeignKey, Enum as SQLEnum, TIMESTAMP
+from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+import enum
+import uuid
+
+from backend.app.db.base import Base
+
+
+# Enum Types
+class UserRole(str, enum.Enum):
+    ADMIN = "admin"
+    USER = "user"
+
+
+class DBType(str, enum.Enum):
+    POSTGRES = "postgres"
+    MYSQL = "mysql"
+
+
+class ChatRole(str, enum.Enum):
+    USER = "user"
+    ASSISTANT = "assistant"
+
+
+# Models
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email = Column(String(255), nullable=False, unique=True, index=True)
+    hashed_password = Column(String(255), nullable=False)
+    role = Column(SQLEnum(UserRole, name="user_role"), default=UserRole.USER)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    # Relationships
+    db_connections = relationship("DBConnection", back_populates="user", cascade="all, delete-orphan")
+
+
+class DBConnection(Base):
+    __tablename__ = "db_connections"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(100), nullable=False)
+    host = Column(String(255), nullable=False)
+    port = Column(Integer, default=5432)
+    username = Column(String(100))
+    encrypted_password = Column(String(500), nullable=False)
+    db_name = Column(String(100), nullable=False)
+    db_type = Column(SQLEnum(DBType, name="db_type"), default=DBType.POSTGRES)
+    metadata_cache = Column(JSONB, nullable=True)  # Cache for schema metadata
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    # Relationships
+    user = relationship("User", back_populates="db_connections")
+    conversations = relationship("Conversation", back_populates="connection")
+
+
+class Conversation(Base):
+    __tablename__ = "conversations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    connection_id = Column(UUID(as_uuid=True), ForeignKey("db_connections.id", ondelete="SET NULL"), index=True)
+    title = Column(String(255))
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    # Relationships
+    connection = relationship("DBConnection", back_populates="conversations")
+    query_logs = relationship("QueryLog", back_populates="conversation", cascade="all, delete-orphan")
+
+
+class QueryLog(Base):
+    __tablename__ = "query_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
+    role = Column(SQLEnum(ChatRole, name="chat_role"), nullable=False)
+    content = Column(Text, nullable=False)
+    sql_generated = Column(Text)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    # Relationships
+    conversation = relationship("Conversation", back_populates="query_logs")
+    feedback = relationship("Feedback", back_populates="query_log", uselist=False)
+    performance_analysis = relationship("PerformanceAnalysis", back_populates="query_log", uselist=False)
+
+
+class Feedback(Base):
+    __tablename__ = "feedbacks"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    query_log_id = Column(UUID(as_uuid=True), ForeignKey("query_logs.id", ondelete="CASCADE"), nullable=False, unique=True)
+    rating = Column(Integer)
+    corrected_sql = Column(Text)
+    comment = Column(Text)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    # Relationships
+    query_log = relationship("QueryLog", back_populates="feedback")
+
+
+class PerformanceAnalysis(Base):
+    __tablename__ = "performance_analysis"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    query_log_id = Column(UUID(as_uuid=True), ForeignKey("query_logs.id", ondelete="CASCADE"), nullable=False, unique=True)
+    execution_time_ms = Column(Float)
+    total_cost = Column(Float)
+    explain_plan = Column(JSONB, nullable=False)
+    index_recommendation = Column(Text)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    # Relationships
+    query_log = relationship("QueryLog", back_populates="performance_analysis")

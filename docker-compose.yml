@@ -3,12 +3,14 @@ services:
     build:
       context: ./docker/database
     container_name: sqltuner_db
+    env_file:
+      - .env
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-sqltuner_db}
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -24,13 +26,17 @@ services:
       context: .
       dockerfile: ./docker/backend/Dockerfile
     container_name: sqltuner_backend
+    env_file:
+      - .env
     volumes:
-      - ./backend:/app
+      - ./backend:/app/backend
     ports:
       - "8000:8000"
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@sqltuner-server:5432/${POSTGRES_DB:-sqltuner_db}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      DEV_MODE: ${DEV_MODE:-true}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
     depends_on:
       sqltuner-server:
         condition: service_healthy

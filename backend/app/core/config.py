@@ -5,7 +5,7 @@ from typing import Optional
 class Settings(BaseSettings):
     # API Settings
     API_V1_STR: str = "/api/v1"
-    PROJECT_NAME: str = "Smart SQL Tuner"
+    PROJECT_NAME: str = "SQLTuner"
     
     # PostgreSQL Database
     POSTGRES_SERVER: str = "localhost"
@@ -16,10 +16,14 @@ class Settings(BaseSettings):
     
     # Ollama LLM Settings
     OLLAMA_BASE_URL: str = "http://localhost:11434"
-    MODEL_NAME: str = "sqlcoder-thesis"
+    MODEL_NAME: str = "sqlcoder-thesis"  # For SQL generation
+    MODEL_CHAT_NAME: str = "qwen2.5:3b"  # For SQL explanation
     
     # CORS Settings
     BACKEND_CORS_ORIGINS: list[str] = ["http://localhost:5173"]
+    
+    # Encryption key for database passwords
+    ENCRYPTION_KEY: Optional[str] = None
     
     # Database connection flag
     ENABLE_DATABASE: bool = True
