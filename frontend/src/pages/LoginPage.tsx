@@ -51,7 +51,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
     } else {
       localStorage.setItem('userRole', 'user');
       onLoginSuccess?.();
-      navigate('/dashboard');
+      navigate('/optimize');
     }
   };
 

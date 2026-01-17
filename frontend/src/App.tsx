@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate, Outlet } from 'react-router-dom';
 import { ThemeProvider } from './context/ThemeContext';
 import { MainLayout } from './layouts/MainLayout';
 import { AdminLayout } from './layouts/AdminLayout';
@@ -10,11 +10,9 @@ import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { FeedbackReview } from './pages/admin/FeedbackReview';
 import { UserManagement } from './pages/admin/UserManagement';
 
-type Page = 'dashboard' | 'workspaces' | 'optimize' | 'history' | 'settings';
 type AdminPage = 'dashboard' | 'users' | 'feedback' | 'connections' | 'settings';
 
 function App() {
-  const [currentPage, setCurrentPage] = useState<Page>('dashboard');
   const [currentAdminPage, setCurrentAdminPage] = useState<AdminPage>('dashboard');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const navigate = useNavigate();
@@ -32,34 +30,15 @@ function App() {
     navigate('/login');
   };
 
-  const renderPage = () => {
-    switch (currentPage) {
-      case 'dashboard':
-      case 'workspaces':
-        return <DashboardHome />;
-      case 'optimize':
-        return <QueryEditor />;
-      case 'history':
-        return (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center">
-              <h2 className="text-2xl font-bold text-text-main-DEFAULT dark:text-text-main-dark mb-2">History</h2>
-              <p className="text-text-muted-DEFAULT dark:text-text-muted-dark">Coming soon...</p>
-            </div>
-          </div>
-        );
-      case 'settings':
-        return (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center">
-              <h2 className="text-2xl font-bold text-text-main-DEFAULT dark:text-text-main-dark mb-2">Settings</h2>
-              <p className="text-text-muted-DEFAULT dark:text-text-muted-dark">Coming soon...</p>
-            </div>
-          </div>
-        );
-      default:
-        return <DashboardHome />;
+  const ProtectedUserLayout = () => {
+    if (!isAuthenticated) {
+      return <Navigate to="/login" replace />;
     }
+    return (
+      <MainLayout onLogout={handleLogout}>
+        <Outlet />
+      </MainLayout>
+    );
   };
 
   const renderAdminPage = () => {
@@ -116,21 +95,29 @@ function App() {
         } />
         
         {/* User Routes */}
-        <Route path="/*" element={
-          !isAuthenticated ? (
-            <Navigate to="/login" replace />
-          ) : (
-            <MainLayout 
-              currentPage={currentPage} 
-              onNavigate={(page) => setCurrentPage(page as Page)}
-              onLogout={handleLogout}
-            >
-              {renderPage()}
-            </MainLayout>
-          )
-        } />
+        <Route element={<ProtectedUserLayout />}>
+          <Route path="/dashboard" element={<DashboardHome />} />
+          <Route path="/workspaces" element={<DashboardHome />} />
+          <Route path="/optimize" element={<QueryEditor />} />
+          <Route path="/history" element={
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center">
+                <h2 className="text-2xl font-bold text-text-main-DEFAULT dark:text-text-main-dark mb-2">History</h2>
+                <p className="text-text-muted-DEFAULT dark:text-text-muted-dark">Coming soon...</p>
+              </div>
+            </div>
+          } />
+          <Route path="/settings" element={
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center">
+                <h2 className="text-2xl font-bold text-text-main-DEFAULT dark:text-text-main-dark mb-2">Settings</h2>
+                <p className="text-text-muted-DEFAULT dark:text-text-muted-dark">Coming soon...</p>
+              </div>
+            </div>
+          } />
+        </Route>
 
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/" element={<Navigate to="/optimize" replace />} />
       </Routes>
     </ThemeProvider>
   );

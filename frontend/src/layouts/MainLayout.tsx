@@ -6,13 +6,12 @@ import {
   FileText,
   LogOut
 } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '../lib/utils';
 import { ThemeToggle } from '../components/ui/ThemeToggle';
 
 interface MainLayoutProps {
   children: React.ReactNode;
-  currentPage?: string;
-  onNavigate?: (page: string) => void;
   onLogout?: () => void;
 }
 
@@ -31,11 +30,12 @@ const menuItems: MenuItem[] = [
   { id: 'settings', label: 'Settings', icon: Settings, path: '/settings' },
 ];
 
-export function MainLayout({ children, currentPage = 'dashboard', onNavigate, onLogout }: MainLayoutProps) {
-  const handleMenuClick = (itemId: string) => {
-    if (onNavigate) {
-      onNavigate(itemId);
-    }
+export function MainLayout({ children, onLogout }: MainLayoutProps) {
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const handleMenuClick = (path: string) => {
+    navigate(path);
   };
 
   return (
@@ -61,12 +61,12 @@ export function MainLayout({ children, currentPage = 'dashboard', onNavigate, on
         <nav className="flex-1 p-4 space-y-1">
           {menuItems.map((item) => {
             const Icon = item.icon;
-            const isActive = currentPage === item.id;
+            const isActive = location.pathname === item.path;
 
             return (
               <button
                 key={item.id}
-                onClick={() => handleMenuClick(item.id)}
+                onClick={() => handleMenuClick(item.path)}
                 className={cn(
                   'w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200',
                   'hover:bg-surface-highlight-DEFAULT dark:hover:bg-surface-highlight-dark group',
