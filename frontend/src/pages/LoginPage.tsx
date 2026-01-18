@@ -2,26 +2,24 @@ import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useNavigate, Link } from 'react-router-dom';
-import { Mail, Lock, Eye, EyeOff, Zap, Loader2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Mail, Lock, Eye, EyeOff, Zap, Loader2, AlertCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { useAuth } from '../context/AuthContext';
 
 // Validation Schema
 const loginSchema = z.object({
   email: z.string().min(1, 'Email is required').email('Invalid email format'),
-  password: z.string().min(6, 'Password must be at least 6 characters'),
+  password: z.string().min(5, 'Password must be at least 6 characters'),
   rememberMe: z.boolean().optional(),
 });
 
 type LoginFormData = z.infer<typeof loginSchema>;
 
-interface LoginPageProps {
-  onLoginSuccess?: () => void;
-}
-
-export function LoginPage({ onLoginSuccess }: LoginPageProps) {
-  const navigate = useNavigate();
+export function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { login } = useAuth();
   
   const {
     register,
@@ -35,23 +33,12 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
   });
 
   const onSubmit = async (data: LoginFormData) => {
-    console.log('Login data:', data);
-    
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    // Mock successful login
-    localStorage.setItem('isAuthenticated', 'true');
-    
-    // Check if admin email
-    if (data.email === 'admin@gmail.com') {
-      localStorage.setItem('userRole', 'admin');
-      onLoginSuccess?.();
-      navigate('/admin');
-    } else {
-      localStorage.setItem('userRole', 'user');
-      onLoginSuccess?.();
-      navigate('/optimize');
+    try {
+      setError(null);
+      await login(data.email, data.password);
+      // Navigation is handled in AuthContext based on role
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred during login');
     }
   };
 
@@ -86,6 +73,14 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
 
           {/* Form */}
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+            {/* Error Alert */}
+            {error && (
+              <div className="flex items-center gap-2 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+                <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0" />
+                <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+              </div>
+            )}
+
             {/* Email Input */}
             <div>
               <label className="block text-sm font-medium text-text-main-DEFAULT dark:text-text-main-dark mb-2">
@@ -96,7 +91,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
                 <input
                   type="email"
                   placeholder="you@example.com"
-                  defaultValue="bin@gmail.com"
+                  defaultValue="quochuy04.ar@gmail.com"
                   className={cn(
                     'w-full rounded-lg border pl-10 pr-4 py-3 text-sm transition-all',
                     'bg-background-DEFAULT dark:bg-background-dark',
@@ -124,7 +119,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
                 <input
                   type={showPassword ? 'text' : 'password'}
                   placeholder="••••••••"
-                  value="sqltuner"
+                  defaultValue="quochuy123"
                   className={cn(
                     'w-full rounded-lg border pl-10 pr-12 py-3 text-sm transition-all',
                     'bg-background-DEFAULT dark:bg-background-dark',
