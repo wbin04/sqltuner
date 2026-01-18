@@ -6,45 +6,24 @@
  */
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Database, Loader2, AlertCircle, RefreshCw, ArrowLeft, ChevronDown } from 'lucide-react';
+import { Database, Loader2, AlertCircle, RefreshCw, ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useWorkspace } from '../hooks/useWorkspace';
+import { useEditorLogic } from '../hooks/useEditorLogic';
 import { SchemaViewer } from '../components/editor/SchemaViewer';
 import { SessionManager } from '../components/editor/SessionManager';
 import { ChatArea } from '../components/editor/ChatArea';
 import { OptimizationModal } from '../components/editor/OptimizationModal';
 import { DbType } from '../types/workspace';
 
-// Mock data - to be replaced with real API calls
-const mockConversations = [
-  { id: '1', title: 'User analytics query', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: '2', title: 'Performance optimization', created_at: new Date(Date.now() - 86400000).toISOString(), updated_at: new Date(Date.now() - 86400000).toISOString() },
-];
-
-const mockMessages = [
-  {
-    id: '1',
-    role: 'user' as const,
-    content: 'Show me all users who registered in the last 7 days',
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: '2',
-    role: 'assistant' as const,
-    content: 'I\'ll help you query users who registered in the last 7 days. Here\'s the SQL query:',
-    sql_generated: 'SELECT id, email, username, created_at\nFROM users\nWHERE created_at >= NOW() - INTERVAL \'7 days\'\nORDER BY created_at DESC;',
-    created_at: new Date().toISOString(),
-  },
-];
-
 export function EditorPage() {
   const { workspaceId } = useParams<{ workspaceId: string }>();
   const navigate = useNavigate();
   const [autoSyncTriggered, setAutoSyncTriggered] = useState(false);
-  const [activeConversationId, setActiveConversationId] = useState<string | null>('1');
-  const [isOptimizationModalOpen, setIsOptimizationModalOpen] = useState(false);
-  const [currentOptimization, setCurrentOptimization] = useState<any>(null);
-  const [showResults, setShowResults] = useState(false);
+  const [activeResultSql, setActiveResultSql] = useState<string | null>(null);
+  const [isResultsCollapsed, setIsResultsCollapsed] = useState(false);
+  const [resultsPanelHeight, setResultsPanelHeight] = useState(300); // Default height in pixels
+  const [isResizing, setIsResizing] = useState(false);
 
   if (!workspaceId) {
     navigate('/workspaces');
@@ -53,48 +32,49 @@ export function EditorPage() {
 
   const { workspace, isLoading, isError, error, syncSchema, isSyncing } = useWorkspace(workspaceId);
 
-  // Handlers
-  const handleNewChat = () => {
-    console.log('Creating new chat...');
-    // TODO: Implement new chat creation
-  };
+  // Use editor logic hook
+  const editorLogic = useEditorLogic({ connectionId: workspaceId });
 
-  const handleSelectConversation = (id: string) => {
-    setActiveConversationId(id);
-  };
-
+  // Handlers that integrate with editor logic
   const handleSendMessage = (content: string) => {
-    console.log('Sending message:', content);
-    // TODO: Implement message sending
+    editorLogic.handleSendMessage(content);
   };
 
-  const handleRunQuery = (sql: string) => {
-    console.log('Running query:', sql);
-    setShowResults(true);
-    // TODO: Implement query execution
+  const handleRunQuery = async (sql: string) => {
+    await editorLogic.handleRunQuery(sql);
+    setActiveResultSql(sql);
+    setIsResultsCollapsed(false); // Auto-expand when new query runs
   };
 
   const handleOptimize = (sql: string) => {
-    console.log('Optimizing query:', sql);
-    // Mock optimization result
-    setCurrentOptimization({
-      original_sql: sql,
-      optimized_sql: sql.replace('SELECT *', 'SELECT id, email, username, created_at'),
-      cost_reduction: 45,
-      execution_time_improvement: 2.3,
-      explanation: 'Replaced SELECT * with specific columns to reduce data transfer and improve query performance.',
-      index_recommendations: [
-        'CREATE INDEX idx_users_created_at ON users(created_at DESC);',
-        'CREATE INDEX idx_users_email ON users(email);'
-      ],
-    });
-    setIsOptimizationModalOpen(true);
+    editorLogic.handleOptimize(sql);
   };
 
-  const handleExplain = (sql: string) => {
-    console.log('Explaining query:', sql);
-    // TODO: Implement query explanation
+  const handleExplain = async (sql: string) => {
+    await editorLogic.handleExplain(sql);
   };
+
+  // Handle resize of results panel
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const newHeight = window.innerHeight - e.clientY;
+      setResultsPanelHeight(Math.max(100, Math.min(600, newHeight))); // Min 100px, Max 600px
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing]);
 
   // Auto-sync logic: Trigger sync if real DB with empty schema
   useEffect(() => {
@@ -113,7 +93,7 @@ export function EditorPage() {
   // Loading state
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-background-DEFAULT dark:bg-background-dark flex items-center justify-center">
+      <div className="min-h-screen bg-background-light dark:bg-background-dark flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
           <Loader2 className="w-12 h-12 animate-spin text-primary dark:text-primary-dark" />
           <p className="text-text-muted-DEFAULT dark:text-text-muted-dark">
@@ -127,7 +107,7 @@ export function EditorPage() {
   // Error state
   if (isError || !workspace) {
     return (
-      <div className="min-h-screen bg-background-DEFAULT dark:bg-background-dark flex items-center justify-center">
+      <div className="min-h-screen bg-background-light dark:bg-background-dark flex items-center justify-center">
         <div className="text-center max-w-md">
           <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
             <AlertCircle className="w-8 h-8 text-red-600 dark:text-red-400" />
@@ -154,7 +134,7 @@ export function EditorPage() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-background-DEFAULT dark:bg-background-dark">
+    <div className="h-screen flex flex-col bg-background-light dark:bg-background-dark">
       {/* Header */}
       <header className={cn(
         'flex items-center justify-between px-6 py-4 flex-shrink-0',
@@ -206,47 +186,134 @@ export function EditorPage() {
           'border-r border-border-DEFAULT dark:border-border-dark'
         )}>
           <SessionManager
-            conversations={mockConversations}
-            activeConversationId={activeConversationId}
-            onSelectConversation={handleSelectConversation}
-            onNewChat={handleNewChat}
+            conversations={editorLogic.conversations.map(c => ({
+              id: c.id,
+              title: c.title,
+              created_at: c.created_at,
+              updated_at: c.created_at,
+            }))}
+            activeConversationId={editorLogic.activeConversationId}
+            onSelectConversation={editorLogic.handleSelectConversation}
+            onNewChat={editorLogic.handleNewChat}
           />
         </aside>
 
         {/* Pane B: Chat Workbench (Center) */}
         <main className="flex-1 flex flex-col overflow-hidden">
           <ChatArea
-            messages={mockMessages}
+            messages={editorLogic.messages}
             onSendMessage={handleSendMessage}
             onRunQuery={handleRunQuery}
             onOptimize={handleOptimize}
             onExplain={handleExplain}
+            isLoading={editorLogic.isSendingMessage}
           />
 
-          {/* Results Panel (Collapsible) */}
-          {showResults && (
-            <div className={cn(
-              'border-t border-border-DEFAULT dark:border-border-dark',
-              'bg-surface-DEFAULT dark:bg-surface-dark'
-            )}>
+          {/* Results Panel (Resizable & Collapsible) */}
+          {activeResultSql && (
+            <div 
+              className={cn(
+                'border-t border-border-DEFAULT dark:border-border-dark',
+                'bg-surface-DEFAULT dark:bg-surface-dark',
+                'flex flex-col'
+              )}
+              style={{ height: isResultsCollapsed ? 'auto' : `${resultsPanelHeight}px` }}
+            >
+              {/* Resize Handle */}
+              {!isResultsCollapsed && (
+                <div
+                  className={cn(
+                    'h-1 cursor-ns-resize hover:bg-primary dark:hover:bg-primary-dark transition-colors',
+                    isResizing && 'bg-primary dark:bg-primary-dark'
+                  )}
+                  onMouseDown={() => setIsResizing(true)}
+                />
+              )}
+
+              {/* Header */}
               <button
-                onClick={() => setShowResults(false)}
+                onClick={() => setIsResultsCollapsed(!isResultsCollapsed)}
                 className={cn(
                   'w-full flex items-center justify-between px-4 py-2',
                   'hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark',
                   'transition-colors'
                 )}
               >
-                <span className="text-sm font-medium text-text-main-DEFAULT dark:text-text-main-dark">
+                <span className="text-sm font-medium text-text-main-DEFAULT dark:text-text-main-dark flex items-center gap-2">
                   Query Results
+                  {editorLogic.isExecuting && (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  )}
                 </span>
-                <ChevronDown className="w-4 h-4" />
+                {isResultsCollapsed ? (
+                  <ChevronUp className="w-4 h-4" />
+                ) : (
+                  <ChevronDown className="w-4 h-4" />
+                )}
               </button>
-              <div className="p-4 max-h-64 overflow-auto">
-                <div className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark">
-                  Results will appear here...
+              
+              {/* Results Content */}
+              {!isResultsCollapsed && (
+                <div className="flex-1 p-4 overflow-auto">
+                  {editorLogic.executeError ? (
+                    <div className="text-sm text-red-600 dark:text-red-400">
+                      Error: {(editorLogic.executeError as Error).message}
+                    </div>
+                  ) : editorLogic.queryResults.get(activeResultSql) ? (
+                    <div>
+                      <div className="mb-2 text-xs text-text-muted-DEFAULT dark:text-text-muted-dark">
+                        Execution time: {editorLogic.queryResults.get(activeResultSql)?.data.execution_time_ms.toFixed(2)}ms
+                        {' | '}
+                        Rows: {editorLogic.queryResults.get(activeResultSql)?.data.row_count}
+                      </div>
+                      
+                      {editorLogic.queryResults.get(activeResultSql)?.data.columns.length! > 0 ? (
+                        <div className="overflow-x-auto">
+                          <table className="min-w-full text-sm border border-border-DEFAULT dark:border-border-dark">
+                            <thead className="bg-surface-highlight-light dark:bg-surface-highlight-dark">
+                              <tr>
+                                {editorLogic.queryResults.get(activeResultSql)?.data.columns.map((col) => (
+                                  <th
+                                    key={col}
+                                    className="px-4 py-2 text-left font-medium text-text-main-DEFAULT dark:text-text-main-dark border-b border-border-DEFAULT dark:border-border-dark"
+                                  >
+                                    {col}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {editorLogic.queryResults.get(activeResultSql)?.data.rows.map((row, idx) => (
+                                <tr
+                                  key={idx}
+                                  className="hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark"
+                                >
+                                  {editorLogic.queryResults.get(activeResultSql)?.data.columns.map((col) => (
+                                    <td
+                                      key={col}
+                                      className="px-4 py-2 text-text-main-DEFAULT dark:text-text-main-dark border-b border-border-DEFAULT dark:border-border-dark"
+                                    >
+                                      {row[col] !== null ? String(row[col]) : <span className="text-text-muted-DEFAULT dark:text-text-muted-dark italic">null</span>}
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <div className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark">
+                          Query executed successfully (no rows returned)
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark">
+                      No results yet
+                    </div>
+                  )}
                 </div>
-              </div>
+              )}
             </div>
           )}
         </main>
@@ -263,12 +330,21 @@ export function EditorPage() {
 
       {/* Optimization Modal */}
       <OptimizationModal
-        isOpen={isOptimizationModalOpen}
-        onClose={() => setIsOptimizationModalOpen(false)}
-        result={currentOptimization}
+        isOpen={editorLogic.isOptimizationModalOpen}
+        onClose={editorLogic.handleCloseOptimizationModal}
+        result={editorLogic.optimizationResult ? {
+          original_sql: editorLogic.optimizationResult.original_sql,
+          optimized_sql: editorLogic.optimizationResult.optimized_sql,
+          explanation: editorLogic.optimizationResult.explanation,
+          cost_reduction: editorLogic.optimizationResult.stats_comparison?.improvement_percent,
+          index_recommendations: editorLogic.optimizationResult.index_recommendation 
+            ? [editorLogic.optimizationResult.index_recommendation] 
+            : undefined,
+        } : null}
         onApply={(sql) => {
-          console.log('Applying optimized SQL:', sql);
-          // TODO: Apply optimized SQL to chat
+          // Send optimized SQL as a new message
+          handleSendMessage(`Please execute this optimized query:\n\`\`\`sql\n${sql}\n\`\`\``);
+          editorLogic.handleCloseOptimizationModal();
         }}
       />
     </div>

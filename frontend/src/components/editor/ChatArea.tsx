@@ -2,8 +2,8 @@
  * ChatArea Component (Pane B - Center)
  * Main workbench with chat stream, SQL blocks, and action bar
  */
-import { useState } from 'react';
-import { Send, Sparkles, Play, LineChart } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Send, Sparkles, Play, LineChart, Loader2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 interface Message {
@@ -20,7 +20,7 @@ interface ChatAreaProps {
   onRunQuery: (sql: string) => void;
   onOptimize: (sql: string) => void;
   onExplain: (sql: string) => void;
-  isSending?: boolean;
+  isLoading?: boolean;
 }
 
 export function ChatArea({
@@ -29,13 +29,19 @@ export function ChatArea({
   onRunQuery,
   onOptimize,
   onExplain,
-  isSending = false,
+  isLoading = false,
 }: ChatAreaProps) {
   const [inputValue, setInputValue] = useState('');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto scroll to bottom when new messages arrive
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (inputValue.trim() && !isSending) {
+    if (inputValue.trim() && !isLoading) {
       onSendMessage(inputValue.trim());
       setInputValue('');
     }
@@ -113,12 +119,22 @@ export function ChatArea({
                       ? 'bg-primary dark:bg-primary-dark text-white'
                       : 'bg-surface-DEFAULT dark:bg-surface-dark border border-border-DEFAULT dark:border-border-dark'
                   )}>
-                    <p className={cn(
-                      'text-sm whitespace-pre-wrap',
-                      message.role === 'assistant' && 'text-text-main-DEFAULT dark:text-text-main-dark'
-                    )}>
-                      {message.content}
-                    </p>
+                    {/* Loading indicator for Processing message */}
+                    {message.content === 'Processing...' && message.role === 'assistant' ? (
+                      <div className="flex items-center gap-3">
+                        <Loader2 className="w-4 h-4 animate-spin text-primary dark:text-primary-dark" />
+                        <p className="text-sm text-text-main-DEFAULT dark:text-text-main-dark">
+                          Processing your request...
+                        </p>
+                      </div>
+                    ) : (
+                      <p className={cn(
+                        'text-sm whitespace-pre-wrap',
+                        message.role === 'assistant' && 'text-text-main-DEFAULT dark:text-text-main-dark'
+                      )}>
+                        {message.content}
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -178,6 +194,8 @@ export function ChatArea({
                 )}
               </div>
             ))}
+            {/* Scroll anchor */}
+            <div ref={messagesEndRef} />
           </div>
         )}
       </div>
@@ -196,7 +214,7 @@ export function ChatArea({
               placeholder="Ask me anything about your database..."
               className={cn(
                 'flex-1 px-4 py-3 rounded-lg resize-none',
-                'bg-background-DEFAULT dark:bg-background-dark',
+                'bg-background-light dark:bg-background-dark',
                 'border border-border-DEFAULT dark:border-border-dark',
                 'text-text-main-DEFAULT dark:text-text-main-dark',
                 'placeholder:text-text-muted-DEFAULT dark:placeholder:text-text-muted-dark',
@@ -212,7 +230,7 @@ export function ChatArea({
             />
             <button
               type="submit"
-              disabled={!inputValue.trim() || isSending}
+              disabled={!inputValue.trim() || isLoading}
               className={cn(
                 'px-6 py-3 rounded-lg font-medium text-white flex items-center gap-2',
                 'bg-primary dark:bg-primary-dark',
@@ -222,7 +240,7 @@ export function ChatArea({
               )}
             >
               <Send className="w-5 h-5" />
-              Send
+              {isLoading ? 'Sending...' : 'Send'}
             </button>
           </div>
         </form>

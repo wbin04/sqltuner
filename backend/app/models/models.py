@@ -81,7 +81,7 @@ class QueryLog(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
-    role = Column(SQLEnum(ChatRole, name="chat_role"), nullable=False)
+    role = Column(SQLEnum(ChatRole, name="chat_role", values_callable=lambda x: [e.value for e in x]), nullable=False)
     content = Column(Text, nullable=False)
     sql_generated = Column(Text)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())

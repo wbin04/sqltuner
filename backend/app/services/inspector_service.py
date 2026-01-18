@@ -172,11 +172,16 @@ class DatabaseInspectorService:
         # Decrypt password
         password = decrypt_password(connection.db_password)
         
+        # Resolve localhost for Docker environment
+        resolved_host = connection.host
+        if connection.host in ['localhost', '127.0.0.1']:
+            resolved_host = 'host.docker.internal'
+        
         # Build connection URL for target database
         if connection.db_type == DBType.POSTGRES:
-            db_url = f"postgresql://{connection.username}:{password}@{connection.host}:{connection.port}/{connection.db_name}"
+            db_url = f"postgresql://{connection.username}:{password}@{resolved_host}:{connection.port}/{connection.db_name}"
         elif connection.db_type == DBType.MYSQL:
-            db_url = f"mysql+pymysql://{connection.username}:{password}@{connection.host}:{connection.port}/{connection.db_name}"
+            db_url = f"mysql+pymysql://{connection.username}:{password}@{resolved_host}:{connection.port}/{connection.db_name}"
         else:
             raise ValueError(f"Unsupported database type: {connection.db_type}")
         
@@ -216,21 +221,57 @@ class DatabaseInspectorService:
                                 ref_column=fk['referred_columns'][i] if i < len(fk['referred_columns']) else fk['referred_columns'][0]
                             ))
                 
-                # Get row count
+                # Get row count and sample data
                 row_count = None
+                sample_data = []
+                sample_size = 50  # Default sample size, max 500
+                
                 try:
                     with engine.connect() as conn:
+                        # Get row count
                         result = conn.execute(text(f"SELECT COUNT(*) FROM {table_name}"))
                         row_count = result.scalar()
-                except Exception:
-                    # If count fails, leave it as None
-                    pass
+                        
+                        # Fetch sample data with randomization
+                        if row_count and row_count > 0:
+                            actual_sample_size = min(sample_size, 500, row_count)  # Cap at 500
+                            
+                            # Use appropriate random function based on DB type
+                            if connection.db_type == DBType.POSTGRES:
+                                random_clause = "ORDER BY RANDOM()"
+                            elif connection.db_type == DBType.MYSQL:
+                                random_clause = "ORDER BY RAND()"
+                            else:
+                                random_clause = ""  # Fallback to sequential
+                            
+                            sample_query = f"SELECT * FROM {table_name} {random_clause} LIMIT {actual_sample_size}"
+                            result = conn.execute(text(sample_query))
+                            
+                            # Convert rows to JSON-safe format
+                            for row in result.mappings():
+                                row_dict = {}
+                                for key, value in row.items():
+                                    # Serialize to JSON-safe types
+                                    if value is None:
+                                        row_dict[key] = None
+                                    elif isinstance(value, (str, int, float, bool)):
+                                        row_dict[key] = value
+                                    else:
+                                        # Convert UUIDs, dates, decimals, etc. to string
+                                        row_dict[key] = str(value)
+                                sample_data.append(row_dict)
+                            
+                except Exception as e:
+                    # If sampling fails, continue without sample data
+                    import logging
+                    logging.warning(f"Failed to sample data from {table_name}: {str(e)}")
                 
                 tables.append(TableDef(
                     name=table_name,
                     columns=columns,
                     foreign_keys=foreign_keys,
-                    row_count=row_count
+                    row_count=row_count,
+                    sample_data=sample_data
                 ))
             
             schema_def = SchemaDef(tables=tables)

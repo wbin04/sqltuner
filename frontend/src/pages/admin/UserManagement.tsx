@@ -120,7 +120,7 @@ export function UserManagement() {
             placeholder="Search users by name or email..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-background-DEFAULT dark:bg-background-dark border border-border-DEFAULT dark:border-border-dark rounded-lg text-text-main-DEFAULT dark:text-text-main-dark placeholder:text-text-muted-DEFAULT dark:placeholder:text-text-muted-dark focus:outline-none focus:ring-2 focus:ring-primary/50 dark:focus:ring-primary-dark/50"
+            className="w-full pl-10 pr-4 py-2 bg-background-light dark:bg-background-dark border border-border-DEFAULT dark:border-border-dark rounded-lg text-text-main-DEFAULT dark:text-text-main-dark placeholder:text-text-muted-DEFAULT dark:placeholder:text-text-muted-dark focus:outline-none focus:ring-2 focus:ring-primary/50 dark:focus:ring-primary-dark/50"
           />
         </div>
       </div>

@@ -1,0 +1,8 @@
+## MySQL
+```sql
+CREATE USER 'root'@'%' IDENTIFIED BY 'your_password';
+
+GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION;
+
+FLUSH PRIVILEGES;
+```

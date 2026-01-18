@@ -176,7 +176,7 @@ export function CreateWorkspaceModal({ isOpen, onClose, onSubmit }: CreateWorksp
               placeholder="My Production DB"
               className={cn(
                 'w-full px-4 py-2 rounded-lg border transition-all',
-                'bg-background-DEFAULT dark:bg-background-dark',
+                'bg-background-light dark:bg-background-dark',
                 'border-border-DEFAULT dark:border-border-dark',
                 'text-text-main-DEFAULT dark:text-text-main-dark',
                 'placeholder:text-text-muted-DEFAULT dark:placeholder:text-text-muted-dark',
@@ -237,7 +237,7 @@ export function CreateWorkspaceModal({ isOpen, onClose, onSubmit }: CreateWorksp
                     placeholder="localhost"
                     className={cn(
                       'w-full px-4 py-2 rounded-lg border',
-                      'bg-background-DEFAULT dark:bg-background-dark',
+                      'bg-background-light dark:bg-background-dark',
                       'border-border-DEFAULT dark:border-border-dark',
                       'text-text-main-DEFAULT dark:text-text-main-dark',
                       'focus:outline-none focus:ring-2 focus:ring-primary/50',
@@ -258,7 +258,7 @@ export function CreateWorkspaceModal({ isOpen, onClose, onSubmit }: CreateWorksp
                     placeholder="5432"
                     className={cn(
                       'w-full px-4 py-2 rounded-lg border',
-                      'bg-background-DEFAULT dark:bg-background-dark',
+                      'bg-background-light dark:bg-background-dark',
                       'border-border-DEFAULT dark:border-border-dark',
                       'text-text-main-DEFAULT dark:text-text-main-dark',
                       'focus:outline-none focus:ring-2 focus:ring-primary/50'
@@ -279,7 +279,7 @@ export function CreateWorkspaceModal({ isOpen, onClose, onSubmit }: CreateWorksp
                     placeholder="postgres"
                     className={cn(
                       'w-full px-4 py-2 rounded-lg border',
-                      'bg-background-DEFAULT dark:bg-background-dark',
+                      'bg-background-light dark:bg-background-dark',
                       'border-border-DEFAULT dark:border-border-dark',
                       'text-text-main-DEFAULT dark:text-text-main-dark',
                       'focus:outline-none focus:ring-2 focus:ring-primary/50',
@@ -300,7 +300,7 @@ export function CreateWorkspaceModal({ isOpen, onClose, onSubmit }: CreateWorksp
                     placeholder="mydb"
                     className={cn(
                       'w-full px-4 py-2 rounded-lg border',
-                      'bg-background-DEFAULT dark:bg-background-dark',
+                      'bg-background-light dark:bg-background-dark',
                       'border-border-DEFAULT dark:border-border-dark',
                       'text-text-main-DEFAULT dark:text-text-main-dark',
                       'focus:outline-none focus:ring-2 focus:ring-primary/50',
@@ -324,7 +324,7 @@ export function CreateWorkspaceModal({ isOpen, onClose, onSubmit }: CreateWorksp
                   placeholder="••••••••"
                   className={cn(
                     'w-full px-4 py-2 rounded-lg border',
-                    'bg-background-DEFAULT dark:bg-background-dark',
+                    'bg-background-light dark:bg-background-dark',
                     'border-border-DEFAULT dark:border-border-dark',
                     'text-text-main-DEFAULT dark:text-text-main-dark',
                     'focus:outline-none focus:ring-2 focus:ring-primary/50',

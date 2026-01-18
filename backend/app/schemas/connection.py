@@ -68,7 +68,9 @@ class DBConnectionResponse(DBConnectionBase):
 
 class DBConnectionWithSchema(DBConnectionResponse):
     """Response that includes the cached schema metadata"""
-    schema: Optional[Dict[str, Any]] = Field(None, alias="meta_schema")
+    meta_schema_data: Optional[Dict[str, Any]] = Field(None, alias="meta_schema")
+    
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 # Schema Sync

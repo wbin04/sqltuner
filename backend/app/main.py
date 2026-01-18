@@ -35,7 +35,7 @@ async def health_check():
     Returns:
         - status: API status
         - project_name: Project name
-        - model_name: LLM model name in use
+        - llm_model: LLM model name in use
         - model_available: Whether the model is available in Ollama
     """
     model_available = await llm_service.check_health()
@@ -43,7 +43,7 @@ async def health_check():
     return HealthResponse(
         status="online",
         project_name=settings.PROJECT_NAME,
-        model_name=settings.MODEL_NAME,
+        llm_model=settings.MODEL_NAME,
         model_available=model_available
     )
 

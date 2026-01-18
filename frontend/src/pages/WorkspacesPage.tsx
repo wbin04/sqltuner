@@ -57,7 +57,7 @@ export function WorkspacesPage() {
   // Loading state
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-background-DEFAULT dark:bg-background-dark">
+      <div className="min-h-screen bg-background-light dark:bg-background-dark">
         <div className="container mx-auto px-6 py-8">
           {/* Header Skeleton */}
           <div className="mb-8">
@@ -82,7 +82,7 @@ export function WorkspacesPage() {
   // Error state
   if (error) {
     return (
-      <div className="min-h-screen bg-background-DEFAULT dark:bg-background-dark flex items-center justify-center">
+      <div className="min-h-screen bg-background-light dark:bg-background-dark flex items-center justify-center">
         <div className="text-center">
           <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
             <Database className="w-8 h-8 text-red-600 dark:text-red-400" />
@@ -112,7 +112,7 @@ export function WorkspacesPage() {
   const isEmpty = !workspaces || workspaces.length === 0;
 
   return (
-    <div className="min-h-screen bg-background-DEFAULT dark:bg-background-dark">
+    <div className="min-h-screen bg-background-light dark:bg-background-dark">
       <div className="container mx-auto px-6 py-8">
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
