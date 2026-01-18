@@ -1,0 +1,72 @@
+"""
+Database initialization script
+Seeds initial users with hashed passwords
+"""
+import asyncio
+import sys
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.app.db.session import AsyncSessionLocal
+from backend.app.models.models import User, UserRole
+from backend.app.core.security import get_password_hash
+
+
+async def init_db():
+    """
+    Initialize database with default users
+    This function is idempotent - safe to run multiple times
+    """
+    print("Starting database initialization...")
+    
+    if not AsyncSessionLocal:
+        print("ERROR: Database is not configured or disabled")
+        sys.exit(1)
+    
+    async with AsyncSessionLocal() as session:
+        try:
+            # Define initial users
+            initial_users = [
+                {
+                    "email": "admin@gmail.com",
+                    "password": "admin123",
+                    "role": UserRole.ADMIN
+                },
+                {
+                    "email": "quochuy04.ar@gmail.com",
+                    "password": "quochuy123",
+                    "role": UserRole.USER
+                }
+            ]
+            
+            for user_data in initial_users:
+                # Check if user already exists
+                result = await session.execute(
+                    select(User).where(User.email == user_data["email"])
+                )
+                existing_user = result.scalar_one_or_none()
+                
+                if existing_user:
+                    print(f"✓ User '{user_data['email']}' already exists. Skipping.")
+                else:
+                    # Hash password and create user
+                    hashed_password = get_password_hash(user_data["password"])
+                    new_user = User(
+                        email=user_data["email"],
+                        password=hashed_password,
+                        role=user_data["role"]  # Pass enum object directly
+                    )
+                    session.add(new_user)
+                    await session.commit()
+                    print(f"✓ User '{user_data['email']}' created successfully with role '{user_data['role'].value}'")
+            
+            print("Database initialization completed successfully!")
+            
+        except Exception as e:
+            print(f"ERROR during database initialization: {str(e)}")
+            await session.rollback()
+            sys.exit(1)
+
+
+if __name__ == "__main__":
+    asyncio.run(init_db())
