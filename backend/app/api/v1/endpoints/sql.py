@@ -1,16 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import get_db
-from app.core.config import settings
-from app.schemas.sql import (
+from backend.app.db.session import get_db
+from backend.app.core.config import settings
+from backend.app.schemas.sql import (
     SQLOptimizeRequest,
     SQLOptimizeResponse,
     SQLExplainRequest,
     SQLExplainResponse,
 )
-from app.services.llm_service import llm_service
-from app.services.inspector_service import inspector_service
+from backend.app.services.llm_service import llm_service
+from backend.app.services.inspector_service import inspector_service
 
 router = APIRouter()
 
@@ -34,16 +34,16 @@ async def optimize_sql(
             schema = await inspector_service.get_database_schema(db)
             db_schema = inspector_service.format_schema_for_llm(schema)
         
-        # Get optimized query from LLM
-        optimized_query = await llm_service.optimize_sql(
+        # Get optimized query and explanation from LLM
+        result = await llm_service.optimize_sql(
             sql_query=request.sql_query,
             db_schema=db_schema
         )
         
         return SQLOptimizeResponse(
             original_query=request.sql_query,
-            optimized_query=optimized_query,
-            explanation="Query optimized using AI analysis"
+            optimized_query=result["optimized_sql"],
+            explanation=result["explanation"]
         )
         
     except Exception as e:

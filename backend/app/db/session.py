@@ -1,10 +1,10 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from app.core.config import settings
+from backend.app.core.config import settings
 
 # Create async engine only if database is enabled
-if settings.ENABLE_DATABASE and settings.DATABASE_URL:
+if settings.ENABLE_DATABASE and settings.SQLALCHEMY_DATABASE_URL:
     engine = create_async_engine(
-        settings.DATABASE_URL,
+        settings.SQLALCHEMY_DATABASE_URL,
         echo=True,  # Set to False in production
         future=True,
         pool_pre_ping=True,
