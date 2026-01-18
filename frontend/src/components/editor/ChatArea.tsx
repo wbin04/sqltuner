@@ -44,7 +44,7 @@ export function ChatArea({
   return (
     <div className="h-full flex flex-col">
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto p-6 bg-surface dark:bg-background-dark">
         {messages.length === 0 ? (
           // Empty State
           <div className="flex flex-col items-center justify-center h-full text-center">
@@ -155,7 +155,7 @@ export function ChatArea({
                           'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
                           'bg-surface-DEFAULT dark:bg-surface-dark',
                           'border border-border-DEFAULT dark:border-border-dark',
-                          'hover:bg-surface-highlight-DEFAULT dark:hover:bg-surface-highlight-dark'
+                          'hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark'
                         )}
                       >
                         <LineChart className="w-4 h-4" />

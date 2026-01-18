@@ -46,6 +46,7 @@ class TableDef(BaseModel):
     name: str = Field(..., description="Table name")
     columns: List[ColumnDef] = Field(default_factory=list, description="List of columns in the table")
     foreign_keys: List[ForeignKeyDef] = Field(default_factory=list, description="List of foreign key relationships")
+    row_count: Optional[int] = Field(None, description="Number of rows in the table")
     sample_data: Optional[List[Dict[str, Any]]] = Field(None, description="Optional sample data rows")
     
     class Config:

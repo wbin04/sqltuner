@@ -191,7 +191,7 @@ export function FeedbackReview() {
                 <tr 
                   key={feedback.id}
                   className={cn(
-                    'hover:bg-surface-highlight-DEFAULT dark:hover:bg-surface-highlight-dark transition-colors',
+                    'hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark transition-colors',
                     selectedRows.includes(feedback.id) && 'bg-blue-50 dark:bg-blue-900/10'
                   )}
                 >

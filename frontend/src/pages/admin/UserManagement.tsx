@@ -158,7 +158,7 @@ export function UserManagement() {
               {filteredUsers.map((user) => (
                 <tr 
                   key={user.id}
-                  className="hover:bg-surface-highlight-DEFAULT dark:hover:bg-surface-highlight-dark transition-colors"
+                  className="hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark transition-colors"
                 >
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
@@ -214,7 +214,7 @@ export function UserManagement() {
                     <div className="relative">
                       <button
                         onClick={() => setActiveDropdown(activeDropdown === user.id ? null : user.id)}
-                        className="p-1 hover:bg-surface-highlight-DEFAULT dark:hover:bg-surface-highlight-dark rounded transition-colors"
+                        className="p-1 hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark rounded transition-colors"
                       >
                         <MoreVertical className="w-5 h-5 text-text-muted-DEFAULT dark:text-text-muted-dark" />
                       </button>
@@ -223,28 +223,28 @@ export function UserManagement() {
                         <div className="absolute right-0 mt-2 w-48 bg-surface-DEFAULT dark:bg-surface-dark border border-border-DEFAULT dark:border-border-dark rounded-lg shadow-lg z-10">
                           <button
                             onClick={() => handleAction('edit-role', user.id)}
-                            className="w-full px-4 py-2 text-left text-sm text-text-main-DEFAULT dark:text-text-main-dark hover:bg-surface-highlight-DEFAULT dark:hover:bg-surface-highlight-dark flex items-center gap-2"
+                            className="w-full px-4 py-2 text-left text-sm text-text-main-DEFAULT dark:text-text-main-dark hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark flex items-center gap-2"
                           >
                             <Shield className="w-4 h-4" />
                             Change Role
                           </button>
                           <button
                             onClick={() => handleAction('reset-password', user.id)}
-                            className="w-full px-4 py-2 text-left text-sm text-text-main-DEFAULT dark:text-text-main-dark hover:bg-surface-highlight-DEFAULT dark:hover:bg-surface-highlight-dark flex items-center gap-2"
+                            className="w-full px-4 py-2 text-left text-sm text-text-main-DEFAULT dark:text-text-main-dark hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark flex items-center gap-2"
                           >
                             <Key className="w-4 h-4" />
                             Reset Password
                           </button>
                           <button
                             onClick={() => handleAction('ban', user.id)}
-                            className="w-full px-4 py-2 text-left text-sm text-orange-600 dark:text-orange-400 hover:bg-surface-highlight-DEFAULT dark:hover:bg-surface-highlight-dark flex items-center gap-2"
+                            className="w-full px-4 py-2 text-left text-sm text-orange-600 dark:text-orange-400 hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark flex items-center gap-2"
                           >
                             <Ban className="w-4 h-4" />
                             {user.status === 'active' ? 'Ban User' : 'Unban User'}
                           </button>
                           <button
                             onClick={() => handleAction('delete', user.id)}
-                            className="w-full px-4 py-2 text-left text-sm text-red-600 dark:text-red-400 hover:bg-surface-highlight-DEFAULT dark:hover:bg-surface-highlight-dark flex items-center gap-2 rounded-b-lg"
+                            className="w-full px-4 py-2 text-left text-sm text-red-600 dark:text-red-400 hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark flex items-center gap-2 rounded-b-lg"
                           >
                             <Trash2 className="w-4 h-4" />
                             Delete User

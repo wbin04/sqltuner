@@ -13,8 +13,8 @@ Your task is to implement a **Light/Dark Mode Theme System** for the SQLTuner ap
 - **Mechanism:** Use Tailwind's `darkMode: 'class'` strategy.
 - **Persistence:** Save the user's preference in `localStorage`.
 - **Toggle Behavior:**
-  - If current is **Light**: Show **Sun Icon** ☀️. Clicking it switches to Dark (icon becomes Moon).
-  - If current is **Dark**: Show **Moon Icon** 🌙. Clicking it switches to Light (icon becomes Sun).
+  - If current is **Light**: Show **Sun Icon**. Clicking it switches to Dark (icon becomes Moon).
+  - If current is **Dark**: Show **Moon Icon**. Clicking it switches to Light (icon becomes Sun).
 
 ## 2. Light Theme Palette (New)
 Define semantic colors in `tailwind.config.ts` using CSS variables or Tailwind utility classes to support both modes effortlessly.

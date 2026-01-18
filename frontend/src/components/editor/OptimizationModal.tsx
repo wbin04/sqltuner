@@ -53,7 +53,7 @@ export function OptimizationModal({
           </div>
           <button
             onClick={onClose}
-            className="p-2 rounded-lg hover:bg-surface-highlight-DEFAULT dark:hover:bg-surface-highlight-dark transition-colors"
+            className="p-2 rounded-lg hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
@@ -189,7 +189,7 @@ export function OptimizationModal({
               'px-6 py-2.5 rounded-lg font-medium transition-colors',
               'border border-border-DEFAULT dark:border-border-dark',
               'text-text-main-DEFAULT dark:text-text-main-dark',
-              'hover:bg-surface-highlight-DEFAULT dark:hover:bg-surface-highlight-dark'
+              'hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark'
             )}
           >
             Close

@@ -82,7 +82,7 @@ export function ConversationSidebar({
                   onClick={() => onSelectConversation(conv.id)}
                   className={cn(
                     'w-full text-left px-3 py-2 rounded-lg transition-all',
-                    'hover:bg-surface-highlight-DEFAULT dark:hover:bg-surface-highlight-dark group',
+                    'hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark group',
                     activeConversationId === conv.id && 'bg-surface-highlight-DEFAULT dark:bg-surface-highlight-dark border border-primary/30 dark:border-primary-dark/30'
                   )}
                 >

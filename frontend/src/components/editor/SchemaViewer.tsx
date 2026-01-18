@@ -8,22 +8,22 @@ import { cn } from '../../lib/utils';
 
 interface Column {
   name: string;
-  data_type: string;
+  type: string; // Backend uses 'type' not 'data_type'
   is_nullable?: boolean;
-  is_primary_key?: boolean;
+  is_pk?: boolean; // Backend uses 'is_pk' not 'is_primary_key'
 }
 
 interface ForeignKey {
   column: string;
-  referenced_table: string;
-  referenced_column: string;
+  ref_table: string; // Backend uses 'ref_table' not 'referenced_table'
+  ref_column: string; // Backend uses 'ref_column' not 'referenced_column'
 }
 
 interface TableSchema {
   name: string;
   columns: Column[];
   foreign_keys?: ForeignKey[];
-  primary_keys?: string[];
+  row_count?: number;
 }
 
 interface SchemaDef {
@@ -77,7 +77,7 @@ export function SchemaViewer({ schema }: SchemaViewerProps) {
   return (
     <div className="h-full overflow-y-auto">
       {/* Header */}
-      <div className="sticky top-0 z-10 bg-surface-DEFAULT dark:bg-surface-dark border-b border-border-DEFAULT dark:border-border-dark p-4">
+      <div className="sticky top-0 z-10 bg-surface dark:bg-background-dark border-b border-border-DEFAULT dark:border-border-dark p-4">
         <div className="flex items-center gap-2">
           <Database className="w-5 h-5 text-primary dark:text-primary-dark" />
           <h2 className="text-lg font-semibold text-text-main-DEFAULT dark:text-text-main-dark">
@@ -105,7 +105,7 @@ export function SchemaViewer({ schema }: SchemaViewerProps) {
               className={cn(
                 'mb-2 rounded-lg border',
                 'border-border-DEFAULT dark:border-border-dark',
-                'bg-background-DEFAULT dark:bg-background-dark'
+                'bg-surface dark:bg-background-dark'
               )}
             >
               {/* Table Header */}
@@ -113,7 +113,7 @@ export function SchemaViewer({ schema }: SchemaViewerProps) {
                 onClick={() => toggleTable(table.name)}
                 className={cn(
                   'w-full flex items-center gap-2 p-3 text-left',
-                  'hover:bg-surface-highlight-DEFAULT dark:hover:bg-surface-highlight-dark',
+                  'hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark',
                   'transition-colors rounded-lg'
                 )}
               >
@@ -126,9 +126,15 @@ export function SchemaViewer({ schema }: SchemaViewerProps) {
                 <span className="font-medium text-text-main-DEFAULT dark:text-text-main-dark">
                   {table.name}
                 </span>
-                <span className="text-xs text-text-muted-DEFAULT dark:text-text-muted-dark ml-auto">
-                  {table.columns.length} columns
-                </span>
+                <div className="text-xs text-text-muted-DEFAULT dark:text-text-muted-dark ml-auto text-right">
+                  <div>{table.columns.length} cols</div>
+                  <div>
+                    {table.row_count !== undefined && table.row_count !== null 
+                      ? `${table.row_count.toLocaleString()} rows`
+                      : '- rows'
+                    }
+                  </div>
+                </div>
               </button>
 
               {/* Table Columns (Expanded) */}
@@ -144,7 +150,7 @@ export function SchemaViewer({ schema }: SchemaViewerProps) {
                       )}
                     >
                       {/* Primary Key Icon */}
-                      {(column.is_primary_key || table.primary_keys?.includes(column.name)) && (
+                      {column.is_pk && (
                         <Key className="w-3.5 h-3.5 text-yellow-600 dark:text-yellow-400 flex-shrink-0" />
                       )}
                       
@@ -156,14 +162,14 @@ export function SchemaViewer({ schema }: SchemaViewerProps) {
                       {/* Column Name */}
                       <span className={cn(
                         'font-mono text-text-main-DEFAULT dark:text-text-main-dark',
-                        column.is_primary_key && 'font-semibold'
+                        column.is_pk && 'font-semibold'
                       )}>
                         {column.name}
                       </span>
                       
                       {/* Data Type */}
                       <span className="text-text-muted-DEFAULT dark:text-text-muted-dark">
-                        {column.data_type}
+                        {column.type}
                       </span>
                       
                       {/* Nullable Badge */}
@@ -189,7 +195,7 @@ export function SchemaViewer({ schema }: SchemaViewerProps) {
                           <Link className="w-3 h-3" />
                           <span className="font-mono">{fk.column}</span>
                           <span>→</span>
-                          <span className="font-mono">{fk.referenced_table}.{fk.referenced_column}</span>
+                          <span className="font-mono">{fk.ref_table}.{fk.ref_column}</span>
                         </div>
                       ))}
                     </div>

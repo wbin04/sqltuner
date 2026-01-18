@@ -76,7 +76,7 @@ export function SessionManager({
                   onClick={() => onSelectConversation(conversation.id)}
                   className={cn(
                     'w-full flex items-start gap-3 px-3 py-3 rounded-lg text-left transition-all',
-                    'hover:bg-surface-highlight-DEFAULT dark:hover:bg-surface-highlight-dark',
+                    'hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark',
                     isActive && 'bg-surface-highlight-DEFAULT dark:bg-surface-highlight-dark border border-primary/30 dark:border-primary-dark/30'
                   )}
                 >

@@ -8,6 +8,7 @@ import { DashboardHome } from './pages/DashboardHome';
 import { LoginPage } from './pages/LoginPage';
 import { WorkspacesPage } from './pages/WorkspacesPage';
 import { EditorPage } from './pages/EditorPage';
+import { HistoryPage } from './pages/HistoryPage';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { FeedbackReview } from './pages/admin/FeedbackReview';
 import { UserManagement } from './pages/admin/UserManagement';
@@ -112,14 +113,7 @@ function AppContent() {
       <Route element={<ProtectedUserLayout />}>
         <Route path="/dashboard" element={<DashboardHome />} />
         <Route path="/workspaces" element={<WorkspacesPage />} />
-        <Route path="/history" element={
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center">
-              <h2 className="text-2xl font-bold text-text-main-DEFAULT dark:text-text-main-dark mb-2">History</h2>
-              <p className="text-text-muted-DEFAULT dark:text-text-muted-dark">Coming soon...</p>
-            </div>
-          </div>
-        } />
+        <Route path="/history" element={<HistoryPage />} />
         <Route path="/settings" element={
           <div className="flex items-center justify-center h-full">
             <div className="text-center">

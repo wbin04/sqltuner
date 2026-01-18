@@ -28,7 +28,7 @@ This page must now be the "Super Interface". Structure it as a **3-Pane IDE Layo
 - **Chat Stream:** User asks "Why is this slow?", AI replies.
 - **SQL Block Components:**
   - Display the Generated SQL in Monaco Editor.
-  - **Action Bar:** [Run Query] [Explain] [✨ Optimize].
+  - **Action Bar:** [Run Query] [Explain] [Optimize].
 - **Results Area:** A Collapsible Bottom Panel or Tab inside the Center Pane to show `Data Grid` (Query Results).
 
 ### Pane C: Context Explorer (Right Sidebar)
@@ -37,7 +37,7 @@ This page must now be the "Super Interface". Structure it as a **3-Pane IDE Layo
 ## 3. The "Optimize" Action (Feature Integration)
 Instead of a separate page, implement "Optimize" as an **Overlay/Modal** triggered from Pane B.
 - Create `src/components/editor/OptimizationModal.tsx`.
-- **Trigger:** Clicking [✨ Optimize] on a specific SQL block.
+- **Trigger:** Clicking [Optimize] on a specific SQL block.
 - **Content:**
   - Diff View (Old SQL vs New SQL).
   - Performance Stats (Cost reduction).

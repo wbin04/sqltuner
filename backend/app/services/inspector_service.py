@@ -216,10 +216,21 @@ class DatabaseInspectorService:
                                 ref_column=fk['referred_columns'][i] if i < len(fk['referred_columns']) else fk['referred_columns'][0]
                             ))
                 
+                # Get row count
+                row_count = None
+                try:
+                    with engine.connect() as conn:
+                        result = conn.execute(text(f"SELECT COUNT(*) FROM {table_name}"))
+                        row_count = result.scalar()
+                except Exception:
+                    # If count fails, leave it as None
+                    pass
+                
                 tables.append(TableDef(
                     name=table_name,
                     columns=columns,
-                    foreign_keys=foreign_keys
+                    foreign_keys=foreign_keys,
+                    row_count=row_count
                 ))
             
             schema_def = SchemaDef(tables=tables)

@@ -70,7 +70,7 @@ export function MainLayout({ children, onLogout }: MainLayoutProps) {
                 onClick={() => handleMenuClick(item.path)}
                 className={cn(
                   'w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200',
-                  'hover:bg-surface-highlight-DEFAULT dark:hover:bg-surface-highlight-dark group',
+                  'hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark group',
                   isActive && 'bg-surface-highlight-DEFAULT dark:bg-surface-highlight-dark border border-primary/30 dark:border-primary-dark/30'
                 )}
               >

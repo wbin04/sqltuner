@@ -166,7 +166,7 @@ export function EditorPage() {
             onClick={() => navigate('/workspaces')}
             className={cn(
               'p-2 rounded-lg transition-colors',
-              'hover:bg-surface-highlight-DEFAULT dark:hover:bg-surface-highlight-dark'
+              'hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark'
             )}
             title="Back to Workspaces"
           >
@@ -233,7 +233,7 @@ export function EditorPage() {
                 onClick={() => setShowResults(false)}
                 className={cn(
                   'w-full flex items-center justify-between px-4 py-2',
-                  'hover:bg-surface-highlight-DEFAULT dark:hover:bg-surface-highlight-dark',
+                  'hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark',
                   'transition-colors'
                 )}
               >
@@ -253,7 +253,7 @@ export function EditorPage() {
 
         {/* Pane C: Context Explorer (Right Sidebar) */}
         <aside className={cn(
-          'w-80 flex-shrink-0',
+          'w-90 flex-shrink-0',
           'bg-surface-DEFAULT dark:bg-surface-dark',
           'border-l border-border-DEFAULT dark:border-border-dark'
         )}>
