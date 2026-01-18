@@ -10,7 +10,7 @@ import { useAuth } from '../context/AuthContext';
 // Validation Schema
 const loginSchema = z.object({
   email: z.string().min(1, 'Email is required').email('Invalid email format'),
-  password: z.string().min(5, 'Password must be at least 6 characters'),
+  password: z.string().min(5, 'Password must be at least 5 characters'),
   rememberMe: z.boolean().optional(),
 });
 
