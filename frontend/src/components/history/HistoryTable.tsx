@@ -176,15 +176,6 @@ export function HistoryTable({ data, onViewDetail, onCopySQL }: HistoryTableProp
       header: 'Actions',
       cell: ({ row }) => (
         <div className="flex items-center gap-2">
-          {row.original.sql_query && (
-            <button
-              onClick={() => onCopySQL(row.original.sql_query!)}
-              className="p-2 hover:bg-surface-light dark:hover:bg-surface-dark rounded-md transition-colors"
-              title="Copy SQL"
-            >
-              <Copy className="w-4 h-4 text-text-muted-DEFAULT dark:text-text-muted-dark hover:text-primary" />
-            </button>
-          )}
           <button
             onClick={() => onViewDetail(row.original)}
             className="px-3 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary rounded-md text-sm font-medium transition-colors"
@@ -194,6 +185,15 @@ export function HistoryTable({ data, onViewDetail, onCopySQL }: HistoryTableProp
               <span>View</span>
             </div>
           </button>
+          {row.original.sql_query && (
+            <button
+              onClick={() => onCopySQL(row.original.sql_query!)}
+              className="p-2 hover:bg-surface-light dark:hover:bg-surface-dark rounded-md transition-colors"
+              title="Copy SQL"
+            >
+              <Copy className="w-4 h-4 text-text-muted-DEFAULT dark:text-text-muted-dark hover:text-primary" />
+            </button>
+          )}
         </div>
       ),
     },
