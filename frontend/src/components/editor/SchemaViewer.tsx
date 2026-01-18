@@ -1,0 +1,205 @@
+/**
+ * SchemaViewer Component
+ * Displays database schema metadata in a collapsible tree view
+ */
+import { useState } from 'react';
+import { Database, Table, ChevronDown, ChevronRight, Key, Link } from 'lucide-react';
+import { cn } from '../../lib/utils';
+
+interface Column {
+  name: string;
+  data_type: string;
+  is_nullable?: boolean;
+  is_primary_key?: boolean;
+}
+
+interface ForeignKey {
+  column: string;
+  referenced_table: string;
+  referenced_column: string;
+}
+
+interface TableSchema {
+  name: string;
+  columns: Column[];
+  foreign_keys?: ForeignKey[];
+  primary_keys?: string[];
+}
+
+interface SchemaDef {
+  database_name?: string;
+  db_type?: string;
+  tables: TableSchema[];
+}
+
+interface SchemaViewerProps {
+  schema: Record<string, any> | null | undefined;
+}
+
+export function SchemaViewer({ schema }: SchemaViewerProps) {
+  const [expandedTables, setExpandedTables] = useState<Set<string>>(new Set());
+
+  // Parse schema to SchemaDef format
+  const schemaDef = schema as SchemaDef | null;
+
+  const toggleTable = (tableName: string) => {
+    setExpandedTables((prev) => {
+      const next = new Set(prev);
+      if (next.has(tableName)) {
+        next.delete(tableName);
+      } else {
+        next.add(tableName);
+      }
+      return next;
+    });
+  };
+
+  // Empty state
+  if (!schemaDef || !schemaDef.tables || schemaDef.tables.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full p-8 text-center">
+        <div className={cn(
+          'w-16 h-16 rounded-full flex items-center justify-center mb-4',
+          'bg-surface-highlight-DEFAULT dark:bg-surface-highlight-dark'
+        )}>
+          <Database className="w-8 h-8 text-text-muted-DEFAULT dark:text-text-muted-dark" />
+        </div>
+        <h3 className="text-lg font-semibold text-text-main-DEFAULT dark:text-text-main-dark mb-2">
+          No Schema Available
+        </h3>
+        <p className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark max-w-sm">
+          Schema metadata has not been loaded yet. For real databases, sync to fetch schema. For simulations, define your schema.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full overflow-y-auto">
+      {/* Header */}
+      <div className="sticky top-0 z-10 bg-surface-DEFAULT dark:bg-surface-dark border-b border-border-DEFAULT dark:border-border-dark p-4">
+        <div className="flex items-center gap-2">
+          <Database className="w-5 h-5 text-primary dark:text-primary-dark" />
+          <h2 className="text-lg font-semibold text-text-main-DEFAULT dark:text-text-main-dark">
+            Database Schema
+          </h2>
+        </div>
+        {schemaDef.database_name && (
+          <p className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark mt-1">
+            {schemaDef.database_name} ({schemaDef.db_type})
+          </p>
+        )}
+        <p className="text-xs text-text-muted-DEFAULT dark:text-text-muted-dark mt-1">
+          {schemaDef.tables.length} {schemaDef.tables.length === 1 ? 'table' : 'tables'}
+        </p>
+      </div>
+
+      {/* Tables List */}
+      <div className="p-2">
+        {schemaDef.tables.map((table) => {
+          const isExpanded = expandedTables.has(table.name);
+          
+          return (
+            <div
+              key={table.name}
+              className={cn(
+                'mb-2 rounded-lg border',
+                'border-border-DEFAULT dark:border-border-dark',
+                'bg-background-DEFAULT dark:bg-background-dark'
+              )}
+            >
+              {/* Table Header */}
+              <button
+                onClick={() => toggleTable(table.name)}
+                className={cn(
+                  'w-full flex items-center gap-2 p-3 text-left',
+                  'hover:bg-surface-highlight-DEFAULT dark:hover:bg-surface-highlight-dark',
+                  'transition-colors rounded-lg'
+                )}
+              >
+                {isExpanded ? (
+                  <ChevronDown className="w-4 h-4 text-text-muted-DEFAULT dark:text-text-muted-dark flex-shrink-0" />
+                ) : (
+                  <ChevronRight className="w-4 h-4 text-text-muted-DEFAULT dark:text-text-muted-dark flex-shrink-0" />
+                )}
+                <Table className="w-4 h-4 text-primary dark:text-primary-dark flex-shrink-0" />
+                <span className="font-medium text-text-main-DEFAULT dark:text-text-main-dark">
+                  {table.name}
+                </span>
+                <span className="text-xs text-text-muted-DEFAULT dark:text-text-muted-dark ml-auto">
+                  {table.columns.length} columns
+                </span>
+              </button>
+
+              {/* Table Columns (Expanded) */}
+              {isExpanded && (
+                <div className="px-3 pb-3 space-y-1">
+                  {table.columns.map((column) => (
+                    <div
+                      key={column.name}
+                      className={cn(
+                        'flex items-center gap-2 p-2 rounded',
+                        'bg-surface-DEFAULT dark:bg-surface-dark',
+                        'text-sm'
+                      )}
+                    >
+                      {/* Primary Key Icon */}
+                      {(column.is_primary_key || table.primary_keys?.includes(column.name)) && (
+                        <Key className="w-3.5 h-3.5 text-yellow-600 dark:text-yellow-400 flex-shrink-0" />
+                      )}
+                      
+                      {/* Foreign Key Icon */}
+                      {table.foreign_keys?.some(fk => fk.column === column.name) && (
+                        <Link className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                      )}
+                      
+                      {/* Column Name */}
+                      <span className={cn(
+                        'font-mono text-text-main-DEFAULT dark:text-text-main-dark',
+                        column.is_primary_key && 'font-semibold'
+                      )}>
+                        {column.name}
+                      </span>
+                      
+                      {/* Data Type */}
+                      <span className="text-text-muted-DEFAULT dark:text-text-muted-dark">
+                        {column.data_type}
+                      </span>
+                      
+                      {/* Nullable Badge */}
+                      {column.is_nullable === false && (
+                        <span className="ml-auto text-xs px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400">
+                          NOT NULL
+                        </span>
+                      )}
+                    </div>
+                  ))}
+
+                  {/* Foreign Keys Section */}
+                  {table.foreign_keys && table.foreign_keys.length > 0 && (
+                    <div className="mt-3 pt-2 border-t border-border-DEFAULT dark:border-border-dark">
+                      <p className="text-xs font-semibold text-text-muted-DEFAULT dark:text-text-muted-dark mb-2">
+                        Foreign Keys
+                      </p>
+                      {table.foreign_keys.map((fk, idx) => (
+                        <div
+                          key={idx}
+                          className="text-xs text-text-muted-DEFAULT dark:text-text-muted-dark flex items-center gap-1 mb-1"
+                        >
+                          <Link className="w-3 h-3" />
+                          <span className="font-mono">{fk.column}</span>
+                          <span>→</span>
+                          <span className="font-mono">{fk.referenced_table}.{fk.referenced_column}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

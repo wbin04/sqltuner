@@ -1,14 +1,16 @@
 """
 API endpoints for database connections management
+Supports both real database connections and virtual simulations
 """
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import List
 from uuid import UUID
 
 from backend.app.db.session import get_db
-from backend.app.models.models import DBConnection
+from backend.app.models.models import DBConnection, DBType, User
 from backend.app.schemas.connection import (
     DBConnectionCreate,
     DBConnectionUpdate,
@@ -17,8 +19,12 @@ from backend.app.schemas.connection import (
     SchemaSyncRequest,
     SchemaSyncResponse,
 )
+from backend.app.schemas.schema_def import SchemaDef
 from backend.app.core.security import encrypt_password
 from backend.app.services.schema_service import SchemaService
+from backend.app.services.inspector_service import inspector_service
+from backend.app.services.simulation_service import simulation_service
+from backend.app.api.v1.endpoints.auth import get_current_user
 
 router = APIRouter()
 
@@ -26,18 +32,29 @@ router = APIRouter()
 @router.post("/", response_model=DBConnectionResponse, status_code=status.HTTP_201_CREATED)
 async def create_connection(
     connection_data: DBConnectionCreate,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Create a new database connection
-    Password will be encrypted before storing
-    """
-    # TODO: Get user_id from authentication
-    # For now, using a dummy user_id (should be replaced with real auth)
-    user_id = "00000000-0000-0000-0000-000000000001"  # Placeholder
+    Create a new database connection (real or simulation)
     
-    # Encrypt password
-    db_password = encrypt_password(connection_data.password)
+    - For real databases (postgres/mysql): Provide host, port, username, password, db_name
+    - For simulations: Only provide name and db_type='simulation'
+    """
+    user_id = current_user.id
+    
+    # Validate: Real DB must have credentials, Simulation must not
+    if connection_data.db_type in [DBType.POSTGRES, DBType.MYSQL]:
+        if not all([connection_data.host, connection_data.password, connection_data.db_name]):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Real database connections require host, password, and db_name"
+            )
+        # Encrypt password for real DB
+        db_password = encrypt_password(connection_data.password)
+    else:
+        # Simulation - no credentials needed
+        db_password = None
     
     # Create connection object
     db_connection = DBConnection(
@@ -49,6 +66,7 @@ async def create_connection(
         db_password=db_password,
         db_name=connection_data.db_name,
         db_type=connection_data.db_type,
+        meta_schema={}  # Initialize empty schema
     )
     
     db.add(db_connection)
@@ -60,6 +78,7 @@ async def create_connection(
 
 @router.get("/", response_model=List[DBConnectionResponse])
 async def list_connections(
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     skip: int = 0,
     limit: int = 100
@@ -67,9 +86,11 @@ async def list_connections(
     """
     Get list of database connections for current user
     """
-    # TODO: Filter by authenticated user_id
     result = await db.execute(
-        select(DBConnection).offset(skip).limit(limit)
+        select(DBConnection)
+        .where(DBConnection.user_id == current_user.id)
+        .offset(skip)
+        .limit(limit)
     )
     connections = result.scalars().all()
     return connections
@@ -78,13 +99,16 @@ async def list_connections(
 @router.get("/{connection_id}", response_model=DBConnectionWithSchema)
 async def get_connection(
     connection_id: UUID,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Get a specific database connection with cached schema
     """
     result = await db.execute(
-        select(DBConnection).where(DBConnection.id == connection_id)
+        select(DBConnection)
+        .where(DBConnection.id == connection_id)
+        .where(DBConnection.user_id == current_user.id)
     )
     connection = result.scalar_one_or_none()
     
@@ -101,13 +125,16 @@ async def get_connection(
 async def update_connection(
     connection_id: UUID,
     connection_data: DBConnectionUpdate,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Update a database connection
     """
     result = await db.execute(
-        select(DBConnection).where(DBConnection.id == connection_id)
+        select(DBConnection)
+        .where(DBConnection.id == connection_id)
+        .where(DBConnection.user_id == current_user.id)
     )
     connection = result.scalar_one_or_none()
     
@@ -136,13 +163,16 @@ async def update_connection(
 @router.delete("/{connection_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_connection(
     connection_id: UUID,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Delete a database connection
     """
     result = await db.execute(
-        select(DBConnection).where(DBConnection.id == connection_id)
+        select(DBConnection)
+        .where(DBConnection.id == connection_id)
+        .where(DBConnection.user_id == current_user.id)
     )
     connection = result.scalar_one_or_none()
     
@@ -159,23 +189,27 @@ async def delete_connection(
 @router.post("/{connection_id}/sync", response_model=SchemaSyncResponse)
 async def sync_connection_schema(
     connection_id: UUID,
+    current_user: User = Depends(get_current_user),
     sync_request: SchemaSyncRequest = SchemaSyncRequest(),
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Synchronize database schema metadata from target database
+    Synchronize database schema metadata from a REAL database connection
     
     This endpoint:
     1. Connects to the target database using stored credentials
     2. Extracts metadata (tables, columns, types, foreign keys)
-    3. Saves it as JSON cache in the internal database
+    3. Saves it as JSON in meta_schema field
     4. Returns the schema metadata
     
+    Only works for real database connections (not simulations).
     The process is read-only and does not fetch table data.
     """
     # Check if connection exists
     result = await db.execute(
-        select(DBConnection).where(DBConnection.id == connection_id)
+        select(DBConnection)
+        .where(DBConnection.id == connection_id)
+        .where(DBConnection.user_id == current_user.id)
     )
     connection = result.scalar_one_or_none()
     
@@ -185,40 +219,150 @@ async def sync_connection_schema(
             detail=f"Connection with ID {connection_id} not found"
         )
     
-    # Sync schema using service
-    sync_result = await SchemaService.sync_connection_schema(
-        connection_id=connection_id,
-        db=db,
-        force=sync_request.force
-    )
-    
-    if not sync_result["success"]:
+    if connection.db_type == DBType.SIMULATION:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=sync_result["message"]
+            detail="Cannot sync schema from a simulation connection. Use PUT /schema instead."
         )
     
-    return SchemaSyncResponse(**sync_result)
+    try:
+        # Use inspector service to sync schema
+        schema_def = await inspector_service.sync_schema(db, connection_id)
+        
+        return SchemaSyncResponse(
+            success=True,
+            message="Schema synchronized successfully",
+            tables_count=len(schema_def.tables),
+            schema=schema_def.to_json_dict()
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to sync schema: {str(e)}"
+        )
 
 
 @router.get("/{connection_id}/schema", response_model=dict)
 async def get_connection_schema(
     connection_id: UUID,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Get cached schema metadata for a connection
     Returns 404 if schema is not cached yet
     """
-    schema = await SchemaService.get_cached_schema(
-        connection_id=connection_id,
-        db=db
+    result = await db.execute(
+        select(DBConnection)
+        .where(DBConnection.id == connection_id)
+        .where(DBConnection.user_id == current_user.id)
     )
+    connection = result.scalar_one_or_none()
     
-    if schema is None:
+    if not connection:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Schema not cached. Please sync the connection first."
+            detail=f"Connection with ID {connection_id} not found"
         )
     
-    return schema
+    if not connection.meta_schema or connection.meta_schema == {}:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Schema not available. Please sync the connection or update schema for simulations."
+        )
+    
+    return connection.meta_schema
+
+
+@router.put("/{connection_id}/schema", response_model=dict)
+async def update_connection_schema(
+    connection_id: UUID,
+    schema_data: SchemaDef,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Update schema metadata for a SIMULATION connection
+    
+    This endpoint allows you to define or update the virtual schema
+    for simulation connections. Only works for connections with db_type='simulation'.
+    
+    Request body should contain a complete SchemaDef structure.
+    """
+    # Check if connection exists
+    result = await db.execute(
+        select(DBConnection)
+        .where(DBConnection.id == connection_id)
+        .where(DBConnection.user_id == current_user.id)
+    )
+    connection = result.scalar_one_or_none()
+    
+    if not connection:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Connection with ID {connection_id} not found"
+        )
+    
+    if connection.db_type != DBType.SIMULATION:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Can only update schema for simulation connections. Use POST /sync for real databases."
+        )
+    
+    try:
+        # Use simulation service to update schema
+        updated_schema = await simulation_service.update_table_metadata(
+            db, connection_id, schema_data
+        )
+        
+        return updated_schema.to_json_dict()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to update schema: {str(e)}"
+        )
+
+
+@router.get("/{connection_id}/ddl", response_class=PlainTextResponse)
+async def get_connection_ddl(
+    connection_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Generate SQL DDL script from connection schema
+    
+    This endpoint generates a CREATE TABLE script from the meta_schema JSON.
+    Useful for:
+    - AI context: Providing schema structure to LLM for query generation
+    - Documentation: Understanding the virtual database structure
+    - Migration: Exporting simulation schema to real database
+    
+    Returns plain text SQL script.
+    """
+    result = await db.execute(
+        select(DBConnection)
+        .where(DBConnection.id == connection_id)
+        .where(DBConnection.user_id == current_user.id)
+    )
+    connection = result.scalar_one_or_none()
+    
+    if not connection:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Connection with ID {connection_id} not found"
+        )
+    
+    try:
+        ddl_script = await simulation_service.generate_ddl_for_connection(db, connection_id)
+        return ddl_script
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate DDL: {str(e)}"
+        )

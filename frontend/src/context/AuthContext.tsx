@@ -66,7 +66,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (userData.role === 'admin') {
         navigate('/admin');
       } else {
-        navigate('/optimize');
+        navigate('/workspaces');
       }
     } catch (error) {
       if (axios.isAxiosError(error)) {

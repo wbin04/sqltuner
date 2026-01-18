@@ -1,6 +1,12 @@
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect, text, create_engine
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Dict, List, Any
+from sqlalchemy.future import select
+from typing import Dict, List, Any, Optional
+from uuid import UUID
+
+from backend.app.models.models import DBConnection, DBType
+from backend.app.schemas.schema_def import SchemaDef, TableDef, ColumnDef, ForeignKeyDef
+from backend.app.core.security import decrypt_password
 
 
 class DatabaseInspectorService:
@@ -135,6 +141,100 @@ class DatabaseInspectorService:
                     output.append(f"  - {idx['name']}: ({idx_cols}) {unique}")
         
         return "\n".join(output)
+    
+    async def sync_schema(self, db: AsyncSession, connection_id: UUID) -> SchemaDef:
+        """
+        Sync schema metadata from a real database connection to meta_schema JSON
+        
+        Args:
+            db: Async database session (SQLTuner internal DB)
+            connection_id: UUID of the connection to sync
+            
+        Returns:
+            SchemaDef object containing the synchronized schema
+            
+        Raises:
+            ValueError: If connection not found or is a simulation
+            Exception: If unable to connect to target database
+        """
+        # Fetch connection details
+        result = await db.execute(
+            select(DBConnection).where(DBConnection.id == connection_id)
+        )
+        connection = result.scalar_one_or_none()
+        
+        if not connection:
+            raise ValueError(f"Connection {connection_id} not found")
+        
+        if connection.db_type == DBType.POSTGRES and connection.db_type.value == 'simulation':
+            raise ValueError("Cannot sync schema from a simulation connection")
+        
+        # Decrypt password
+        password = decrypt_password(connection.db_password)
+        
+        # Build connection URL for target database
+        if connection.db_type == DBType.POSTGRES:
+            db_url = f"postgresql://{connection.username}:{password}@{connection.host}:{connection.port}/{connection.db_name}"
+        elif connection.db_type == DBType.MYSQL:
+            db_url = f"mysql+pymysql://{connection.username}:{password}@{connection.host}:{connection.port}/{connection.db_name}"
+        else:
+            raise ValueError(f"Unsupported database type: {connection.db_type}")
+        
+        # Connect to target database and extract schema
+        try:
+            engine = create_engine(db_url)
+            inspector = inspect(engine)
+            
+            tables = []
+            table_names = inspector.get_table_names()
+            
+            for table_name in table_names:
+                # Get columns
+                columns_info = inspector.get_columns(table_name)
+                pk_constraint = inspector.get_pk_constraint(table_name)
+                pk_columns = set(pk_constraint.get('constrained_columns', []))
+                
+                columns = []
+                for col in columns_info:
+                    columns.append(ColumnDef(
+                        name=col['name'],
+                        type=str(col['type']),
+                        is_pk=col['name'] in pk_columns,
+                        is_nullable=col.get('nullable', True),
+                        default=str(col.get('default')) if col.get('default') is not None else None
+                    ))
+                
+                # Get foreign keys
+                fk_info = inspector.get_foreign_keys(table_name)
+                foreign_keys = []
+                for fk in fk_info:
+                    if fk.get('constrained_columns') and fk.get('referred_columns'):
+                        for i, col in enumerate(fk['constrained_columns']):
+                            foreign_keys.append(ForeignKeyDef(
+                                column=col,
+                                ref_table=fk['referred_table'],
+                                ref_column=fk['referred_columns'][i] if i < len(fk['referred_columns']) else fk['referred_columns'][0]
+                            ))
+                
+                tables.append(TableDef(
+                    name=table_name,
+                    columns=columns,
+                    foreign_keys=foreign_keys
+                ))
+            
+            schema_def = SchemaDef(tables=tables)
+            
+            # Update meta_schema in database
+            connection.meta_schema = schema_def.to_json_dict()
+            await db.commit()
+            await db.refresh(connection)
+            
+            engine.dispose()
+            
+            return schema_def
+            
+        except Exception as e:
+            raise Exception(f"Failed to connect to target database: {str(e)}")
 
 
 # Singleton instance
