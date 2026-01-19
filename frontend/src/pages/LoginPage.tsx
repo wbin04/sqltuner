@@ -119,7 +119,6 @@ export function LoginPage() {
                 <input
                   type={showPassword ? 'text' : 'password'}
                   placeholder="••••••••"
-                  defaultValue="quochuy123"
                   className={cn(
                     'w-full rounded-lg border pl-10 pr-12 py-3 text-sm transition-all',
                     'bg-background-DEFAULT dark:bg-background-dark',
