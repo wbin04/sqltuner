@@ -9,7 +9,7 @@ from datetime import timedelta
 
 from backend.app.db.session import get_db
 from backend.app.models.models import User
-from backend.app.schemas.token import LoginRequest, LoginResponse, UserResponse, TokenData
+from backend.app.schemas.token import LoginRequest, LoginResponse, UserResponse
 from backend.app.core.security import verify_password, create_access_token, decode_access_token
 from backend.app.core.config import settings
 
