@@ -5,7 +5,6 @@ Seeds initial users with hashed passwords
 import asyncio
 import sys
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.db.session import AsyncSessionLocal
 from backend.app.models.models import User, UserRole
