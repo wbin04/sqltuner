@@ -35,6 +35,7 @@ class HistoryLogResponse(BaseModel):
     timestamp: datetime
     workspace: WorkspaceInfo
     activity_type: str  # "optimization", "execution", "chat"
+    action_type: Optional[str] = None  # "chat", "explain", "optimize"
     user_prompt: Optional[str] = None
     sql_query: Optional[str] = None
     result_status: Optional[str] = None  # "success", "error", "optimized"
@@ -137,16 +138,11 @@ async def get_history(
     
     if activity_type:
         if activity_type == "optimization":
-            query = query.where(PerformanceAnalysis.id.isnot(None))
+            query = query.where(QueryLog.action_type == "optimize")
         elif activity_type == "execution":
-            query = query.where(
-                and_(
-                    QueryLog.sql_generated.isnot(None),
-                    PerformanceAnalysis.id.is_(None)
-                )
-            )
+            query = query.where(QueryLog.action_type == "explain")  # Assuming explain is for execution
         elif activity_type == "chat":
-            query = query.where(QueryLog.sql_generated.is_(None))
+            query = query.where(QueryLog.action_type == "chat")
     
     # Get total count
     count_query = select(QueryLog.id).select_from(query.subquery())
@@ -186,6 +182,7 @@ async def get_history(
             timestamp=log.created_at,
             workspace=workspace_info,
             activity_type=activity_type_determined,
+            action_type=log.action_type,
             user_prompt=user_prompt,
             sql_query=log.sql_generated,
             result_status=result_status,

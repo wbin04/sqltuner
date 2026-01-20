@@ -50,6 +50,7 @@ class SQLExplainPlanResponse(BaseModel):
 class SQLOptimizeRequest(BaseModel):
     """Request schema for SQL optimization"""
     connection_id: UUID = Field(..., description="Database connection ID")
+    conversation_id: Optional[UUID] = Field(None, description="Conversation ID for logging (optional)")
     sql_query: str = Field(..., description="SQL query to optimize", max_length=10000)
     include_explain: bool = Field(default=True, description="Include EXPLAIN analysis")
 
@@ -61,6 +62,7 @@ class SQLOptimizeResponse(BaseModel):
     explanation: str
     index_recommendation: Optional[str] = None
     stats_comparison: Optional[Dict[str, Any]] = None  # {"old_cost": 100, "new_cost": 50}
+    query_log_id: Optional[UUID] = None  # For persistent history
 
 
 class SQLExplainRequest(BaseModel):

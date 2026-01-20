@@ -20,6 +20,8 @@ interface ChatAreaProps {
   onRunQuery: (sql: string) => void;
   onOptimize: (sql: string) => void;
   onExplain: (sql: string) => void;
+  inputValue?: string;
+  onUpdateInput?: (value: string) => void;
   isLoading?: boolean;
 }
 
@@ -29,9 +31,15 @@ export function ChatArea({
   onRunQuery,
   onOptimize,
   onExplain,
+  inputValue: externalInputValue,
+  onUpdateInput,
   isLoading = false,
 }: ChatAreaProps) {
-  const [inputValue, setInputValue] = useState('');
+  const [internalInputValue, setInternalInputValue] = useState('');
+  
+  // Use external input value if provided, otherwise use internal
+  const inputValue = externalInputValue !== undefined ? externalInputValue : internalInputValue;
+  const setInputValue = onUpdateInput || setInternalInputValue;
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Auto scroll to bottom when new messages arrive

@@ -24,6 +24,7 @@ export function EditorPage() {
   const [isResultsCollapsed, setIsResultsCollapsed] = useState(false);
   const [resultsPanelHeight, setResultsPanelHeight] = useState(300); // Default height in pixels
   const [isResizing, setIsResizing] = useState(false);
+  const [inputValue, setInputValue] = useState('');
 
   if (!workspaceId) {
     navigate('/workspaces');
@@ -206,6 +207,8 @@ export function EditorPage() {
             onRunQuery={handleRunQuery}
             onOptimize={handleOptimize}
             onExplain={handleExplain}
+            inputValue={inputValue}
+            onUpdateInput={setInputValue}
             isLoading={editorLogic.isSendingMessage}
           />
 
@@ -332,19 +335,31 @@ export function EditorPage() {
       <OptimizationModal
         isOpen={editorLogic.isOptimizationModalOpen}
         onClose={editorLogic.handleCloseOptimizationModal}
-        result={editorLogic.optimizationResult ? {
-          original_sql: editorLogic.optimizationResult.original_sql,
+        analysis={editorLogic.optimizationResult ? {
+          original_cost: editorLogic.optimizationResult.stats_comparison?.old_cost || null,
+          bottlenecks: [], // TODO: extract from explanation or add to backend response
           optimized_sql: editorLogic.optimizationResult.optimized_sql,
+          index_recommendation: editorLogic.optimizationResult.index_recommendation,
           explanation: editorLogic.optimizationResult.explanation,
-          cost_reduction: editorLogic.optimizationResult.stats_comparison?.improvement_percent,
-          index_recommendations: editorLogic.optimizationResult.index_recommendation 
-            ? [editorLogic.optimizationResult.index_recommendation] 
-            : undefined,
+          stats_comparison: editorLogic.optimizationResult.stats_comparison,
         } : null}
-        onApply={(sql) => {
-          // Send optimized SQL as a new message
-          handleSendMessage(`Please execute this optimized query:\n\`\`\`sql\n${sql}\n\`\`\``);
-          editorLogic.handleCloseOptimizationModal();
+        isAnalyzing={editorLogic.isOptimizing}
+        isApplying={false}
+        onReplaceQuery={(sql: string) => {
+          // Construct combined script with index recommendation + optimized SQL
+          let script = sql;
+          if (editorLogic.optimizationResult?.index_recommendation) {
+            const indexRec = editorLogic.optimizationResult.index_recommendation.trim();
+            // Check if index recommendation already ends with semicolon
+            const indexWithSemicolon = indexRec.endsWith(';') ? indexRec : `${indexRec};`;
+            script = `${indexWithSemicolon}\n\n${sql}`;
+          }
+          
+          // Display the combined script in chat as assistant message
+          editorLogic.handleApplyOptimization(script);
+          
+          // Auto-run the combined script
+          handleRunQuery(script);
         }}
       />
     </div>

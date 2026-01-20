@@ -7,6 +7,7 @@ from sqlalchemy import create_engine, text, inspect
 from sqlalchemy.exc import OperationalError, ProgrammingError
 import json
 import re
+import sqlparse
 
 
 class SimulationExecutor:
@@ -14,6 +15,148 @@ class SimulationExecutor:
     Executes SQL queries on ephemeral in-memory SQLite databases
     Maps PostgreSQL schema definitions to SQLite-compatible schema
     """
+    
+    @staticmethod
+    def _execute_statements(conn, sql_query: str) -> Dict[str, Any]:
+        """
+        Execute SQL query supporting multiple statements
+        
+        Args:
+            conn: Database connection
+            sql_query: SQL query (may contain multiple statements)
+            
+        Returns:
+            Dictionary with columns and rows from final SELECT statement
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Split SQL query into individual statements
+        statements = sqlparse.split(sql_query)
+        # Filter out empty statements and whitespace-only statements
+        statements = [stmt.strip() for stmt in statements if stmt.strip() and stmt.strip() != ';']
+        
+        if not statements:
+            raise ValueError("No valid SQL statements found")
+        
+        logger.info(f"[EXECUTE] Split into {len(statements)} statements")
+        
+        final_columns = []
+        final_rows = []
+        
+        for i, stmt in enumerate(statements):
+            logger.debug(f"[EXECUTE] Executing statement {i+1}: {stmt[:100]}...")
+            
+            try:
+                result = conn.execute(text(stmt))
+                
+                # Check if this statement returns rows (SELECT)
+                if result.returns_rows:
+                    columns = list(result.keys())
+                    rows = [dict(row._mapping) for row in result.fetchall()]
+                    final_columns = columns
+                    final_rows = rows
+                    logger.debug(f"[EXECUTE] Statement {i+1} returned {len(rows)} rows")
+                else:
+                    # For DDL/DML statements, just commit
+                    conn.commit()
+                    logger.debug(f"[EXECUTE] Statement {i+1} executed (no rows returned)")
+                    
+            except Exception as stmt_error:
+                error_str = str(stmt_error)
+                
+                # Check if it's a duplicate index error (treat as warning, not failure)
+                is_duplicate_index = (
+                    "Duplicate key name" in error_str or  # MySQL
+                    "already exists" in error_str or       # PostgreSQL
+                    "duplicate key" in error_str.lower() or
+                    "index" in stmt.upper() and "already" in error_str.lower()  # SQLite
+                )
+                
+                if is_duplicate_index and "CREATE INDEX" in stmt.upper():
+                    logger.warning(f"[EXECUTE] Statement {i+1} skipped: Index already exists")
+                    # Continue to next statement instead of failing
+                    continue
+                    
+                logger.error(f"[EXECUTE] Statement {i+1} failed: {error_str}")
+                # For multi-statement execution, if one fails, stop and return error
+                raise Exception(f"Statement {i+1} failed: {error_str}")
+        
+        return {
+            "columns": final_columns,
+            "rows": final_rows,
+            "row_count": len(final_rows)
+        }
+    
+    @staticmethod
+    def execute_real_db_statements(conn, sql_query: str) -> Dict[str, Any]:
+        """
+        Execute SQL query on real database supporting multiple statements
+        
+        Args:
+            conn: Database connection
+            sql_query: SQL query (may contain multiple statements)
+            
+        Returns:
+            Dictionary with columns and rows from final SELECT statement
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Split SQL query into individual statements
+        statements = sqlparse.split(sql_query)
+        # Filter out empty statements and whitespace-only statements
+        statements = [stmt.strip() for stmt in statements if stmt.strip() and stmt.strip() != ';']
+        
+        if not statements:
+            raise ValueError("No valid SQL statements found")
+        
+        logger.info(f"[REAL_DB] Split into {len(statements)} statements")
+        
+        final_columns = []
+        final_rows = []
+        
+        for i, stmt in enumerate(statements):
+            logger.debug(f"[REAL_DB] Executing statement {i+1}: {stmt[:100]}...")
+            
+            try:
+                result = conn.execute(text(stmt))
+                
+                # Check if this statement returns rows (SELECT)
+                if result.returns_rows:
+                    columns = list(result.keys())
+                    rows = [dict(row._mapping) for row in result.fetchall()]
+                    final_columns = columns
+                    final_rows = rows
+                    logger.debug(f"[REAL_DB] Statement {i+1} returned {len(rows)} rows")
+                else:
+                    # For DDL/DML statements, commit is handled by context manager
+                    logger.debug(f"[REAL_DB] Statement {i+1} executed (no rows returned)")
+                    
+            except Exception as stmt_error:
+                error_str = str(stmt_error)
+                
+                # Check if it's a duplicate index error (treat as warning, not failure)
+                is_duplicate_index = (
+                    "Duplicate key name" in error_str or  # MySQL
+                    "already exists" in error_str or       # PostgreSQL
+                    "duplicate key" in error_str.lower()
+                )
+                
+                if is_duplicate_index and "CREATE INDEX" in stmt.upper():
+                    logger.warning(f"[REAL_DB] Statement {i+1} skipped: Index already exists")
+                    # Continue to next statement instead of failing
+                    continue
+                    
+                logger.error(f"[REAL_DB] Statement {i+1} failed: {error_str}")
+                # For multi-statement execution, if one fails, stop and return error
+                raise Exception(f"Statement {i+1} failed: {error_str}")
+        
+        return {
+            "columns": final_columns,
+            "rows": final_rows,
+            "row_count": len(final_rows)
+        }
     
     @staticmethod
     def _map_postgres_to_sqlite(pg_type: str) -> str:
@@ -234,70 +377,10 @@ class SimulationExecutor:
                 
                 logger.info(f"[SANDBOX] Total seeded rows: {total_seeded_rows}")
                 
-                # Step 3: Execute user query
-                try:
-                    logger.info(f"[SANDBOX] Executing query: {sql_query[:200]}...")
-                    result = conn.execute(text(sql_query))
-                    
-                    # Check if query returns rows
-                    if result.returns_rows:
-                        columns = list(result.keys())
-                        rows = [dict(row._mapping) for row in result.fetchall()]
-                        logger.info(f"[SANDBOX] Query returned {len(rows)} rows with {len(columns)} columns")
-                    else:
-                        # For INSERT, UPDATE, DELETE
-                        columns = []
-                        rows = []
-                        rowcount = result.rowcount
-                        logger.info(f"[SANDBOX] Query executed, affected {rowcount} rows")
-                    
-                    return {
-                        'columns': columns,
-                        'rows': rows,
-                        'row_count': len(rows) if result.returns_rows else result.rowcount
-                    }
+                # Step 3: Execute user query (supporting multiple statements)
+                result = self._execute_statements(conn, sql_query)
                 
-                except (OperationalError, ProgrammingError) as e:
-                    error_msg = str(e)
-                    
-                    # Check for column not found errors
-                    if 'no such column' in error_msg.lower() or 'column' in error_msg.lower() and 'does not exist' in error_msg.lower():
-                        # Extract column name from error
-                        import re
-                        col_match = re.search(r"column:?\s+([a-zA-Z0-9_.]+)", error_msg, re.IGNORECASE)
-                        if col_match:
-                            missing_col = col_match.group(1)
-                            raise Exception(
-                                f"Column '{missing_col}' not found in the virtual schema. "
-                                f"This could mean:\n"
-                                f"1. The column doesn't exist in the actual database\n"
-                                f"2. The meta_schema is outdated - try refreshing the connection schema\n"
-                                f"3. There's a typo in your query\n\n"
-                                f"Available tables: {', '.join(t.get('name', '?') for t in tables)}"
-                            )
-                    
-                    # Check for table not found errors
-                    if 'no such table' in error_msg.lower():
-                        raise Exception(
-                            f"Table not found in the virtual schema. "
-                            f"Available tables: {', '.join(t.get('name', '?') for t in tables)}\n\n"
-                            f"Please refresh the connection schema if tables are missing."
-                        )
-                    
-                    # Check for Postgres-specific function errors
-                    if any(func in error_msg.lower() for func in [
-                        'gen_random_uuid', 'uuid_generate', 'now()', 'current_timestamp',
-                        'array_agg', 'json_agg', 'jsonb_', 'to_jsonb', 'to_json'
-                    ]):
-                        raise Exception(
-                            "Simulation Mode runs on a lightweight SQLite engine. "
-                            "Some PostgreSQL-specific functions (like gen_random_uuid(), "
-                            "array_agg(), jsonb functions) are not supported. "
-                            "Please use standard SQL syntax or switch to a real database connection."
-                        )
-                    
-                    # Re-raise with original error
-                    raise Exception(f"Query execution error: {error_msg}")
+                return result
         
         finally:
             # Cleanup

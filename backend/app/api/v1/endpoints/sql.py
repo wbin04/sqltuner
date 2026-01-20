@@ -29,6 +29,7 @@ from backend.app.schemas.sql import (
 )
 from backend.app.services.llm_service import llm_service
 from backend.app.services.execution_service import simulation_executor
+from backend.app.services.optimization_service import optimization_service
 from backend.app.core.security import decrypt_password
 from backend.app.api.v1.endpoints.auth import get_current_user
 
@@ -188,16 +189,10 @@ async def execute_sql(
         logger.info(f"[LIVE] Running query on real database...")
         
         with engine.connect() as conn:
-            result_proxy = conn.execute(text(request.sql))
-            
-            # Check if query returns results
-            if result_proxy.returns_rows:
-                columns = list(result_proxy.keys())
-                rows = [dict(row._mapping) for row in result_proxy.fetchall()]
-            else:
-                # For INSERT, UPDATE, DELETE, etc.
-                columns = []
-                rows = []
+            result = simulation_executor.execute_real_db_statements(conn, request.sql)
+            columns = result["columns"]
+            rows = result["rows"]
+            row_count = result["row_count"]
             
             row_count = len(rows) if rows else result_proxy.rowcount
         
@@ -322,15 +317,26 @@ async def optimize_sql(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Optimize SQL query using LLM with optional EXPLAIN analysis
+    Optimize SQL query using Optimization Engine
     
-    - Fetches meta_schema from connection
-    - Runs EXPLAIN on original query (if include_explain=True)
-    - Uses LLM to optimize with schema context
-    - Runs EXPLAIN on optimized query
-    - Returns comparison stats
+    Workflow:
+    1. Fetch connection and validate user permissions
+    2. Run EXPLAIN to analyze original query (real databases only)
+    3. Use LLM to interpret plan, identify bottlenecks, and suggest optimizations
+    4. Generate index recommendations
+    5. Compare costs before/after optimization
+    
+    - **connection_id**: Database connection UUID
+    - **sql_query**: Original SQL query to optimize
+    - **include_explain**: Run EXPLAIN analysis (default: True, ignored for SIMULATION)
+    
+    Returns:
+    - Optimized SQL query
+    - Performance explanation
+    - Index recommendations
+    - Cost comparison statistics
     """
-    # Fetch and validate connection
+    # Validate user has access to this connection
     result = await db.execute(
         select(DBConnection).where(
             DBConnection.id == request.connection_id,
@@ -342,81 +348,42 @@ async def optimize_sql(
     if not connection:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Connection not found"
+            detail="Connection not found or access denied"
         )
     
-    # Get meta_schema for context
-    schema_text = format_schema_for_llm(connection.meta_schema or {})
-    
-    # Run EXPLAIN on original query (only for real databases, not SIMULATION)
-    original_cost = None
-    optimized_cost = None
-    
-    if request.include_explain and connection.db_type != DBType.SIMULATION:
-        logger.info(f"[OPTIMIZE] Running EXPLAIN on original query for {connection.db_type.value} database")
-        try:
-            conn_string = build_sync_connection_string(connection)
-            engine = create_engine(conn_string, pool_pre_ping=True, pool_recycle=3600)
-            
-            with engine.connect() as conn:
-                if connection.db_type == DBType.POSTGRES:
-                    explain_query = f"EXPLAIN (FORMAT JSON) {request.sql_query}"
-                    result_proxy = conn.execute(text(explain_query))
-                    explain_output = result_proxy.fetchone()[0]
-                    plan_data = json.loads(explain_output) if isinstance(explain_output, str) else explain_output
-                    original_cost = plan_data[0]["Plan"]["Total Cost"]
-                else:  # MySQL
-                    explain_query = f"EXPLAIN FORMAT=JSON {request.sql_query}"
-                    result_proxy = conn.execute(text(explain_query))
-                    explain_output = result_proxy.fetchone()[0]
-                    plan_data = json.loads(explain_output) if isinstance(explain_output, str) else explain_output
-                    original_cost = plan_data.get("query_block", {}).get("cost_info", {}).get("query_cost", 0.0)
-            
-            engine.dispose()
-        except Exception as e:
-            # Continue without EXPLAIN if it fails
-            pass
-    
-    # Call LLM to optimize
+    # Call the optimization service
     try:
-        result = await llm_service.optimize_sql(
+        analysis = await optimization_service.analyze_query(
+            connection_id=request.connection_id,
             sql_query=request.sql_query,
-            db_schema=schema_text
+            db=db,
+            conversation_id=request.conversation_id
         )
         
-        optimized_sql = result["optimized_sql"]
-        explanation = result["explanation"]
+        # Extract results from analysis
+        original_cost = analysis.get("original_cost")
+        bottlenecks = analysis.get("bottlenecks", [])
+        optimized_sql = analysis.get("optimized_sql")
+        index_recommendation = analysis.get("index_recommendation")
+        explanation = analysis.get("explanation")
+        query_log_id = analysis.get("query_log_id")
         
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
     except Exception as e:
+        logger.error(f"[OPTIMIZE] Analysis failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Optimization failed: {str(e)}"
+            detail=f"Optimization analysis failed: {str(e)}"
         )
     
-    # Generate index recommendations based on schema
-    index_recommendation = None
-    if schema_text:
-        # Ask LLM for index suggestions
-        index_prompt = f"""Based on this SQL query and schema, suggest index optimizations:
-
-Query: {request.sql_query}
-
-{schema_text}
-
-Provide ONLY the CREATE INDEX statements, one per line. No explanations."""
-        
-        try:
-            index_recommendation = await llm_service._call_ollama(
-                model=llm_service.coder_model,
-                prompt=index_prompt,
-                temperature=0.1
-            )
-        except:
-            pass
-    
-    # Run EXPLAIN on optimized query (only for real databases)
+    # Run EXPLAIN on optimized query to compare costs (if include_explain is True)
+    optimized_cost = None
     if request.include_explain and connection.db_type != DBType.SIMULATION:
-        logger.info(f"[OPTIMIZE] Running EXPLAIN on optimized query for {connection.db_type.value} database")
+        logger.info(f"[OPTIMIZE] Running EXPLAIN on optimized query to compare costs")
         try:
             conn_string = build_sync_connection_string(connection)
             engine = create_engine(conn_string, pool_pre_ping=True, pool_recycle=3600)
@@ -428,7 +395,8 @@ Provide ONLY the CREATE INDEX statements, one per line. No explanations."""
                     explain_output = result_proxy.fetchone()[0]
                     plan_data = json.loads(explain_output) if isinstance(explain_output, str) else explain_output
                     optimized_cost = plan_data[0]["Plan"]["Total Cost"]
-                else:  # MySQL
+                    
+                elif connection.db_type == DBType.MYSQL:
                     explain_query = f"EXPLAIN FORMAT=JSON {optimized_sql}"
                     result_proxy = conn.execute(text(explain_query))
                     explain_output = result_proxy.fetchone()[0]
@@ -436,25 +404,47 @@ Provide ONLY the CREATE INDEX statements, one per line. No explanations."""
                     optimized_cost = plan_data.get("query_block", {}).get("cost_info", {}).get("query_cost", 0.0)
             
             engine.dispose()
+            logger.info(f"[OPTIMIZE] Optimized query cost: {optimized_cost}")
+            
         except Exception as e:
-            # Continue without EXPLAIN if it fails
-            pass
+            logger.warning(f"[OPTIMIZE] Could not get cost for optimized query: {str(e)}")
+            # Continue without optimized cost
     
-    # Build stats comparison
+    # Build cost comparison statistics
     stats_comparison = None
     if original_cost is not None and optimized_cost is not None:
-        stats_comparison = {
-            "old_cost": float(original_cost),
-            "new_cost": float(optimized_cost),
-            "improvement_percent": round(((original_cost - optimized_cost) / original_cost) * 100, 2) if original_cost > 0 else 0
-        }
+        try:
+            # Ensure both costs are floats
+            original_cost_float = float(original_cost)
+            optimized_cost_float = float(optimized_cost)
+            
+            improvement_percent = 0
+            if original_cost_float > 0:
+                improvement_percent = round(((original_cost_float - optimized_cost_float) / original_cost_float) * 100, 2)
+            
+            stats_comparison = {
+                "old_cost": original_cost_float,
+                "new_cost": optimized_cost_float,
+                "improvement_percent": improvement_percent
+            }
+            
+            logger.info(f"[OPTIMIZE] Cost comparison: {original_cost_float} → {optimized_cost_float} ({improvement_percent}% improvement)")
+        except (ValueError, TypeError) as e:
+            logger.warning(f"[OPTIMIZE] Could not calculate cost comparison: {str(e)}")
+            # Continue without stats comparison
+    
+    # Enhance explanation with bottleneck information
+    if bottlenecks:
+        bottleneck_text = "\n\nDetected Performance Bottlenecks:\n" + "\n".join(f"• {b}" for b in bottlenecks)
+        explanation = explanation + bottleneck_text
     
     return SQLOptimizeResponse(
         original_sql=request.sql_query,
         optimized_sql=optimized_sql,
         explanation=explanation,
         index_recommendation=index_recommendation,
-        stats_comparison=stats_comparison
+        stats_comparison=stats_comparison,
+        query_log_id=query_log_id
     )
 
 

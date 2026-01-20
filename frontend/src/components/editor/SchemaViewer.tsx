@@ -19,10 +19,17 @@ interface ForeignKey {
   ref_column: string; // Backend uses 'ref_column' not 'referenced_column'
 }
 
+interface Index {
+  name: string;
+  column_names: string[];
+  unique?: boolean;
+}
+
 interface TableSchema {
   name: string;
   columns: Column[];
   foreign_keys?: ForeignKey[];
+  indexes?: Index[];
   row_count?: number;
 }
 
@@ -196,6 +203,30 @@ export function SchemaViewer({ schema }: SchemaViewerProps) {
                           <span className="font-mono">{fk.column}</span>
                           <span>→</span>
                           <span className="font-mono">{fk.ref_table}.{fk.ref_column}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Indexes Section */}
+                  {table.indexes && table.indexes.length > 0 && (
+                    <div className="mt-3 pt-2 border-t border-border-DEFAULT dark:border-border-dark">
+                      <p className="text-xs font-semibold text-text-muted-DEFAULT dark:text-text-muted-dark mb-2">
+                        Indexes
+                      </p>
+                      {table.indexes.map((index, idx) => (
+                        <div
+                          key={idx}
+                          className="text-xs text-text-muted-DEFAULT dark:text-text-muted-dark flex items-center gap-1 mb-1"
+                        >
+                          <Key className="w-3 h-3" />
+                          <span className="font-mono">{index.name}</span>
+                          {index.unique && (
+                            <span className="text-xs px-1 py-0.5 rounded bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400">
+                              UNIQUE
+                            </span>
+                          )}
+                          <span className="ml-2">({index.column_names.join(', ')})</span>
                         </div>
                       ))}
                     </div>

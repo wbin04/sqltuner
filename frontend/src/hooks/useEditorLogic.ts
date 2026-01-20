@@ -4,23 +4,13 @@
  */
 import { useState, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { chatService, ChatMessage, Conversation } from '../services/chatService';
+import { chatService, ChatMessage } from '../services/chatService';
 import { sqlService, SQLExecuteResponse, SQLOptimizeResponse } from '../services/sqlService';
 
 interface QueryResult {
   sql: string;
   data: SQLExecuteResponse;
   timestamp: number;
-}
-
-interface EditorState {
-  messages: ChatMessage[];
-  conversations: Conversation[];
-  activeConversationId: string | null;
-  queryResults: Map<string, QueryResult>;
-  isOptimizing: boolean;
-  optimizationResult: SQLOptimizeResponse | null;
-  isExecuting: boolean;
 }
 
 interface UseEditorLogicProps {
@@ -36,6 +26,7 @@ export function useEditorLogic({ connectionId }: UseEditorLogicProps) {
   const [optimizationResult, setOptimizationResult] = useState<SQLOptimizeResponse | null>(null);
   const [isOptimizationModalOpen, setIsOptimizationModalOpen] = useState(false);
   const [optimisticMessages, setOptimisticMessages] = useState<ChatMessage[]>([]);
+  const [appliedOptimizationMessages, setAppliedOptimizationMessages] = useState<ChatMessage[]>([]);
 
   // Fetch conversations
   const { data: conversations = [], isLoading: isLoadingConversations } = useQuery({
@@ -51,8 +42,8 @@ export function useEditorLogic({ connectionId }: UseEditorLogicProps) {
     enabled: !!activeConversationId,
   });
 
-  // Combine fetched messages with optimistic messages
-  const messages = [...fetchedMessages, ...optimisticMessages];
+  // Combine fetched messages with optimistic messages and applied optimization messages
+  const messages = [...fetchedMessages, ...appliedOptimizationMessages, ...optimisticMessages];
 
   // Send message mutation
   const sendMessageMutation = useMutation({
@@ -178,10 +169,14 @@ export function useEditorLogic({ connectionId }: UseEditorLogicProps) {
 
   const handleNewChat = useCallback(() => {
     setActiveConversationId(null);
+    // Clear applied optimization messages when starting new chat
+    setAppliedOptimizationMessages([]);
   }, []);
 
   const handleSelectConversation = useCallback((id: string) => {
     setActiveConversationId(id);
+    // Clear applied optimization messages when switching conversations
+    setAppliedOptimizationMessages([]);
   }, []);
 
   const handleCloseOptimizationModal = useCallback(() => {
@@ -189,11 +184,25 @@ export function useEditorLogic({ connectionId }: UseEditorLogicProps) {
     setOptimizationResult(null);
   }, []);
 
-  const handleApplyOptimization = useCallback(() => {
-    // This will be handled by the parent component
-    // Just close the modal
-    setIsOptimizationModalOpen(false);
-  }, []);
+  const handleApplyOptimization = useCallback(
+    (combinedScript: string) => {
+      // Display the combined script as an assistant message in chat
+      const assistantMessage: ChatMessage = {
+        id: `optimization-${Date.now()}`,
+        role: 'assistant',
+        content: 'Applied optimization with the following script:',
+        sql_generated: combinedScript,
+        created_at: new Date().toISOString(),
+      };
+      
+      // Add to applied optimization messages (persists across conversation)
+      setAppliedOptimizationMessages((prev) => [...prev, assistantMessage]);
+      
+      // Close modal
+      setIsOptimizationModalOpen(false);
+    },
+    []
+  );
 
   return {
     // State

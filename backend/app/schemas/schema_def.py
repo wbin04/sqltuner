@@ -41,11 +41,28 @@ class ForeignKeyDef(BaseModel):
         }
 
 
+class IndexDef(BaseModel):
+    """Definition of a database index"""
+    name: str = Field(..., description="Index name")
+    column_names: List[str] = Field(default_factory=list, description="List of column names covered by the index")
+    unique: bool = Field(default=False, description="Whether this is a unique index")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "name": "idx_users_email",
+                "column_names": ["email"],
+                "unique": False
+            }
+        }
+
+
 class TableDef(BaseModel):
     """Definition of a database table"""
     name: str = Field(..., description="Table name")
     columns: List[ColumnDef] = Field(default_factory=list, description="List of columns in the table")
     foreign_keys: List[ForeignKeyDef] = Field(default_factory=list, description="List of foreign key relationships")
+    indexes: List[IndexDef] = Field(default_factory=list, description="List of indexes on the table")
     row_count: Optional[int] = Field(None, description="Number of rows in the table")
     sample_data: Optional[List[Dict[str, Any]]] = Field(None, description="Optional sample data rows")
     

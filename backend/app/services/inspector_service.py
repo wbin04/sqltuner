@@ -5,7 +5,7 @@ from typing import Dict, List, Any, Optional
 from uuid import UUID
 
 from backend.app.models.models import DBConnection, DBType
-from backend.app.schemas.schema_def import SchemaDef, TableDef, ColumnDef, ForeignKeyDef
+from backend.app.schemas.schema_def import SchemaDef, TableDef, ColumnDef, ForeignKeyDef, IndexDef
 from backend.app.core.security import decrypt_password
 
 
@@ -221,6 +221,16 @@ class DatabaseInspectorService:
                                 ref_column=fk['referred_columns'][i] if i < len(fk['referred_columns']) else fk['referred_columns'][0]
                             ))
                 
+                # Get indexes
+                index_info = inspector.get_indexes(table_name)
+                indexes = []
+                for idx in index_info:
+                    indexes.append(IndexDef(
+                        name=idx['name'],
+                        column_names=idx.get('column_names', []),
+                        unique=idx.get('unique', False)
+                    ))
+                
                 # Get row count and sample data
                 row_count = None
                 sample_data = []
@@ -270,6 +280,7 @@ class DatabaseInspectorService:
                     name=table_name,
                     columns=columns,
                     foreign_keys=foreign_keys,
+                    indexes=indexes,
                     row_count=row_count,
                     sample_data=sample_data
                 ))
