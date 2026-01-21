@@ -20,6 +20,7 @@ class UserRole(str, enum.Enum):
 class DBType(str, enum.Enum):
     POSTGRES = "postgres"
     MYSQL = "mysql"
+    SIMULATION = "simulation"
 
 
 class ChatRole(str, enum.Enum):
@@ -47,13 +48,14 @@ class DBConnection(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     name = Column(String(100), nullable=False)
-    host = Column(String(255), nullable=False)
+    host = Column(String(255), nullable=True)  # Nullable for simulation
     port = Column(Integer, default=5432)
     username = Column(String(100))
-    db_password = Column(String(500), nullable=False)
-    db_name = Column(String(100), nullable=False)
-    db_type = Column(SQLEnum(DBType, name="db_type"), default=DBType.POSTGRES)
-    metadata_cache = Column(JSONB, nullable=True)  # Cache for schema metadata
+    db_password = Column(String(500), nullable=True)  # Nullable for simulation
+    db_name = Column(String(100), nullable=True)  # Nullable for simulation
+    db_type = Column(SQLEnum(DBType, name="db_type", values_callable=lambda x: [e.value for e in x]), default=DBType.POSTGRES)
+    meta_schema = Column(JSONB, nullable=True, server_default="{}")  # Unified schema storage
+    metadata_cache = Column(JSONB, nullable=True)  # Legacy field, can be deprecated
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     # Relationships
@@ -79,7 +81,8 @@ class QueryLog(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
-    role = Column(SQLEnum(ChatRole, name="chat_role"), nullable=False)
+    role = Column(SQLEnum(ChatRole, name="chat_role", values_callable=lambda x: [e.value for e in x]), nullable=False)
+    action_type = Column(String(50), nullable=False, default='chat')  # chat, explain, optimize
     content = Column(Text, nullable=False)
     sql_generated = Column(Text)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())

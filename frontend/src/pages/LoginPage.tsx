@@ -43,7 +43,7 @@ export function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background-DEFAULT dark:bg-background-dark p-4 relative overflow-hidden">
+    <div className="min-h-screen flex items-center justify-center bg-background-light dark:bg-background-dark p-4 relative overflow-hidden">
       {/* Background Pattern */}
       <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-secondary/5 dark:from-primary-dark/5 dark:to-secondary-dark/5" />
       <div className="absolute inset-0" style={{
@@ -93,7 +93,7 @@ export function LoginPage() {
                   placeholder="you@example.com"
                   className={cn(
                     'w-full rounded-lg border pl-10 pr-4 py-3 text-sm transition-all',
-                    'bg-background-DEFAULT dark:bg-background-dark',
+                    'bg-background-light dark:bg-background-dark',
                     'border-border-DEFAULT dark:border-border-dark',
                     'text-text-main-DEFAULT dark:text-text-main-dark',
                     'placeholder:text-text-muted-DEFAULT dark:placeholder:text-text-muted-dark',
@@ -120,7 +120,7 @@ export function LoginPage() {
                   placeholder="••••••••"
                   className={cn(
                     'w-full rounded-lg border pl-10 pr-12 py-3 text-sm transition-all',
-                    'bg-background-DEFAULT dark:bg-background-dark',
+                    'bg-background-light dark:bg-background-dark',
                     'border-border-DEFAULT dark:border-border-dark',
                     'text-text-main-DEFAULT dark:text-text-main-dark',
                     'placeholder:text-text-muted-DEFAULT dark:placeholder:text-text-muted-dark',

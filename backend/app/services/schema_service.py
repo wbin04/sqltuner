@@ -21,6 +21,23 @@ class SchemaService:
     """Service for syncing database schema metadata"""
     
     @staticmethod
+    def _resolve_docker_host(host: str) -> str:
+        """
+        Resolve localhost to host.docker.internal when running in Docker
+        
+        Args:
+            host: Original host from connection config
+            
+        Returns:
+            Resolved host that works from Docker container
+        """
+        # If host is localhost or 127.0.0.1, replace with host.docker.internal
+        # This allows Docker containers to connect to services on host machine
+        if host in ['localhost', '127.0.0.1']:
+            return 'host.docker.internal'
+        return host
+    
+    @staticmethod
     def _build_connection_string(
         db_type: DBType,
         host: str,
@@ -43,10 +60,13 @@ class SchemaService:
         Returns:
             Connection string for SQLAlchemy
         """
+        # Resolve localhost for Docker environment
+        resolved_host = SchemaService._resolve_docker_host(host)
+        
         if db_type == DBType.POSTGRES:
-            return f"postgresql://{username}:{password}@{host}:{port}/{db_name}"
+            return f"postgresql://{username}:{password}@{resolved_host}:{port}/{db_name}"
         elif db_type == DBType.MYSQL:
-            return f"mysql+pymysql://{username}:{password}@{host}:{port}/{db_name}"
+            return f"mysql+pymysql://{username}:{password}@{resolved_host}:{port}/{db_name}"
         else:
             raise ValueError(f"Unsupported database type: {db_type}")
     

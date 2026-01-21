@@ -20,7 +20,7 @@ export function AdminLayout({ children, currentPage, onNavigate, onLogout }: Adm
   ];
 
   return (
-    <div className="flex h-screen bg-background-DEFAULT dark:bg-background-dark">
+    <div className="flex h-screen bg-background-light dark:bg-background-dark">
       {/* Sidebar */}
       <aside className="w-64 bg-purple-50 dark:bg-purple-950/20 border-r border-purple-200 dark:border-purple-800/30 flex flex-col">
         {/* Logo */}

@@ -30,15 +30,16 @@ class UserResponse(UserBase):
 # DBConnection Schemas
 class DBConnectionBase(BaseModel):
     name: str = Field(..., max_length=100)
-    host: str = Field(..., max_length=255)
-    port: int = Field(default=5432, ge=1, le=65535)
-    username: Optional[str] = Field(None, max_length=100)
-    db_name: str = Field(..., max_length=100)
     db_type: DBType = DBType.POSTGRES
 
 
 class DBConnectionCreate(DBConnectionBase):
-    password: str  # Plain password, will be encrypted
+    # For real databases
+    host: Optional[str] = Field(None, max_length=255)
+    port: Optional[int] = Field(5432, ge=1, le=65535)
+    username: Optional[str] = Field(None, max_length=100)
+    password: Optional[str] = None  # Plain password, will be encrypted
+    db_name: Optional[str] = Field(None, max_length=100)
 
 
 class DBConnectionUpdate(BaseModel):
@@ -54,6 +55,11 @@ class DBConnectionUpdate(BaseModel):
 class DBConnectionResponse(DBConnectionBase):
     id: UUID
     user_id: UUID
+    host: Optional[str] = None
+    port: Optional[int] = None
+    username: Optional[str] = None
+    db_name: Optional[str] = None
+    meta_schema: Optional[Dict[str, Any]] = None
     metadata_cache: Optional[Dict[str, Any]] = None
     created_at: datetime
     
@@ -62,7 +68,9 @@ class DBConnectionResponse(DBConnectionBase):
 
 class DBConnectionWithSchema(DBConnectionResponse):
     """Response that includes the cached schema metadata"""
-    schema: Optional[Dict[str, Any]] = Field(None, alias="metadata_cache")
+    meta_schema_data: Optional[Dict[str, Any]] = Field(None, alias="meta_schema")
+    
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 # Schema Sync

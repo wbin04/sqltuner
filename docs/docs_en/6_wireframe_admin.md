@@ -12,11 +12,11 @@ Your task is to implement the **Admin Portal** for the SQLTuner application.
 ## 1. Layout & Navigation
 - **Structure:** Sidebar (Left) + Topbar (Header) + Main Content (Right).
 - **Sidebar Menu:**
-  - 📊 **Dashboard:** System Overview.
-  - 👥 **Users:** User management (Role assignment, Ban/Unban).
-  - 🧠 **AI Training (RLHF):** Review user feedbacks and corrected SQL (Crucial).
-  - 🔌 **Connections:** Monitor all active database connections.
-  - ⚙️ **System Config:** LLM settings, API keys.
+  - **Dashboard:** System Overview.
+  - **Users:** User management (Role assignment, Ban/Unban).
+  - **AI Training (RLHF):** Review user feedbacks and corrected SQL (Crucial).
+  - **Connections:** Monitor all active database connections.
+  - **System Config:** LLM settings, API keys.
 - **Topbar:** Breadcrumbs on the left. User Profile + **Theme Toggle** on the right.
 
 ## 2. Key Modules to Implement
@@ -38,7 +38,7 @@ This screen is for reviewing the `feedbacks` table to fine-tune the model.
   - Date/Time.
   - Original Query (Truncated).
   - AI Generated SQL.
-  - User Rating (👍/👎).
+  - User Rating (Thumbs Up/Down).
   - **User Correction** (Highlight this column if the user provided fixed SQL).
   - Status (Reviewed / Pending).
 - **Action:** A "Approve for Fine-tuning" button.

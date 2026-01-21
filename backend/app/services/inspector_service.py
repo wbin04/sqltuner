@@ -1,6 +1,12 @@
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect, text, create_engine
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Dict, List, Any
+from sqlalchemy.future import select
+from typing import Dict, List, Any, Optional
+from uuid import UUID
+
+from backend.app.models.models import DBConnection, DBType
+from backend.app.schemas.schema_def import SchemaDef, TableDef, ColumnDef, ForeignKeyDef, IndexDef
+from backend.app.core.security import decrypt_password
 
 
 class DatabaseInspectorService:
@@ -135,6 +141,163 @@ class DatabaseInspectorService:
                     output.append(f"  - {idx['name']}: ({idx_cols}) {unique}")
         
         return "\n".join(output)
+    
+    async def sync_schema(self, db: AsyncSession, connection_id: UUID) -> SchemaDef:
+        """
+        Sync schema metadata from a real database connection to meta_schema JSON
+        
+        Args:
+            db: Async database session (SQLTuner internal DB)
+            connection_id: UUID of the connection to sync
+            
+        Returns:
+            SchemaDef object containing the synchronized schema
+            
+        Raises:
+            ValueError: If connection not found or is a simulation
+            Exception: If unable to connect to target database
+        """
+        # Fetch connection details
+        result = await db.execute(
+            select(DBConnection).where(DBConnection.id == connection_id)
+        )
+        connection = result.scalar_one_or_none()
+        
+        if not connection:
+            raise ValueError(f"Connection {connection_id} not found")
+        
+        if connection.db_type == DBType.POSTGRES and connection.db_type.value == 'simulation':
+            raise ValueError("Cannot sync schema from a simulation connection")
+        
+        # Decrypt password
+        password = decrypt_password(connection.db_password)
+        
+        # Resolve localhost for Docker environment
+        resolved_host = connection.host
+        if connection.host in ['localhost', '127.0.0.1']:
+            resolved_host = 'host.docker.internal'
+        
+        # Build connection URL for target database
+        if connection.db_type == DBType.POSTGRES:
+            db_url = f"postgresql://{connection.username}:{password}@{resolved_host}:{connection.port}/{connection.db_name}"
+        elif connection.db_type == DBType.MYSQL:
+            db_url = f"mysql+pymysql://{connection.username}:{password}@{resolved_host}:{connection.port}/{connection.db_name}"
+        else:
+            raise ValueError(f"Unsupported database type: {connection.db_type}")
+        
+        # Connect to target database and extract schema
+        try:
+            engine = create_engine(db_url)
+            inspector = inspect(engine)
+            
+            tables = []
+            table_names = inspector.get_table_names()
+            
+            for table_name in table_names:
+                # Get columns
+                columns_info = inspector.get_columns(table_name)
+                pk_constraint = inspector.get_pk_constraint(table_name)
+                pk_columns = set(pk_constraint.get('constrained_columns', []))
+                
+                columns = []
+                for col in columns_info:
+                    columns.append(ColumnDef(
+                        name=col['name'],
+                        type=str(col['type']),
+                        is_pk=col['name'] in pk_columns,
+                        is_nullable=col.get('nullable', True),
+                        default=str(col.get('default')) if col.get('default') is not None else None
+                    ))
+                
+                # Get foreign keys
+                fk_info = inspector.get_foreign_keys(table_name)
+                foreign_keys = []
+                for fk in fk_info:
+                    if fk.get('constrained_columns') and fk.get('referred_columns'):
+                        for i, col in enumerate(fk['constrained_columns']):
+                            foreign_keys.append(ForeignKeyDef(
+                                column=col,
+                                ref_table=fk['referred_table'],
+                                ref_column=fk['referred_columns'][i] if i < len(fk['referred_columns']) else fk['referred_columns'][0]
+                            ))
+                
+                # Get indexes
+                index_info = inspector.get_indexes(table_name)
+                indexes = []
+                for idx in index_info:
+                    indexes.append(IndexDef(
+                        name=idx['name'],
+                        column_names=idx.get('column_names', []),
+                        unique=idx.get('unique', False)
+                    ))
+                
+                # Get row count and sample data
+                row_count = None
+                sample_data = []
+                sample_size = 50  # Default sample size, max 500
+                
+                try:
+                    with engine.connect() as conn:
+                        # Get row count
+                        result = conn.execute(text(f"SELECT COUNT(*) FROM {table_name}"))
+                        row_count = result.scalar()
+                        
+                        # Fetch sample data with randomization
+                        if row_count and row_count > 0:
+                            actual_sample_size = min(sample_size, 500, row_count)  # Cap at 500
+                            
+                            # Use appropriate random function based on DB type
+                            if connection.db_type == DBType.POSTGRES:
+                                random_clause = "ORDER BY RANDOM()"
+                            elif connection.db_type == DBType.MYSQL:
+                                random_clause = "ORDER BY RAND()"
+                            else:
+                                random_clause = ""  # Fallback to sequential
+                            
+                            sample_query = f"SELECT * FROM {table_name} {random_clause} LIMIT {actual_sample_size}"
+                            result = conn.execute(text(sample_query))
+                            
+                            # Convert rows to JSON-safe format
+                            for row in result.mappings():
+                                row_dict = {}
+                                for key, value in row.items():
+                                    # Serialize to JSON-safe types
+                                    if value is None:
+                                        row_dict[key] = None
+                                    elif isinstance(value, (str, int, float, bool)):
+                                        row_dict[key] = value
+                                    else:
+                                        # Convert UUIDs, dates, decimals, etc. to string
+                                        row_dict[key] = str(value)
+                                sample_data.append(row_dict)
+                            
+                except Exception as e:
+                    # If sampling fails, continue without sample data
+                    import logging
+                    logging.warning(f"Failed to sample data from {table_name}: {str(e)}")
+                
+                tables.append(TableDef(
+                    name=table_name,
+                    columns=columns,
+                    foreign_keys=foreign_keys,
+                    indexes=indexes,
+                    row_count=row_count,
+                    sample_data=sample_data
+                ))
+            
+            schema_def = SchemaDef(tables=tables)
+            
+            # Update meta_schema in database
+            connection.meta_schema = schema_def.to_json_dict()
+            await db.commit()
+            await db.refresh(connection)
+            
+            engine.dispose()
+            
+            return schema_def
+            
+        except Exception as e:
+            raise Exception(f"Failed to connect to target database: {str(e)}")
 
 
 # Singleton instance

@@ -213,7 +213,7 @@ export function QueryEditor() {
             </div>
             <button
               onClick={() => setIsRightPanelOpen(!isRightPanelOpen)}
-              className="p-2 rounded-lg hover:bg-surface-highlight-DEFAULT dark:hover:bg-surface-highlight-dark text-text-muted-DEFAULT dark:text-text-muted-dark hover:text-text-main-DEFAULT dark:hover:text-text-main-dark transition-colors"
+              className="p-2 rounded-lg hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark text-text-muted-DEFAULT dark:text-text-muted-dark hover:text-text-main-DEFAULT dark:hover:text-text-main-dark transition-colors"
             >
               {isRightPanelOpen ? (
                 <Minimize2 className="w-5 h-5" />
@@ -253,7 +253,7 @@ export function QueryEditor() {
                 'flex-1 px-4 py-3 text-sm font-medium transition-colors',
                 rightPanelTab === 'schema'
                   ? 'text-primary dark:text-primary-dark border-b-2 border-primary dark:border-primary-dark bg-background dark:bg-background-dark'
-                  : 'text-text-muted-DEFAULT dark:text-text-muted-dark hover:text-text-main-DEFAULT dark:hover:text-text-main-dark hover:bg-surface-highlight-DEFAULT dark:hover:bg-surface-highlight-dark'
+                  : 'text-text-muted-DEFAULT dark:text-text-muted-dark hover:text-text-main-DEFAULT dark:hover:text-text-main-dark hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark'
               )}
             >
               <div className="flex items-center justify-center gap-2">
@@ -267,7 +267,7 @@ export function QueryEditor() {
                 'flex-1 px-4 py-3 text-sm font-medium transition-colors',
                 rightPanelTab === 'results'
                   ? 'text-primary dark:text-primary-dark border-b-2 border-primary dark:border-primary-dark bg-background dark:bg-background-dark'
-                  : 'text-text-muted-DEFAULT dark:text-text-muted-dark hover:text-text-main-DEFAULT dark:hover:text-text-main-dark hover:bg-surface-highlight-DEFAULT dark:hover:bg-surface-highlight-dark'
+                  : 'text-text-muted-DEFAULT dark:text-text-muted-dark hover:text-text-main-DEFAULT dark:hover:text-text-main-dark hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark'
               )}
             >
               <div className="flex items-center justify-center gap-2">

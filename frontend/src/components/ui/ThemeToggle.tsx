@@ -12,7 +12,7 @@ export function ThemeToggle() {
         'p-2 rounded-lg transition-colors',
         'text-text-muted-DEFAULT dark:text-text-muted-dark',
         'hover:text-primary dark:hover:text-primary-dark',
-        'hover:bg-surface-highlight-DEFAULT dark:hover:bg-surface-highlight-dark'
+        'hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark'
       )}
       title={theme === 'light' ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
       aria-label="Toggle theme"

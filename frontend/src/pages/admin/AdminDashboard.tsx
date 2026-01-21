@@ -202,7 +202,7 @@ export function AdminDashboard() {
           ].map((activity, idx) => (
             <div 
               key={idx}
-              className="flex items-center justify-between py-3 px-4 rounded-lg hover:bg-surface-highlight-DEFAULT dark:hover:bg-surface-highlight-dark transition-colors"
+              className="flex items-center justify-between py-3 px-4 rounded-lg hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark transition-colors"
             >
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 bg-gradient-to-br from-primary to-secondary dark:from-primary-dark dark:to-secondary-dark rounded-full flex items-center justify-center text-white text-xs font-bold">
