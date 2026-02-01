@@ -1,5 +1,7 @@
 from fastapi import APIRouter
-from backend.app.api.v1.endpoints import sql, db_inspector, connections, auth, history, chat
+
+from backend.app.api.v1.endpoints import (auth, chat, connections,
+                                          db_inspector, history, sql)
 
 api_router = APIRouter()
 

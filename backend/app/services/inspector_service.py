@@ -1,47 +1,36 @@
-from sqlalchemy import inspect, text, create_engine
-from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Dict, List, Any, Optional
+from typing import Any, Dict, List
 from uuid import UUID
 
-from backend.app.models.models import DBConnection, DBType
-from backend.app.schemas.schema_def import SchemaDef, TableDef, ColumnDef, ForeignKeyDef, IndexDef
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from backend.app.core.security import decrypt_password
-from backend.app.repositories.connection_repository import connection_repository
+from backend.app.models.models import DBType
+from backend.app.repositories.connection_repository import \
+    connection_repository
+from backend.app.schemas.schema_def import (ColumnDef, ForeignKeyDef, IndexDef,
+                                            SchemaDef, TableDef)
 
 
 class DatabaseInspectorService:
-    """
-    Service for inspecting database structure
-    Retrieves schema information: tables, columns, indexes, foreign keys
-    """
-    
+
     async def get_database_schema(self, db: AsyncSession) -> Dict[str, Any]:
-        """
-        Get comprehensive database schema information
-        
-        Args:
-            db: Async database session
-            
-        Returns:
-            Dictionary containing tables, columns, indexes, and relationships
-        """
         schema = {
             "tables": [],
             "relationships": []
         }
-        
-        # Get inspector (sync operation)
+
         def get_inspector_data(connection):
             inspector = inspect(connection)
             table_names = inspector.get_table_names()
-            
+
             tables_data = []
             for table_name in table_names:
                 columns = inspector.get_columns(table_name)
                 pk_constraint = inspector.get_pk_constraint(table_name)
                 foreign_keys = inspector.get_foreign_keys(table_name)
                 indexes = inspector.get_indexes(table_name)
-                
+
                 tables_data.append({
                     "name": table_name,
                     "columns": columns,
@@ -49,176 +38,155 @@ class DatabaseInspectorService:
                     "foreign_keys": foreign_keys,
                     "indexes": indexes
                 })
-            
+
             return tables_data
-        
-        # Execute sync operation in async context
+
         tables_data = await db.run_sync(get_inspector_data)
         schema["tables"] = tables_data
-        
+
         return schema
-    
-    async def get_table_info(self, db: AsyncSession, table_name: str) -> Dict[str, Any]:
-        """
-        Get detailed information about a specific table
-        
-        Args:
-            db: Async database session
-            table_name: Name of the table
-            
-        Returns:
-            Dictionary containing table structure details
-        """
+
+    async def get_table_info(self, db: AsyncSession,
+                             table_name: str) -> Dict[str, Any]:
         def get_table_data(connection):
             inspector = inspect(connection)
-            
+
             return {
                 "name": table_name,
                 "columns": inspector.get_columns(table_name),
                 "primary_key": inspector.get_pk_constraint(table_name),
                 "foreign_keys": inspector.get_foreign_keys(table_name),
                 "indexes": inspector.get_indexes(table_name),
-                "check_constraints": inspector.get_check_constraints(table_name),
-                "unique_constraints": inspector.get_unique_constraints(table_name)
+                "check_constraints": inspector.get_check_constraints(
+                    table_name
+                ),
+                "unique_constraints": inspector.get_unique_constraints(
+                    table_name
+                )
             }
-        
+
         return await db.run_sync(get_table_data)
-    
+
     async def get_table_sample(
-        self, 
-        db: AsyncSession, 
-        table_name: str, 
+        self,
+        db: AsyncSession,
+        table_name: str,
         limit: int = 5
     ) -> List[Dict[str, Any]]:
-        """
-        Get sample rows from a table
-        
-        Args:
-            db: Async database session
-            table_name: Name of the table
-            limit: Number of rows to fetch
-            
-        Returns:
-            List of sample rows
-        """
         query = text(f"SELECT * FROM {table_name} LIMIT :limit")
         result = await db.execute(query, {"limit": limit})
         rows = result.fetchall()
-        
-        # Convert to list of dicts
+
         return [dict(row._mapping) for row in rows]
-    
+
     def format_schema_for_llm(self, schema: Dict[str, Any]) -> str:
-        """
-        Format schema information into a readable string for LLM
-        
-        Args:
-            schema: Schema dictionary from get_database_schema()
-            
-        Returns:
-            Formatted schema string
-        """
         output = []
-        
+
         for table in schema["tables"]:
             output.append(f"\nTable: {table['name']}")
             output.append("Columns:")
-            
+
             for col in table["columns"]:
                 col_type = str(col["type"])
                 nullable = "NULL" if col["nullable"] else "NOT NULL"
                 output.append(f"  - {col['name']}: {col_type} {nullable}")
-            
-            if table["primary_key"] and table["primary_key"].get("constrained_columns"):
-                pk_cols = ", ".join(table["primary_key"]["constrained_columns"])
+
+            if table["primary_key"] and table["primary_key"].get(
+                    "constrained_columns"):
+                pk_cols = ", ".join(
+                    table["primary_key"]["constrained_columns"])
                 output.append(f"Primary Key: ({pk_cols})")
-            
+
             if table["indexes"]:
                 output.append("Indexes:")
                 for idx in table["indexes"]:
                     idx_cols = ", ".join(idx["column_names"])
                     unique = "UNIQUE" if idx.get("unique") else ""
                     output.append(f"  - {idx['name']}: ({idx_cols}) {unique}")
-        
+
         return "\n".join(output)
-    
-    async def sync_schema(self, db: AsyncSession, connection_id: UUID) -> SchemaDef:
-        """
-        Sync schema metadata from a real database connection to meta_schema JSON
-        
-        Args:
-            db: Async database session (SQLTuner internal DB)
-            connection_id: UUID of the connection to sync
-            
-        Returns:
-            SchemaDef object containing the synchronized schema
-            
-        Raises:
-            ValueError: If connection not found or is a simulation
-            Exception: If unable to connect to target database
-        """
-        # Fetch connection details using repository
+
+    async def sync_schema(
+            self,
+            db: AsyncSession,
+            connection_id: UUID) -> SchemaDef:
         connection = await connection_repository.get(db, id=connection_id)
-        
+
         if not connection:
             raise ValueError(f"Connection {connection_id} not found")
-        
-        if connection.db_type == DBType.POSTGRES and connection.db_type.value == 'simulation':
+
+        if (connection.db_type == DBType.POSTGRES and
+                connection.db_type.value == 'simulation'):
             raise ValueError("Cannot sync schema from a simulation connection")
-        
-        # Decrypt password
+
         password = decrypt_password(connection.db_password)
-        
-        # Resolve localhost for Docker environment
+
         resolved_host = connection.host
         if connection.host in ['localhost', '127.0.0.1']:
             resolved_host = 'host.docker.internal'
-        
-        # Build connection URL for target database
+
         if connection.db_type == DBType.POSTGRES:
-            db_url = f"postgresql://{connection.username}:{password}@{resolved_host}:{connection.port}/{connection.db_name}"
+            db_url = (
+                f"postgresql://{connection.username}:{password}@"
+                f"{resolved_host}:{connection.port}/{connection.db_name}"
+            )
         elif connection.db_type == DBType.MYSQL:
-            db_url = f"mysql+pymysql://{connection.username}:{password}@{resolved_host}:{connection.port}/{connection.db_name}"
+            db_url = (
+                f"mysql+pymysql://{connection.username}:{password}@"
+                f"{resolved_host}:{connection.port}/{connection.db_name}"
+            )
         else:
-            raise ValueError(f"Unsupported database type: {connection.db_type}")
-        
-        # Connect to target database and extract schema
+            raise ValueError(
+                f"Unsupported database type: {connection.db_type}")
+
         try:
             engine = create_engine(db_url)
             inspector = inspect(engine)
-            
+
             tables = []
             table_names = inspector.get_table_names()
-            
+
             for table_name in table_names:
-                # Get columns
                 columns_info = inspector.get_columns(table_name)
                 pk_constraint = inspector.get_pk_constraint(table_name)
                 pk_columns = set(pk_constraint.get('constrained_columns', []))
-                
+
                 columns = []
                 for col in columns_info:
-                    columns.append(ColumnDef(
-                        name=col['name'],
-                        type=str(col['type']),
-                        is_pk=col['name'] in pk_columns,
-                        is_nullable=col.get('nullable', True),
-                        default=str(col.get('default')) if col.get('default') is not None else None
-                    ))
-                
-                # Get foreign keys
+                    columns.append(
+                        ColumnDef(
+                            name=col['name'],
+                            type=str(col['type']),
+                            is_pk=col['name'] in pk_columns,
+                            is_nullable=col.get('nullable', True),
+                            default=(
+                                str(col.get('default'))
+                                if col.get('default') is not None
+                                else None
+                            )
+                        )
+                    )
+
                 fk_info = inspector.get_foreign_keys(table_name)
                 foreign_keys = []
                 for fk in fk_info:
-                    if fk.get('constrained_columns') and fk.get('referred_columns'):
+                    if (
+                        fk.get('constrained_columns') and
+                        fk.get('referred_columns')
+                    ):
                         for i, col in enumerate(fk['constrained_columns']):
-                            foreign_keys.append(ForeignKeyDef(
-                                column=col,
-                                ref_table=fk['referred_table'],
-                                ref_column=fk['referred_columns'][i] if i < len(fk['referred_columns']) else fk['referred_columns'][0]
-                            ))
-                
-                # Get indexes
+                            foreign_keys.append(
+                                ForeignKeyDef(
+                                    column=col,
+                                    ref_table=fk['referred_table'],
+                                    ref_column=(
+                                        fk['referred_columns'][i]
+                                        if i < len(fk['referred_columns'])
+                                        else fk['referred_columns'][0]
+                                    )
+                                )
+                            )
+
                 index_info = inspector.get_indexes(table_name)
                 indexes = []
                 for idx in index_info:
@@ -227,52 +195,73 @@ class DatabaseInspectorService:
                         column_names=idx.get('column_names', []),
                         unique=idx.get('unique', False)
                     ))
-                
-                # Get row count and sample data
+
                 row_count = None
                 sample_data = []
-                sample_size = 50  # Default sample size, max 500
-                
+                sample_size = 10
+
                 try:
                     with engine.connect() as conn:
-                        # Get row count
-                        result = conn.execute(text(f"SELECT COUNT(*) FROM {table_name}"))
+                        result = conn.execute(
+                            text(f"SELECT COUNT(*) FROM {table_name}"))
                         row_count = result.scalar()
-                        
-                        # Fetch sample data with randomization
+
                         if row_count and row_count > 0:
-                            actual_sample_size = min(sample_size, 500, row_count)  # Cap at 500
-                            
-                            # Use appropriate random function based on DB type
+                            actual_sample_size = min(
+                                sample_size, 500, row_count)
+
                             if connection.db_type == DBType.POSTGRES:
                                 random_clause = "ORDER BY RANDOM()"
                             elif connection.db_type == DBType.MYSQL:
                                 random_clause = "ORDER BY RAND()"
                             else:
-                                random_clause = ""  # Fallback to sequential
-                            
-                            sample_query = f"SELECT * FROM {table_name} {random_clause} LIMIT {actual_sample_size}"
+                                random_clause = ""
+
+                            sample_query = (
+                                f"SELECT * FROM {table_name} {random_clause} "
+                                f"LIMIT {actual_sample_size}"
+                            )
                             result = conn.execute(text(sample_query))
-                            
-                            # Convert rows to JSON-safe format
+
                             for row in result.mappings():
                                 row_dict = {}
                                 for key, value in row.items():
-                                    # Serialize to JSON-safe types
+                                    col_type = None
+                                    for col in columns:
+                                        if col.name == key:
+                                            col_type = col.type.upper()
+                                            break
+
+                                    exclude = 'JSON' in col_type or \
+                                              'TEXT' in col_type
+                                    if col_type and exclude:
+                                        row_dict[key] = "[EXCLUDED]"
+                                        continue
+
                                     if value is None:
                                         row_dict[key] = None
-                                    elif isinstance(value, (str, int, float, bool)):
-                                        row_dict[key] = value
+                                    elif isinstance(value, (str, int, float,
+                                                    bool)):
+                                        long_str = isinstance(value, str) and \
+                                                   len(value) > 100
+                                        if long_str:
+                                            row_dict[key] = value[:100] + "..."
+                                        else:
+                                            row_dict[key] = value
                                     else:
-                                        # Convert UUIDs, dates, decimals, etc. to string
-                                        row_dict[key] = str(value)
+                                        str_value = str(value)
+                                        if len(str_value) > 100:
+                                            row_dict[key] = str_value[:100] + \
+                                                "..."
+                                        else:
+                                            row_dict[key] = str_value
                                 sample_data.append(row_dict)
-                            
+
                 except Exception as e:
-                    # If sampling fails, continue without sample data
                     import logging
-                    logging.warning(f"Failed to sample data from {table_name}: {str(e)}")
-                
+                    logging.warning(
+                        f"Failed to sample data from {table_name}: {str(e)}")
+
                 tables.append(TableDef(
                     name=table_name,
                     columns=columns,
@@ -281,23 +270,21 @@ class DatabaseInspectorService:
                     row_count=row_count,
                     sample_data=sample_data
                 ))
-            
+
             schema_def = SchemaDef(tables=tables)
-            
-            # Update meta_schema in database using repository
+
             await connection_repository.update_schema(
                 db=db,
                 connection_id=connection_id,
                 meta_schema=schema_def.to_json_dict()
             )
-            
+
             engine.dispose()
-            
+
             return schema_def
-            
+
         except Exception as e:
             raise Exception(f"Failed to connect to target database: {str(e)}")
 
 
-# Singleton instance
 inspector_service = DatabaseInspectorService()
