@@ -75,6 +75,8 @@ class SimulationExecutor:
                 
                 if is_duplicate_index and "CREATE INDEX" in stmt.upper():
                     logger.warning(f"[EXECUTE] Statement {i+1} skipped: Index already exists")
+                    # Rollback the failed transaction
+                    conn.rollback()
                     # Continue to next statement instead of failing
                     continue
                     
@@ -145,6 +147,8 @@ class SimulationExecutor:
                 
                 if is_duplicate_index and "CREATE INDEX" in stmt.upper():
                     logger.warning(f"[REAL_DB] Statement {i+1} skipped: Index already exists")
+                    # Rollback the failed transaction (required for PostgreSQL)
+                    conn.rollback()
                     # Continue to next statement instead of failing
                     continue
                     

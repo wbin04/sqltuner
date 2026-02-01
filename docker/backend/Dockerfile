@@ -23,7 +23,8 @@ ENV PYTHONPATH=/app
 
 # Copy and make entrypoint script executable
 COPY docker/backend/start.sh /app/start.sh
-RUN chmod +x /app/start.sh
+# Convert line endings from CRLF to LF (Windows to Unix)
+RUN sed -i 's/\r$//' /app/start.sh && chmod +x /app/start.sh
 
 # Expose port
 EXPOSE 8000

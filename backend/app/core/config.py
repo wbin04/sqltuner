@@ -16,8 +16,8 @@ class Settings(BaseSettings):
     
     # Ollama LLM Settings
     OLLAMA_BASE_URL: str = "http://localhost:11434"
-    MODEL_NAME: str = "sqlcoder-thesis"  # For SQL generation
-    MODEL_CHAT_NAME: str = "qwen2.5:3b"  # For SQL explanation
+    MODEL_NAME: str = "qwen2.5:3b"  # For SQL generation and optimization
+    MODEL_CHAT_NAME: str = "qwen2.5:3b"  # For SQL explanation (same model to avoid double calls)
     
     # CORS Settings
     BACKEND_CORS_ORIGINS: list[str] = ["http://localhost:5173"]

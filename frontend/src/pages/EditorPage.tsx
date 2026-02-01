@@ -153,7 +153,7 @@ export function EditorPage() {
           >
             <ArrowLeft className="w-5 h-5 text-text-main-DEFAULT dark:text-text-main-dark" />
           </button>
-          
+
           <div className="flex items-center gap-3">
             <Database className="w-6 h-6 text-primary dark:text-primary-dark" />
             <div>
@@ -214,7 +214,7 @@ export function EditorPage() {
 
           {/* Results Panel (Resizable & Collapsible) */}
           {activeResultSql && (
-            <div 
+            <div
               className={cn(
                 'border-t border-border-DEFAULT dark:border-border-dark',
                 'bg-surface-DEFAULT dark:bg-surface-dark',
@@ -254,7 +254,7 @@ export function EditorPage() {
                   <ChevronDown className="w-4 h-4" />
                 )}
               </button>
-              
+
               {/* Results Content */}
               {!isResultsCollapsed && (
                 <div className="flex-1 p-4 overflow-auto">
@@ -269,7 +269,7 @@ export function EditorPage() {
                         {' | '}
                         Rows: {editorLogic.queryResults.get(activeResultSql)?.data.row_count}
                       </div>
-                      
+
                       {editorLogic.queryResults.get(activeResultSql)?.data.columns.length! > 0 ? (
                         <div className="overflow-x-auto">
                           <table className="min-w-full text-sm border border-border-DEFAULT dark:border-border-dark">
@@ -343,23 +343,16 @@ export function EditorPage() {
           explanation: editorLogic.optimizationResult.explanation,
           stats_comparison: editorLogic.optimizationResult.stats_comparison,
         } : null}
+        originalSql={editorLogic.optimizationResult?.original_sql || ''}
         isAnalyzing={editorLogic.isOptimizing}
         isApplying={false}
         onReplaceQuery={(sql: string) => {
-          // Construct combined script with index recommendation + optimized SQL
-          let script = sql;
-          if (editorLogic.optimizationResult?.index_recommendation) {
-            const indexRec = editorLogic.optimizationResult.index_recommendation.trim();
-            // Check if index recommendation already ends with semicolon
-            const indexWithSemicolon = indexRec.endsWith(';') ? indexRec : `${indexRec};`;
-            script = `${indexWithSemicolon}\n\n${sql}`;
-          }
-          
-          // Display the combined script in chat as assistant message
-          editorLogic.handleApplyOptimization(script);
-          
-          // Auto-run the combined script
-          handleRunQuery(script);
+          // sql already contains the full script (index + optimized SQL) from OptimizationModal
+          // Display the script in chat as assistant message
+          editorLogic.handleApplyOptimization(sql);
+
+          // Auto-run the script
+          handleRunQuery(sql);
         }}
       />
     </div>

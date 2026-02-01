@@ -31,6 +31,7 @@ export interface SQLOptimizeRequest {
   connection_id: string;
   sql_query: string;
   include_explain?: boolean;
+  conversation_id?: string;
 }
 
 export interface SQLOptimizeResponse {

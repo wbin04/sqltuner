@@ -19,7 +19,7 @@ interface UseEditorLogicProps {
 
 export function useEditorLogic({ connectionId }: UseEditorLogicProps) {
   const queryClient = useQueryClient();
-  
+
   // State
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [queryResults, setQueryResults] = useState<Map<string, QueryResult>>(new Map());
@@ -75,12 +75,12 @@ export function useEditorLogic({ connectionId }: UseEditorLogicProps) {
     onSuccess: (response) => {
       // Clear optimistic messages
       setOptimisticMessages([]);
-      
+
       // Update active conversation ID if it was a new conversation
       if (!activeConversationId) {
         setActiveConversationId(response.conversation_id);
       }
-      
+
       // Invalidate queries to refresh data
       queryClient.invalidateQueries({ queryKey: ['conversations', connectionId] });
       queryClient.invalidateQueries({ queryKey: ['messages', response.conversation_id] });
@@ -105,7 +105,7 @@ export function useEditorLogic({ connectionId }: UseEditorLogicProps) {
         data,
         timestamp: Date.now(),
       };
-      
+
       setQueryResults((prev) => {
         const newMap = new Map(prev);
         newMap.set(sql, result);
@@ -121,6 +121,8 @@ export function useEditorLogic({ connectionId }: UseEditorLogicProps) {
         connection_id: connectionId,
         sql_query: sql,
         include_explain: true,
+        // Don't send conversation_id - optimization should be fast and standalone
+        // Results are shown in modal, not saved to conversation history
       }),
     onSuccess: (data) => {
       setOptimizationResult(data);
@@ -154,6 +156,9 @@ export function useEditorLogic({ connectionId }: UseEditorLogicProps) {
 
   const handleOptimize = useCallback(
     async (sql: string) => {
+      // Backend will create conversation if needed
+      // No need to pre-create conversation here - saves 1 network round-trip
+
       await optimizeSqlMutation.mutateAsync(sql);
     },
     [optimizeSqlMutation]
@@ -194,10 +199,10 @@ export function useEditorLogic({ connectionId }: UseEditorLogicProps) {
         sql_generated: combinedScript,
         created_at: new Date().toISOString(),
       };
-      
+
       // Add to applied optimization messages (persists across conversation)
       setAppliedOptimizationMessages((prev) => [...prev, assistantMessage]);
-      
+
       // Close modal
       setIsOptimizationModalOpen(false);
     },
@@ -212,7 +217,7 @@ export function useEditorLogic({ connectionId }: UseEditorLogicProps) {
     queryResults,
     optimizationResult,
     isOptimizationModalOpen,
-    
+
     // Loading states
     isLoadingConversations,
     isLoadingMessages,
@@ -220,13 +225,13 @@ export function useEditorLogic({ connectionId }: UseEditorLogicProps) {
     isExecuting: executeSqlMutation.isPending,
     isOptimizing: optimizeSqlMutation.isPending,
     isExplaining: explainSqlMutation.isPending,
-    
+
     // Error states
     sendMessageError: sendMessageMutation.error,
     executeError: executeSqlMutation.error,
     optimizeError: optimizeSqlMutation.error,
     explainError: explainSqlMutation.error,
-    
+
     // Handlers
     handleSendMessage,
     handleRunQuery,

@@ -1,24 +1,8 @@
 /**
  * OptimizationModal Component
- * Shows SQL optimization results with 3-step workflow:
- * 1. Diagnosis (Bottlenecks)
- * 2. Solution (Diff View)
- * 3. Action (Apply Fix)
+ * Unified Inline Diff View - Developer-focused SQL optimization display
  */
-import { useState } from 'react';
-import { 
-  X, 
-  TrendingDown, 
-  Zap, 
-  CheckCircle, 
-  AlertTriangle, 
-  Copy, 
-  RefreshCw,
-  Database,
-  Code,
-  Sparkles,
-  Clock
-} from 'lucide-react';
+import { X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { OptimizationAnalysis } from '../../types/optimization';
 
@@ -28,7 +12,7 @@ interface OptimizationModalProps {
   analysis: OptimizationAnalysis | null;
   isAnalyzing: boolean;
   isApplying: boolean;
-  onApplyIndex?: () => void;
+  originalSql: string;
   onReplaceQuery?: (sql: string) => void;
   onNotify?: (message: string, type: 'success' | 'error') => void;
 }
@@ -39,53 +23,30 @@ export function OptimizationModal({
   analysis,
   isAnalyzing,
   isApplying,
-  onApplyIndex,
+  originalSql,
   onReplaceQuery,
   onNotify,
 }: OptimizationModalProps) {
-  const [selectedTab, setSelectedTab] = useState<'diff' | 'original' | 'optimized'>('diff');
 
   if (!isOpen) return null;
 
-  // Copy to clipboard helper
-  const copyToClipboard = (text: string, label: string) => {
-    navigator.clipboard.writeText(text);
-    onNotify?.(`${label} copied to clipboard!`, 'success');
-  };
-
-  // Loading skeleton
+  // Loading state
   if (isAnalyzing) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
         <div className={cn(
-          'relative w-full max-w-6xl rounded-2xl shadow-2xl p-8',
+          'relative w-full max-w-5xl rounded-xl shadow-2xl p-8',
           'bg-white dark:bg-surface-dark',
           'border border-gray-200 dark:border-border-dark'
         )}>
           <div className="flex flex-col items-center justify-center py-12">
-            <div className="relative">
-              <RefreshCw className="w-16 h-16 text-primary dark:text-primary-dark animate-spin" />
-              <Sparkles className="w-8 h-8 text-yellow-500 absolute -top-2 -right-2 animate-pulse" />
-            </div>
-            <h3 className="text-xl font-semibold text-text-main-DEFAULT dark:text-text-main-dark mt-6">
+            <div className="w-12 h-12 border-4 border-primary dark:border-primary-dark border-t-transparent rounded-full animate-spin" />
+            <h3 className="text-lg font-semibold text-text-main-DEFAULT dark:text-text-main-dark mt-4">
               AI is analyzing your query...
             </h3>
-            <p className="text-text-muted-DEFAULT dark:text-text-muted-dark mt-2">
+            <p className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark mt-2">
               Examining execution plan and identifying bottlenecks
             </p>
-            <div className="mt-8 space-y-3 w-full max-w-md">
-              {['Analyzing query structure', 'Checking indexes', 'Generating recommendations'].map((step, idx) => (
-                <div key={idx} className="flex items-center gap-3">
-                  <div className={cn(
-                    'w-2 h-2 rounded-full',
-                    idx === 0 ? 'bg-primary dark:bg-primary-dark animate-pulse' : 'bg-gray-300 dark:bg-gray-600'
-                  )} />
-                  <span className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark">
-                    {step}
-                  </span>
-                </div>
-              ))}
-            </div>
           </div>
         </div>
       </div>
@@ -94,384 +55,246 @@ export function OptimizationModal({
 
   if (!analysis) return null;
 
+  // Construct modified code with index recommendation
+  const modifiedCode = analysis.index_recommendation
+    ? `-- AI Suggested Index\n${analysis.index_recommendation.trim().replace(/;+$/, '')};\n\n${analysis.optimized_sql}`
+    : analysis.optimized_sql;
+
+  // Check if there are actual differences
+  const hasDifferences = originalSql.trim() !== modifiedCode.trim();
+
+  // Calculate improvement stats
+  const stats = analysis.stats_comparison;
+  const improvement = stats
+    ? `📉 Cost: ${stats.old_cost.toFixed(2)} → ${stats.new_cost.toFixed(2)} (${stats.improvement_percent > 0 ? '-' : '+'}${Math.abs(stats.improvement_percent)}%)`
+    : '';
+
+  // Determine badge color based on improvement
+  // Positive improvement_percent = better (green), Negative = worse (red)
+  const improvementColor = stats
+    ? stats.improvement_percent > 0
+      ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300 border border-green-300 dark:border-green-700'
+      : stats.improvement_percent < 0
+        ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 border border-red-300 dark:border-red-700'
+        : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 border border-gray-300 dark:border-gray-600'
+    : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 border border-gray-300 dark:border-gray-600';
+
+  // Apply fix handler
+  const handleApplyFix = () => {
+    if (onReplaceQuery) {
+      onReplaceQuery(modifiedCode);
+      onNotify?.('Optimization applied successfully!', 'success');
+      onClose();
+    }
+  };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 dark:bg-black/50 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
       <div className={cn(
-        'relative w-full max-w-6xl max-h-[90vh] rounded-2xl shadow-2xl overflow-hidden',
+        'relative w-full max-w-5xl max-h-[85vh] rounded-xl shadow-2xl overflow-hidden',
         'bg-white dark:bg-surface-dark',
-        'border border-gray-200 dark:border-border-dark'
+        'border border-gray-200 dark:border-border-dark',
+        'flex flex-col'
       )}>
-        {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-border-dark bg-gradient-to-r from-primary/5 to-secondary/5 dark:from-primary-dark/5 dark:to-secondary-dark/5">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary to-secondary dark:from-primary-dark dark:to-secondary-dark flex items-center justify-center">
-              <Zap className="w-6 h-6 text-white" />
-            </div>
-            <div>
-              <h2 className="text-2xl font-bold text-text-main-DEFAULT dark:text-text-main-dark">
-                Query Optimization Analysis
-              </h2>
-              <p className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark">
-                AI-powered performance improvement recommendations
-              </p>
-            </div>
+        {/* Minimalist Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-border-dark bg-surface-highlight-DEFAULT/30 dark:bg-surface-highlight-dark/30">
+          <div className="flex items-center gap-4">
+            <h2 className="text-lg font-bold text-text-main-DEFAULT dark:text-text-main-dark">
+              Optimization Analysis
+            </h2>
+            {stats && (
+              <span className={cn(
+                'px-3 py-1 rounded-full text-xs font-semibold',
+                improvementColor
+              )}>
+                {improvement}
+              </span>
+            )}
           </div>
           <button
             onClick={onClose}
-            className="p-2 rounded-lg hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark transition-colors"
+            className="p-1.5 rounded-lg hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark transition-colors"
           >
-            <X className="w-5 h-5" />
+            <X className="w-5 h-5 text-text-muted-DEFAULT dark:text-text-muted-dark" />
           </button>
         </div>
 
-        {/* Content */}
-        <div className="overflow-y-auto max-h-[calc(90vh-12rem)]">
-          
-          {/* SECTION A: DIAGNOSIS - Performance Stats & Bottlenecks */}
-          <div className="p-6 border-b border-gray-200 dark:border-border-dark bg-surface-highlight-DEFAULT/30 dark:bg-surface-highlight-dark/30">
-            <div className="flex items-center gap-2 mb-4">
-              <AlertTriangle className="w-5 h-5 text-orange-600 dark:text-orange-400" />
-              <h3 className="text-lg font-semibold text-text-main-DEFAULT dark:text-text-main-dark">
-                Step 1: Diagnosis
-              </h3>
-            </div>
-
-            {/* Performance Metrics */}
-            {analysis.stats_comparison && (
-              <div className="grid grid-cols-3 gap-4 mb-6">
-                <div className={cn(
-                  'p-4 rounded-xl',
-                  'bg-blue-50 dark:bg-blue-900/20',
-                  'border border-blue-200 dark:border-blue-800'
-                )}>
-                  <div className="flex items-center gap-2 mb-1">
-                    <Clock className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                    <span className="text-xs font-medium text-blue-900 dark:text-blue-300">
-                      Original Cost
-                    </span>
-                  </div>
-                  <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                    {analysis.stats_comparison.old_cost.toFixed(2)}
-                  </p>
-                </div>
-                
-                <div className={cn(
-                  'p-4 rounded-xl',
-                  'bg-green-50 dark:bg-green-900/20',
-                  'border border-green-200 dark:border-green-800'
-                )}>
-                  <div className="flex items-center gap-2 mb-1">
-                    <TrendingDown className="w-4 h-4 text-green-600 dark:text-green-400" />
-                    <span className="text-xs font-medium text-green-900 dark:text-green-300">
-                      Optimized Cost
-                    </span>
-                  </div>
-                  <p className="text-2xl font-bold text-green-600 dark:text-green-400">
-                    {analysis.stats_comparison.new_cost.toFixed(2)}
-                  </p>
-                </div>
-                
-                <div className={cn(
-                  'p-4 rounded-xl',
-                  'bg-purple-50 dark:bg-purple-900/20',
-                  'border border-purple-200 dark:border-purple-800'
-                )}>
-                  <div className="flex items-center gap-2 mb-1">
-                    <Zap className="w-4 h-4 text-purple-600 dark:text-purple-400" />
-                    <span className="text-xs font-medium text-purple-900 dark:text-purple-300">
-                      Improvement
-                    </span>
-                  </div>
-                  <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">
-                    {analysis.stats_comparison.improvement_percent}%
-                  </p>
-                </div>
+        {/* DiffEditor - Core Component */}
+        <div className="flex-1 overflow-hidden" style={{ minHeight: '400px' }}>
+          {!hasDifferences ? (
+            <div className="flex items-center justify-center h-full p-8">
+              <div className="text-center max-w-md">
+                <div className="text-4xl mb-4">✨</div>
+                <h3 className="text-lg font-semibold text-text-main-DEFAULT dark:text-text-main-dark mb-2">
+                  No Changes Needed
+                </h3>
+                <p className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark">
+                  The optimized query is identical to the original. Your query is already well-optimized!
+                </p>
               </div>
-            )}
+            </div>
+          ) : !originalSql || !modifiedCode ? (
+            <div className="flex items-center justify-center h-full p-8">
+              <div className="text-center max-w-md">
+                <div className="text-4xl mb-4">⚠️</div>
+                <h3 className="text-lg font-semibold text-text-main-DEFAULT dark:text-text-main-dark mb-2">
+                  Missing Data
+                </h3>
+                <p className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark">
+                  Unable to display diff: SQL data is missing.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="h-full overflow-auto bg-surface-DEFAULT dark:bg-surface-dark">
+              <div className="font-mono text-sm">
+                {/* Intelligent Inline Diff View */}
+                {(() => {
+                  const originalLines = originalSql.split('\n');
+                  const modifiedLines = modifiedCode.split('\n');
 
-            {/* Bottlenecks */}
-            {analysis.bottlenecks && analysis.bottlenecks.length > 0 && (
-              <div>
-                <h4 className="text-sm font-semibold text-text-main-DEFAULT dark:text-text-main-dark mb-3">
-                  Detected Performance Bottlenecks
-                </h4>
-                <div className="flex flex-wrap gap-2">
-                  {analysis.bottlenecks.map((bottleneck, idx) => (
-                    <span
+                  // Build a simple line-by-line diff
+                  const diffLines: Array<{ type: 'removed' | 'added' | 'unchanged'; content: string; lineNum?: number }> = [];
+
+                  // Find common prefix (unchanged lines at the start)
+                  let commonPrefixLength = 0;
+                  while (
+                    commonPrefixLength < originalLines.length &&
+                    commonPrefixLength < modifiedLines.length &&
+                    originalLines[commonPrefixLength] === modifiedLines[commonPrefixLength]
+                  ) {
+                    commonPrefixLength++;
+                  }
+
+                  // Find common suffix (unchanged lines at the end)
+                  let commonSuffixLength = 0;
+                  while (
+                    commonSuffixLength < (originalLines.length - commonPrefixLength) &&
+                    commonSuffixLength < (modifiedLines.length - commonPrefixLength) &&
+                    originalLines[originalLines.length - 1 - commonSuffixLength] === 
+                    modifiedLines[modifiedLines.length - 1 - commonSuffixLength]
+                  ) {
+                    commonSuffixLength++;
+                  }
+
+                  // Add unchanged prefix
+                  for (let i = 0; i < commonPrefixLength; i++) {
+                    diffLines.push({ 
+                      type: 'unchanged', 
+                      content: originalLines[i], 
+                      lineNum: i + 1 
+                    });
+                  }
+
+                  // Add removed lines (from original, not in common parts)
+                  for (let i = commonPrefixLength; i < originalLines.length - commonSuffixLength; i++) {
+                    diffLines.push({ 
+                      type: 'removed', 
+                      content: originalLines[i], 
+                      lineNum: i + 1 
+                    });
+                  }
+
+                  // Add added lines (from modified, not in common parts)
+                  for (let i = commonPrefixLength; i < modifiedLines.length - commonSuffixLength; i++) {
+                    diffLines.push({ 
+                      type: 'added', 
+                      content: modifiedLines[i], 
+                      lineNum: i + 1 
+                    });
+                  }
+
+                  // Add unchanged suffix
+                  const suffixStartOrig = originalLines.length - commonSuffixLength;
+                  for (let i = 0; i < commonSuffixLength; i++) {
+                    diffLines.push({ 
+                      type: 'unchanged', 
+                      content: originalLines[suffixStartOrig + i], 
+                      lineNum: suffixStartOrig + i + 1 
+                    });
+                  }
+
+                  return diffLines.map((line, idx) => (
+                    <div
                       key={idx}
                       className={cn(
-                        'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium',
-                        'bg-red-100 dark:bg-red-900/30',
-                        'text-red-800 dark:text-red-200',
-                        'border border-red-300 dark:border-red-700'
+                        'flex items-start px-4 py-1 leading-relaxed',
+                        line.type === 'removed' && 'bg-red-50 dark:bg-red-900/20 text-red-900 dark:text-red-200',
+                        line.type === 'added' && 'bg-green-50 dark:bg-green-900/20 text-green-900 dark:text-green-200',
+                        line.type === 'unchanged' && 'text-text-main-DEFAULT dark:text-text-main-dark'
                       )}
                     >
-                      <AlertTriangle className="w-3.5 h-3.5" />
-                      {bottleneck}
-                    </span>
-                  ))}
-                </div>
+                      {/* Line number */}
+                      <span className={cn(
+                        'inline-block w-12 flex-shrink-0 text-right mr-4 select-none opacity-50 text-xs',
+                        line.type === 'removed' && 'text-red-700 dark:text-red-400',
+                        line.type === 'added' && 'text-green-700 dark:text-green-400',
+                        line.type === 'unchanged' && 'text-text-muted-DEFAULT dark:text-text-muted-dark'
+                      )}>
+                        {line.type !== 'unchanged' ? line.lineNum || '' : ''}
+                      </span>
+
+                      {/* Diff marker */}
+                      <span className="inline-block w-4 flex-shrink-0 mr-2 font-bold">
+                        {line.type === 'removed' ? '−' : line.type === 'added' ? '+' : ' '}
+                      </span>
+
+                      {/* Code content */}
+                      <span className="flex-1 whitespace-pre-wrap break-all">
+                        {line.content || ' '}
+                      </span>
+                    </div>
+                  ));
+                })()}
               </div>
-            )}
-
-            {/* Explanation */}
-            <div className="mt-6 p-4 rounded-lg bg-white dark:bg-surface-dark border border-gray-200 dark:border-border-dark">
-              <h4 className="text-sm font-semibold text-text-main-DEFAULT dark:text-text-main-dark mb-2 flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-yellow-600 dark:text-yellow-400" />
-                AI Analysis
-              </h4>
-              <p className="text-sm text-text-main-DEFAULT dark:text-text-main-dark leading-relaxed whitespace-pre-wrap">
-                {analysis.explanation}
-              </p>
-            </div>
-          </div>
-
-          {/* SECTION B: THE SOLUTION - Diff View */}
-          <div className="p-6 border-b border-gray-200 dark:border-border-dark">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <Code className="w-5 h-5 text-primary dark:text-primary-dark" />
-                <h3 className="text-lg font-semibold text-text-main-DEFAULT dark:text-text-main-dark">
-                  Step 2: The Solution
-                </h3>
-              </div>
-              
-              {/* Tab Switcher */}
-              <div className="flex gap-1 p-1 bg-surface-highlight-DEFAULT dark:bg-surface-highlight-dark rounded-lg">
-                <button
-                  onClick={() => setSelectedTab('diff')}
-                  className={cn(
-                    'px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
-                    selectedTab === 'diff'
-                      ? 'bg-white dark:bg-surface-dark text-primary dark:text-primary-dark shadow-sm'
-                      : 'text-text-muted-DEFAULT dark:text-text-muted-dark hover:text-text-main-DEFAULT dark:hover:text-text-main-dark'
-                  )}
-                >
-                  Side-by-Side
-                </button>
-                <button
-                  onClick={() => setSelectedTab('original')}
-                  className={cn(
-                    'px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
-                    selectedTab === 'original'
-                      ? 'bg-white dark:bg-surface-dark text-primary dark:text-primary-dark shadow-sm'
-                      : 'text-text-muted-DEFAULT dark:text-text-muted-dark hover:text-text-main-DEFAULT dark:hover:text-text-main-dark'
-                  )}
-                >
-                  Original
-                </button>
-                <button
-                  onClick={() => setSelectedTab('optimized')}
-                  className={cn(
-                    'px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
-                    selectedTab === 'optimized'
-                      ? 'bg-white dark:bg-surface-dark text-primary dark:text-primary-dark shadow-sm'
-                      : 'text-text-muted-DEFAULT dark:text-text-muted-dark hover:text-text-main-DEFAULT dark:hover:text-text-main-dark'
-                  )}
-                >
-                  Optimized
-                </button>
-              </div>
-            </div>
-
-            {/* SQL Display */}
-            {selectedTab === 'diff' && (
-              <div className="grid grid-cols-2 gap-4">
-                {/* Original SQL */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-medium text-red-600 dark:text-red-400">
-                      Original Query
-                    </span>
-                    <button
-                      onClick={() => copyToClipboard(analysis.optimized_sql, 'Original SQL')}
-                      className="p-1.5 rounded hover:bg-surface-highlight-DEFAULT dark:hover:bg-surface-highlight-dark"
-                    >
-                      <Copy className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                  <div className={cn(
-                    'rounded-lg overflow-hidden',
-                    'bg-red-50 dark:bg-red-900/10',
-                    'border border-red-200 dark:border-red-800'
-                  )}>
-                    <pre className="p-4 overflow-x-auto text-xs leading-relaxed max-h-96">
-                      <code className="font-mono text-red-900 dark:text-red-200">
-                        {analysis.optimized_sql}
-                      </code>
-                    </pre>
-                  </div>
-                </div>
-
-                {/* Optimized SQL */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-medium text-green-600 dark:text-green-400 flex items-center gap-1">
-                      <CheckCircle className="w-4 h-4" />
-                      Optimized Query
-                    </span>
-                    <button
-                      onClick={() => copyToClipboard(analysis.optimized_sql, 'Optimized SQL')}
-                      className="p-1.5 rounded hover:bg-surface-highlight-DEFAULT dark:hover:bg-surface-highlight-dark"
-                    >
-                      <Copy className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                  <div className={cn(
-                    'rounded-lg overflow-hidden',
-                    'bg-green-50 dark:bg-green-900/10',
-                    'border border-green-200 dark:border-green-800'
-                  )}>
-                    <pre className="p-4 overflow-x-auto text-xs leading-relaxed max-h-96">
-                      <code className="font-mono text-green-900 dark:text-green-200">
-                        {analysis.optimized_sql}
-                      </code>
-                    </pre>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {selectedTab === 'original' && (
-              <div className={cn(
-                'rounded-lg overflow-hidden',
-                'bg-surface-highlight-DEFAULT dark:bg-surface-highlight-dark',
-                'border border-border-DEFAULT dark:border-border-dark'
-              )}>
-                <pre className="p-4 overflow-x-auto text-sm leading-relaxed max-h-96">
-                  <code className="font-mono text-text-main-DEFAULT dark:text-text-main-dark">
-                    {analysis.optimized_sql}
-                  </code>
-                </pre>
-              </div>
-            )}
-
-            {selectedTab === 'optimized' && (
-              <div className={cn(
-                'rounded-lg overflow-hidden',
-                'bg-green-50 dark:bg-green-900/10',
-                'border border-green-200 dark:border-green-800'
-              )}>
-                <pre className="p-4 overflow-x-auto text-sm leading-relaxed max-h-96">
-                  <code className="font-mono text-green-900 dark:text-green-200">
-                    {analysis.optimized_sql}
-                  </code>
-                </pre>
-              </div>
-            )}
-          </div>
-
-          {/* SECTION C: ACTION - Apply Fix */}
-          {analysis.index_recommendation && (
-            <div className="p-6 bg-gradient-to-br from-yellow-50 to-orange-50 dark:from-yellow-900/10 dark:to-orange-900/10">
-              <div className="flex items-center gap-2 mb-4">
-                <Database className="w-5 h-5 text-orange-600 dark:text-orange-400" />
-                <h3 className="text-lg font-semibold text-text-main-DEFAULT dark:text-text-main-dark">
-                  Step 3: Action Required
-                </h3>
-              </div>
-
-              <div className={cn(
-                'p-4 rounded-lg mb-4',
-                'bg-white dark:bg-surface-dark',
-                'border-2 border-orange-300 dark:border-orange-700'
-              )}>
-                <div className="flex items-start justify-between mb-2">
-                  <span className="text-sm font-semibold text-orange-900 dark:text-orange-200">
-                    Recommended Index
-                  </span>
-                  <button
-                    onClick={() => copyToClipboard(analysis.index_recommendation!, 'Index DDL')}
-                    className="p-1.5 rounded hover:bg-surface-highlight-DEFAULT dark:hover:bg-surface-highlight-dark"
-                  >
-                    <Copy className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-                <pre className="p-3 rounded bg-surface-highlight-DEFAULT dark:bg-surface-highlight-dark overflow-x-auto text-xs">
-                  <code className="font-mono text-text-main-DEFAULT dark:text-text-main-dark">
-                    {analysis.index_recommendation}
-                  </code>
-                </pre>
-              </div>
-
-              <div className={cn(
-                'flex items-start gap-3 p-3 rounded-lg mb-4',
-                'bg-yellow-100 dark:bg-yellow-900/20',
-                'border border-yellow-300 dark:border-yellow-700'
-              )}>
-                <AlertTriangle className="w-5 h-5 text-yellow-700 dark:text-yellow-400 flex-shrink-0 mt-0.5" />
-                <div className="text-sm text-yellow-900 dark:text-yellow-200">
-                  <p className="font-medium mb-1">⚠️ Important Notice</p>
-                  <p className="text-xs leading-relaxed">
-                    Creating indexes on large tables may take time and temporarily lock the table. 
-                    It's recommended to apply this during off-peak hours or test in a development environment first.
-                  </p>
-                </div>
-              </div>
-
-              {onApplyIndex && (
-                <button
-                  onClick={onApplyIndex}
-                  disabled={isApplying}
-                  className={cn(
-                    'w-full px-6 py-3 rounded-lg font-semibold transition-all',
-                    'bg-gradient-to-r from-orange-500 to-orange-600',
-                    'hover:from-orange-600 hover:to-orange-700',
-                    'text-white shadow-lg hover:shadow-xl',
-                    'disabled:opacity-50 disabled:cursor-not-allowed',
-                    'flex items-center justify-center gap-2'
-                  )}
-                >
-                  {isApplying ? (
-                    <>
-                      <RefreshCw className="w-5 h-5 animate-spin" />
-                      Applying Index...
-                    </>
-                  ) : (
-                    <>
-                      <Zap className="w-5 h-5" />
-                      ⚡ Apply Index Now
-                    </>
-                  )}
-                </button>
-              )}
             </div>
           )}
         </div>
 
-        {/* Footer */}
-        <div className="flex items-center justify-between gap-3 p-6 border-t border-gray-200 dark:border-border-dark bg-surface-highlight-DEFAULT/50 dark:bg-surface-highlight-dark/50">
-          <button
-            onClick={onClose}
-            className={cn(
-              'px-6 py-2.5 rounded-lg font-medium transition-colors',
-              'border border-border-DEFAULT dark:border-border-dark',
-              'text-text-main-DEFAULT dark:text-text-main-dark',
-              'hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark'
-            )}
-          >
-            Close
-          </button>
-          
-          {onReplaceQuery && (
+        {/* Compact Footer */}
+        <div className="border-t border-gray-200 dark:border-border-dark bg-surface-highlight-DEFAULT/30 dark:bg-surface-highlight-dark/30 px-6 py-4">
+          {/* Optional AI Reasoning */}
+          {analysis.explanation && (
+            <p className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark italic mb-4 line-clamp-2">
+              💡 {analysis.explanation}
+            </p>
+          )}
+
+          {/* Action Buttons */}
+          <div className="flex items-center justify-end gap-3">
             <button
-              onClick={() => {
-                onReplaceQuery(analysis.optimized_sql);
-                onClose();
-              }}
+              onClick={onClose}
               className={cn(
-                'px-6 py-2.5 rounded-lg font-semibold transition-all',
+                'px-5 py-2 rounded-lg font-medium transition-colors',
+                'border border-border-DEFAULT dark:border-border-dark',
+                'text-text-main-DEFAULT dark:text-text-main-dark',
+                'hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark'
+              )}
+            >
+              Dismiss
+            </button>
+            <button
+              onClick={handleApplyFix}
+              disabled={isApplying}
+              className={cn(
+                'px-5 py-2 rounded-lg font-semibold transition-all',
                 'bg-gradient-to-r from-primary to-secondary',
                 'dark:from-primary-dark dark:to-secondary-dark',
-                'text-white shadow-lg hover:shadow-xl',
+                'text-white shadow-md hover:shadow-lg',
+                'disabled:opacity-50 disabled:cursor-not-allowed',
                 'flex items-center gap-2'
               )}
             >
-              <CheckCircle className="w-5 h-5" />
-              Replace Query with Optimized Version
+              {isApplying ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Applying...
+                </>
+              ) : (
+                <>Apply Fix</>
+              )}
             </button>
-          )}
+          </div>
         </div>
       </div>
     </div>
