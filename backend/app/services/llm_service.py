@@ -6,6 +6,12 @@ from sqlglot import exp
 from typing import Optional, Dict, Any, List
 from backend.app.core.config import settings
 from backend.app.core.constants import LLM_REQUEST_TIMEOUT
+from backend.app.core.prompts import (
+    SQL_OPTIMIZATION_SYSTEM_PROMPT,
+    SQL_EXPLANATION_SYSTEM_PROMPT,
+    get_sql_optimization_prompt,
+    get_sql_explanation_prompt,
+)
 
 
 class LLMService:
@@ -251,30 +257,10 @@ class LLMService:
         schema_text = f"\nRelevant Schema (Only tables used in query):\n{filtered_schema}" if filtered_schema else ""
         
         # --- STEP B: JSON PROMPTING FOR QWEN MODEL ---
-        # Use JSON format for structured output
-        system_prompt = """You are a PostgreSQL Performance Expert. Output STRICT JSON only.
-
-### LOGIC RULES:
-1. **Analyze Existing Indexes:** Check the "indexes" list in the schema.
-2. **Identify Missing Indexes:** If a column is used in `WHERE`, `JOIN`, or `ORDER BY` but is NOT in the "indexes" list, you MUST suggest a new index.
-3. **Primary Key Rule:** An index on `id` (Primary Key) DOES NOT help when searching by other columns like `email`, `status`, or `name`.
-4. **Output Format:** Return JSON with `optimized_sql`, `index_suggestion`, and `explanation`.
-
-### EXAMPLES:
-User: SELECT * FROM users WHERE email = 'abc@gmail.com'
-Schema: Table users(id PK, email) [Indexes: users_pkey(id)]
-Assistant: {
-  "optimized_sql": "SELECT * FROM users WHERE email = 'abc@gmail.com'",
-  "index_suggestion": "CREATE INDEX idx_users_email ON users (email);",
-  "explanation": "Filtering by 'email' causes a sequential scan because existing index is only on 'id'."
-}
-"""
+        # Use prompts from centralized prompts.py
+        system_prompt = SQL_OPTIMIZATION_SYSTEM_PROMPT
         
-        user_prompt = f"""Input SQL: {sql_query}
-Relevant Schema: {schema_text}
-
-Task: Analyze if the columns in the WHERE clause are indexed.
-Response (JSON):"""
+        user_prompt = get_sql_optimization_prompt(sql_query, schema_text)
         
         # --- STEP C: JSON RESPONSE PARSING ---
         # Enable json_mode for faster, structured output (matches test_model.py)
@@ -343,20 +329,8 @@ Response (JSON):"""
         Returns:
             Human-readable explanation
         """
-        prompt = f"""### Instructions:
-You are a Database Expert.
-Your task is to explain the meaning and logic of the following SQL query in clear, simple language.
-
-### Requirements:
-1. Provide a concise explanation that is easy to understand for non-technical users.
-2. DO NOT rewrite or return any SQL code.
-3. Only return the explanation text.
-
-### SQL Query to Explain:
-{sql_query}
-
-### Explanation:
-"""
+        # Use prompts from centralized prompts.py
+        prompt = get_sql_explanation_prompt(sql_query)
         
         return await self._call_ollama(
             model=self.chat_model,  # Use chat model (qwen2.5:3b)

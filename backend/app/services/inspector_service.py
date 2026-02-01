@@ -1,12 +1,12 @@
 from sqlalchemy import inspect, text, create_engine
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 from typing import Dict, List, Any, Optional
 from uuid import UUID
 
 from backend.app.models.models import DBConnection, DBType
 from backend.app.schemas.schema_def import SchemaDef, TableDef, ColumnDef, ForeignKeyDef, IndexDef
 from backend.app.core.security import decrypt_password
+from backend.app.repositories.connection_repository import connection_repository
 
 
 class DatabaseInspectorService:
@@ -157,11 +157,8 @@ class DatabaseInspectorService:
             ValueError: If connection not found or is a simulation
             Exception: If unable to connect to target database
         """
-        # Fetch connection details
-        result = await db.execute(
-            select(DBConnection).where(DBConnection.id == connection_id)
-        )
-        connection = result.scalar_one_or_none()
+        # Fetch connection details using repository
+        connection = await connection_repository.get(db, id=connection_id)
         
         if not connection:
             raise ValueError(f"Connection {connection_id} not found")
@@ -287,10 +284,12 @@ class DatabaseInspectorService:
             
             schema_def = SchemaDef(tables=tables)
             
-            # Update meta_schema in database
-            connection.meta_schema = schema_def.to_json_dict()
-            await db.commit()
-            await db.refresh(connection)
+            # Update meta_schema in database using repository
+            await connection_repository.update_schema(
+                db=db,
+                connection_id=connection_id,
+                meta_schema=schema_def.to_json_dict()
+            )
             
             engine.dispose()
             

@@ -8,10 +8,10 @@ from sqlalchemy import create_engine, inspect, MetaData
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 
 from backend.app.models.models import DBConnection, DBType
 from backend.app.core.security import decrypt_password
+from backend.app.repositories.connection_repository import connection_repository
 import logging
 
 logger = logging.getLogger(__name__)
@@ -192,11 +192,8 @@ class SchemaService:
             SQLAlchemyError: If database connection fails
         """
         try:
-            # Retrieve connection from database
-            result = await db.execute(
-                select(DBConnection).where(DBConnection.id == connection_id)
-            )
-            connection = result.scalar_one_or_none()
+            # Retrieve connection from database using repository
+            connection = await connection_repository.get(db, id=connection_id)
             
             if not connection:
                 raise ValueError(f"Database connection with ID {connection_id} not found")
@@ -298,10 +295,8 @@ class SchemaService:
         Returns:
             Cached schema dict or None if not cached
         """
-        result = await db.execute(
-            select(DBConnection).where(DBConnection.id == connection_id)
-        )
-        connection = result.scalar_one_or_none()
+        # Use repository to fetch connection
+        connection = await connection_repository.get(db, id=connection_id)
         
         if not connection:
             return None

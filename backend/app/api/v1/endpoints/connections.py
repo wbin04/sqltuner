@@ -5,7 +5,6 @@ Supports both real database connections and virtual simulations
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 from typing import List
 from uuid import UUID
 
@@ -25,6 +24,7 @@ from backend.app.services.schema_service import SchemaService
 from backend.app.services.inspector_service import inspector_service
 from backend.app.services.simulation_service import simulation_service
 from backend.app.api.v1.endpoints.auth import get_current_user
+from backend.app.repositories.connection_repository import connection_repository
 
 router = APIRouter()
 
@@ -56,22 +56,20 @@ async def create_connection(
         # Simulation - no credentials needed
         db_password = None
     
-    # Create connection object
-    db_connection = DBConnection(
-        user_id=user_id,
-        name=connection_data.name,
-        host=connection_data.host,
-        port=connection_data.port,
-        username=connection_data.username,
-        db_password=db_password,
-        db_name=connection_data.db_name,
-        db_type=connection_data.db_type,
-        meta_schema={}  # Initialize empty schema
-    )
+    # Create connection object using repository
+    connection_dict = {
+        "user_id": user_id,
+        "name": connection_data.name,
+        "host": connection_data.host,
+        "port": connection_data.port,
+        "username": connection_data.username,
+        "db_password": db_password,
+        "db_name": connection_data.db_name,
+        "db_type": connection_data.db_type,
+        "meta_schema": {}  # Initialize empty schema
+    }
     
-    db.add(db_connection)
-    await db.commit()
-    await db.refresh(db_connection)
+    db_connection = await connection_repository.create(db, obj_in=connection_dict)
     
     return db_connection
 
@@ -86,13 +84,12 @@ async def list_connections(
     """
     Get list of database connections for current user
     """
-    result = await db.execute(
-        select(DBConnection)
-        .where(DBConnection.user_id == current_user.id)
-        .offset(skip)
-        .limit(limit)
+    connections = await connection_repository.get_by_user(
+        db=db,
+        user_id=current_user.id,
+        skip=skip,
+        limit=limit
     )
-    connections = result.scalars().all()
     return connections
 
 
@@ -105,12 +102,11 @@ async def get_connection(
     """
     Get a specific database connection with cached schema
     """
-    result = await db.execute(
-        select(DBConnection)
-        .where(DBConnection.id == connection_id)
-        .where(DBConnection.user_id == current_user.id)
+    connection = await connection_repository.get_by_user_and_id(
+        db=db,
+        user_id=current_user.id,
+        connection_id=connection_id
     )
-    connection = result.scalar_one_or_none()
     
     if not connection:
         raise HTTPException(
@@ -131,12 +127,11 @@ async def update_connection(
     """
     Update a database connection
     """
-    result = await db.execute(
-        select(DBConnection)
-        .where(DBConnection.id == connection_id)
-        .where(DBConnection.user_id == current_user.id)
+    connection = await connection_repository.get_by_user_and_id(
+        db=db,
+        user_id=current_user.id,
+        connection_id=connection_id
     )
-    connection = result.scalar_one_or_none()
     
     if not connection:
         raise HTTPException(
@@ -151,13 +146,13 @@ async def update_connection(
     if "password" in update_data:
         update_data["db_password"] = encrypt_password(update_data.pop("password"))
     
-    for field, value in update_data.items():
-        setattr(connection, field, value)
+    updated_connection = await connection_repository.update(
+        db=db,
+        db_obj=connection,
+        obj_in=update_data
+    )
     
-    await db.commit()
-    await db.refresh(connection)
-    
-    return connection
+    return updated_connection
 
 
 @router.delete("/{connection_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -169,21 +164,17 @@ async def delete_connection(
     """
     Delete a database connection
     """
-    result = await db.execute(
-        select(DBConnection)
-        .where(DBConnection.id == connection_id)
-        .where(DBConnection.user_id == current_user.id)
+    deleted = await connection_repository.delete_by_user(
+        db=db,
+        user_id=current_user.id,
+        connection_id=connection_id
     )
-    connection = result.scalar_one_or_none()
     
-    if not connection:
+    if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Connection with ID {connection_id} not found"
         )
-    
-    await db.delete(connection)
-    await db.commit()
 
 
 @router.post("/{connection_id}/sync", response_model=SchemaSyncResponse)
@@ -205,13 +196,12 @@ async def sync_connection_schema(
     Only works for real database connections (not simulations).
     The process is read-only and does not fetch table data.
     """
-    # Check if connection exists
-    result = await db.execute(
-        select(DBConnection)
-        .where(DBConnection.id == connection_id)
-        .where(DBConnection.user_id == current_user.id)
+    # Check if connection exists using repository
+    connection = await connection_repository.get_by_user_and_id(
+        db=db,
+        user_id=current_user.id,
+        connection_id=connection_id
     )
-    connection = result.scalar_one_or_none()
     
     if not connection:
         raise HTTPException(
@@ -252,12 +242,11 @@ async def get_connection_schema(
     Get cached schema metadata for a connection
     Returns 404 if schema is not cached yet
     """
-    result = await db.execute(
-        select(DBConnection)
-        .where(DBConnection.id == connection_id)
-        .where(DBConnection.user_id == current_user.id)
+    connection = await connection_repository.get_by_user_and_id(
+        db=db,
+        user_id=current_user.id,
+        connection_id=connection_id
     )
-    connection = result.scalar_one_or_none()
     
     if not connection:
         raise HTTPException(
@@ -289,13 +278,12 @@ async def update_connection_schema(
     
     Request body should contain a complete SchemaDef structure.
     """
-    # Check if connection exists
-    result = await db.execute(
-        select(DBConnection)
-        .where(DBConnection.id == connection_id)
-        .where(DBConnection.user_id == current_user.id)
+    # Check if connection exists using repository
+    connection = await connection_repository.get_by_user_and_id(
+        db=db,
+        user_id=current_user.id,
+        connection_id=connection_id
     )
-    connection = result.scalar_one_or_none()
     
     if not connection:
         raise HTTPException(
@@ -340,12 +328,11 @@ async def get_connection_ddl(
     
     Returns plain text SQL script.
     """
-    result = await db.execute(
-        select(DBConnection)
-        .where(DBConnection.id == connection_id)
-        .where(DBConnection.user_id == current_user.id)
+    connection = await connection_repository.get_by_user_and_id(
+        db=db,
+        user_id=current_user.id,
+        connection_id=connection_id
     )
-    connection = result.scalar_one_or_none()
     
     if not connection:
         raise HTTPException(
