@@ -219,9 +219,12 @@ class OptimizationService:
                 "explanation": str
             }
         """
+        import time
+        start_total = time.time()
         logger.info(f"[OPTIMIZE] Starting analysis for connection {connection_id}")
         
         # --- STEP 1: Fetch Database Connection ---
+        start_step = time.time()
         result = await db.execute(
             select(DBConnection).where(DBConnection.id == connection_id)
         )
@@ -229,40 +232,12 @@ class OptimizationService:
         
         if not connection:
             raise ValueError(f"Connection {connection_id} not found")
+        logger.info(f"[OPTIMIZE] Step 1 - Fetch connection: {time.time() - start_step:.2f}s")
         
-        # --- STEP 1.2: Check for existing optimization (Cache) ---
-        # Look for existing optimization of the same query in this connection's conversations
-        existing_query = await db.execute(
-            select(QueryLog)
-            .join(Conversation, QueryLog.conversation_id == Conversation.id)
-            .outerjoin(PerformanceAnalysis, QueryLog.id == PerformanceAnalysis.query_log_id)
-            .options(selectinload(QueryLog.performance_analysis))
-            .where(
-                Conversation.connection_id == connection_id,
-                QueryLog.action_type == "optimize",
-                QueryLog.content == sql_query.strip()
-            )
-            .order_by(QueryLog.created_at.desc())
-            .limit(1)
-        )
-        existing_log = existing_query.scalar_one_or_none()
-        
-        if existing_log and existing_log.performance_analysis:
-            logger.info(f"[OPTIMIZE] Found existing optimization result, reusing query_log_id={existing_log.id}")
-            # Return cached result
-            perf = existing_log.performance_analysis
-            return {
-                "original_cost": perf.total_cost,
-                "bottlenecks": [],  # Could parse from explain_plan if needed
-                "optimized_sql": existing_log.sql_generated or sql_query,
-                "index_recommendation": perf.index_recommendation,
-                "explanation": "Previously optimized query (cached result)",
-                "query_log_id": str(existing_log.id)
-            }
-        
-        logger.info("[OPTIMIZE] No existing optimization found, performing new analysis")
-        
-        # --- STEP 1.5: Create Query Log for Persistence ---
+        # --- STEP 1.5: Create Query Log for Persistence (OPTIONAL) ---
+        # Only create conversation/query_log if conversation_id is provided
+        # This saves 2-3 DB operations for standalone optimization requests
+        query_log = None
         if conversation_id:
             # Use existing conversation
             result = await db.execute(
@@ -271,29 +246,24 @@ class OptimizationService:
             conversation = result.scalar_one_or_none()
             if not conversation:
                 raise ValueError(f"Conversation {conversation_id} not found")
-        else:
-            # Create new conversation for optimization
-            conversation = Conversation(
-                connection_id=connection_id,
-                title=f"Optimization Analysis - {sql_query[:50]}..."
+            
+            # Create query log entry
+            query_log = QueryLog(
+                conversation_id=conversation.id,
+                role="assistant",  # System-generated
+                action_type="optimize",
+                content=sql_query,
+                sql_generated=None  # Will be set later if needed
             )
-            db.add(conversation)
+            db.add(query_log)
             await db.flush()  # Get the ID
-        
-        # Create query log entry
-        query_log = QueryLog(
-            conversation_id=conversation.id,
-            role="assistant",  # System-generated
-            action_type="optimize",
-            content=sql_query,
-            sql_generated=None  # Will be set later if needed
-        )
-        db.add(query_log)
-        await db.flush()  # Get the ID
-        
-        logger.info(f"[OPTIMIZE] Created query log {query_log.id} for optimization")
+            
+            logger.info(f"[OPTIMIZE] Created query log {query_log.id} for optimization")
+        else:
+            logger.info("[OPTIMIZE] No conversation_id provided, skipping query log creation")
         
         # --- STEP 2: Get Execution Plan (Real DB Only) ---
+        start_step = time.time()
         explain_result = await OptimizationService._get_explain_plan(connection, sql_query)
         
         if explain_result:
@@ -303,90 +273,36 @@ class OptimizationService:
                 {"plan": explain_plan},
                 connection.db_type
             )
+            logger.info(f"[OPTIMIZE] Step 2 - EXPLAIN: {time.time() - start_step:.2f}s, cost={original_cost}")
         else:
             # Simulation mode or EXPLAIN failed
             explain_plan = None
             original_cost = None
             bottlenecks = []
+            logger.info(f"[OPTIMIZE] Step 2 - EXPLAIN: {time.time() - start_step:.2f}s (skipped)")
         
-        # --- STEP 3: Format Schema for LLM ---
-        schema_text = OptimizationService._format_schema_for_llm(connection.meta_schema or {})
+        # --- STEP 3: Prepare Schema for LLM (As JSON String) ---
+        # Convert meta_schema to JSON string for llm_service.optimize_sql()
+        db_schema_json = json.dumps(connection.meta_schema) if connection.meta_schema else None
         
-        # --- STEP 4: LLM Analysis (The Brain) ---
-        logger.info("[OPTIMIZE] Calling LLM for analysis...")
-        
-        # Build comprehensive prompt
-        prompt = f"""### Role:
-You are a Senior Database Performance Engineer specializing in {connection.db_type.value.upper()} optimization.
-
-### Task:
-Analyze the following SQL query and provide optimization recommendations.
-
-### Original SQL Query:
-{sql_query}
-
-### Database Schema:
-{schema_text}
-"""
-        
-        # Add EXPLAIN plan if available
-        if explain_plan:
-            prompt += f"""
-### EXPLAIN Plan (JSON):
-{json.dumps(explain_plan, indent=2)}
-
-### Detected Bottlenecks:
-{chr(10).join(f"- {b}" for b in bottlenecks) if bottlenecks else "None detected"}
-"""
-        
-        prompt += """
-### Requirements:
-1. **Rewrite the SQL** for better performance (use JOINs instead of subqueries, add appropriate WHERE filters, etc.)
-2. **Suggest specific CREATE INDEX commands** if indexes are missing or could improve performance
-3. **Explain why** the optimized version is better (focus on performance benefits)
-
-### Output Format (JSON ONLY):
-{
-  "optimized_sql": "SELECT ... (rewritten query)",
-  "index_recommendation": "CREATE INDEX idx_name ON table(column); -- Optional comment",
-  "explanation": "Brief explanation of improvements and why they help performance"
-}
-
-IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, no additional text.
-"""
+        # --- STEP 4: LLM Analysis (Using Context Pruning + Guardrails) ---
+        start_step = time.time()
+        logger.info("[OPTIMIZE] Calling LLM with context pruning and hallucination prevention...")
         
         try:
-            llm_response = await llm_service._call_ollama(
-                model=llm_service.chat_model,  # Use chat model instead of coder model
-                prompt=prompt,
-                temperature=0.2
+            # Use the refactored optimize_sql method which implements:
+            # - Context pruning (only relevant tables)
+            # - Post-processing validation (reject hallucinated indexes)
+            # - Zero-Trust architecture
+            llm_result = await llm_service.optimize_sql(
+                sql_query=sql_query,
+                db_schema=db_schema_json
             )
+            logger.info(f"[OPTIMIZE] Step 4 - LLM call: {time.time() - start_step:.2f}s")
             
-            # Parse LLM response (expect JSON)
-            # Clean potential markdown formatting
-            llm_response_clean = llm_response.strip()
-            if llm_response_clean.startswith("```"):
-                # Remove markdown code blocks
-                llm_response_clean = llm_response_clean.split("```")[1]
-                if llm_response_clean.startswith("json"):
-                    llm_response_clean = llm_response_clean[4:]
-                llm_response_clean = llm_response_clean.strip()
-            
-            # Handle empty response
-            if not llm_response_clean:
-                logger.error("[OPTIMIZE] LLM returned empty response")
-                raise ValueError("LLM returned empty response")
-            
-            llm_result = json.loads(llm_response_clean)
-            
-            # Validate that llm_result is a dictionary
-            if not isinstance(llm_result, dict):
-                logger.error(f"[OPTIMIZE] LLM returned non-dict response: {type(llm_result)}")
-                raise ValueError(f"LLM returned unexpected response type: {type(llm_result)}")
-            
-            # Extract and validate fields
+            # Extract fields from llm_result
             optimized_sql = llm_result.get("optimized_sql", sql_query)
-            index_recommendation = llm_result.get("index_recommendation", "")
+            index_recommendation = llm_result.get("index_suggestion", "")  # Note: 'index_suggestion' not 'index_recommendation'
             explanation = llm_result.get("explanation", "No explanation provided")
             
             # Ensure strings are actually strings
@@ -406,45 +322,12 @@ IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, no additional te
                 logger.warning(f"[OPTIMIZE] explanation is not a string: {type(explanation)}")
                 explanation = str(explanation)
             
-        except json.JSONDecodeError as e:
-            logger.error(f"[OPTIMIZE] Failed to parse LLM response as JSON: {str(e)}")
-            logger.error(f"[OPTIMIZE] Raw LLM response: {llm_response}")
-            
-            # Fallback: Use raw response as explanation
-            optimized_sql = sql_query
-            index_recommendation = ""
-            explanation = f"LLM analysis (non-structured): {llm_response}"
-        
         except Exception as e:
-            logger.error(f"[OPTIMIZE] LLM call failed: {str(e)}")
-            # Provide fallback analysis without LLM
-            logger.info("[OPTIMIZE] Using fallback analysis without LLM")
-            
-            optimized_sql = sql_query  # Keep original as fallback
-            index_recommendation = ""
-            explanation = f"Analysis completed using schema inspection only. LLM service unavailable: {str(e)}"
-            
-            # Try to provide basic index suggestions based on schema
-            if connection.meta_schema:
-                tables = connection.meta_schema.get("tables", [])
-                for table in tables:
-                    table_name = table.get("name")
-                    columns = table.get("columns", [])
-                    indexes = table.get("indexes", [])
-                    
-                    # Check for common patterns that might benefit from indexes
-                    has_email = any(col.get("name", "").lower() == "email" for col in columns)
-                    has_user_id = any(col.get("name", "").lower() == "user_id" for col in columns)
-                    
-                    if has_email and not any("email" in str(idx.get("columns", [])) for idx in indexes):
-                        index_recommendation = f"CREATE INDEX idx_{table_name}_email ON {table_name}(email);"
-                        explanation += f"\n\nSuggested index: {index_recommendation} (common pattern for user lookup)"
-                        break
-                    
-                    if has_user_id and not any("user_id" in str(idx.get("columns", [])) for idx in indexes):
-                        index_recommendation = f"CREATE INDEX idx_{table_name}_user_id ON {table_name}(user_id);"
-                        explanation += f"\n\nSuggested index: {index_recommendation} (common foreign key pattern)"
-                        break
+            logger.error(f"[OPTIMIZE] LLM optimization failed: {str(e)}")
+            # Fallback: Keep original query without LLM suggestions
+            optimized_sql = sql_query
+            index_recommendation = None
+            explanation = f"Unable to generate optimization suggestions. Error: {str(e)}"
         
         # --- STEP 5: Build Response ---
         response = {
@@ -455,32 +338,37 @@ IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, no additional te
             "explanation": explanation.strip() if isinstance(explanation, str) else str(explanation).strip()
         }
         
-        # --- STEP 6: Save Performance Analysis to DB ---
-        try:
-            performance_analysis = PerformanceAnalysis(
-                query_log_id=query_log.id,
-                execution_time_ms=None,  # Could be calculated if needed
-                total_cost=original_cost,
-                explain_plan=explain_plan,
-                index_recommendation=response["index_recommendation"],
-                # Note: optimized_sql is saved in query_log.sql_generated if needed
-            )
-            db.add(performance_analysis)
-            await db.commit()
-            await db.refresh(performance_analysis)
-            
-            logger.info(f"[OPTIMIZE] Saved performance analysis {performance_analysis.id}")
-            
-            # Update query_log with optimized SQL
-            query_log.sql_generated = response["optimized_sql"]
-            await db.commit()
-            
-        except Exception as e:
-            logger.error(f"[OPTIMIZE] Failed to save analysis to DB: {str(e)}")
-            # Continue without saving - don't fail the request
+        logger.info(f"[OPTIMIZE] Total analysis time: {time.time() - start_total:.2f}s")
         
-        # Add query_log_id to response
-        response["query_log_id"] = str(query_log.id)
+        # --- STEP 6: Save Performance Analysis to DB (Only if query_log exists) ---
+        if query_log:
+            try:
+                performance_analysis = PerformanceAnalysis(
+                    query_log_id=query_log.id,
+                    execution_time_ms=None,  # Could be calculated if needed
+                    total_cost=original_cost,
+                    explain_plan=explain_plan,
+                    index_recommendation=response["index_recommendation"],
+                    # Note: optimized_sql is saved in query_log.sql_generated if needed
+                )
+                db.add(performance_analysis)
+                await db.commit()
+                await db.refresh(performance_analysis)
+                
+                logger.info(f"[OPTIMIZE] Saved performance analysis {performance_analysis.id}")
+                
+                # Update query_log with optimized SQL
+                query_log.sql_generated = response["optimized_sql"]
+                await db.commit()
+                
+                # Add query_log_id to response
+                response["query_log_id"] = str(query_log.id)
+                
+            except Exception as e:
+                logger.error(f"[OPTIMIZE] Failed to save analysis to DB: {str(e)}")
+                # Continue without saving - don't fail the request
+        else:
+            logger.info("[OPTIMIZE] Skipping DB save (no query_log)")
         
         logger.info("[OPTIMIZE] Analysis complete")
         return response

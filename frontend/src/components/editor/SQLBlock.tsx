@@ -1,6 +1,7 @@
-import { useState } from 'react';
-import { Play, Zap, FileText, Copy, Check } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Play, Zap, FileText, Copy, Check, AlignLeft } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { formatSql } from '../../utils/sqlFormatter';
 
 interface SQLBlockProps {
   sql: string;
@@ -10,13 +11,31 @@ interface SQLBlockProps {
   onExecute?: () => void;
 }
 
-export function SQLBlock({ sql, queryLogId, onExplain, onOptimize, onExecute }: SQLBlockProps) {
+export function SQLBlock({
+  sql,
+  queryLogId,
+  onExplain,
+  onOptimize,
+  onExecute
+}: SQLBlockProps) {
   const [copied, setCopied] = useState(false);
+  const [displaySql, setDisplaySql] = useState(() => formatSql(sql));
+
+  // Auto-format SQL whenever it changes
+  useEffect(() => {
+    const formatted = formatSql(sql);
+    setDisplaySql(formatted);
+  }, [sql]);
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(sql);
+    await navigator.clipboard.writeText(displaySql);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleFormat = () => {
+    const formatted = formatSql(displaySql);
+    setDisplaySql(formatted);
   };
 
   return (
@@ -27,28 +46,41 @@ export function SQLBlock({ sql, queryLogId, onExplain, onOptimize, onExecute }: 
           <FileText className="w-4 h-4 text-primary dark:text-primary-dark" />
           <span className="text-sm font-medium text-text-main-DEFAULT dark:text-text-main-dark">Generated SQL</span>
         </div>
-        <button
-          onClick={handleCopy}
-          className="flex items-center gap-1 px-2 py-1 text-xs text-text-muted-DEFAULT dark:text-text-muted-dark hover:text-text-main-DEFAULT dark:hover:text-text-main-dark transition-colors"
-        >
-          {copied ? (
-            <>
-              <Check className="w-3 h-3" />
-              <span>Copied!</span>
-            </>
-          ) : (
-            <>
-              <Copy className="w-3 h-3" />
-              <span>Copy</span>
-            </>
-          )}
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Format Button */}
+          <button
+            onClick={handleFormat}
+            className="flex items-center gap-1 px-2 py-1 text-xs text-text-muted-DEFAULT dark:text-text-muted-dark hover:text-text-main-DEFAULT dark:hover:text-text-main-dark transition-colors"
+            title="Beautify SQL"
+          >
+            <AlignLeft className="w-3 h-3" />
+            <span>Format</span>
+          </button>
+
+          {/* Copy Button */}
+          <button
+            onClick={handleCopy}
+            className="flex items-center gap-1 px-2 py-1 text-xs text-text-muted-DEFAULT dark:text-text-muted-dark hover:text-text-main-DEFAULT dark:hover:text-text-main-dark transition-colors"
+          >
+            {copied ? (
+              <>
+                <Check className="w-3 h-3" />
+                <span>Copied!</span>
+              </>
+            ) : (
+              <>
+                <Copy className="w-3 h-3" />
+                <span>Copy</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* SQL Code */}
       <div className="p-4 font-mono text-sm overflow-x-auto">
         <pre className="text-text-main-DEFAULT dark:text-text-main-dark">
-          <code>{sql}</code>
+          <code>{displaySql}</code>
         </pre>
       </div>
 
@@ -67,7 +99,7 @@ export function SQLBlock({ sql, queryLogId, onExplain, onOptimize, onExecute }: 
             <span>Run Query</span>
           </button>
         )}
-        
+
         {onExplain && (
           <button
             onClick={() => onExplain(queryLogId)}

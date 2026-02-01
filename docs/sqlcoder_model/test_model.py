@@ -1,73 +1,133 @@
 import requests
 import json
-import time
+import re
 
-# Cấu hình API của Ollama local
-url = "http://localhost:11434/api/generate"
+# --- 1. CẤU HÌNH ---
+# Nên dùng model 3B trở lên cho task suy luận (reasoning) index. 
+# Nếu 1.5B trả lời sai logic, hãy đổi sang qwen2.5:3b
+MODEL_NAME = "qwen2.5:3b"  
+API_URL = "http://localhost:11434/api/generate"
 
-# --- 1. GIẢ LẬP INPUT ---
+# --- 2. DATA ĐẦU VÀO (Như bạn cung cấp) ---
+db_schema = {
+    "tables": [
+        {
+            "name": "users",
+            "columns": [
+                {"name": "id", "data_type": "INTEGER", "primary_key": True},
+                {"name": "email", "data_type": "VARCHAR"},
+                {"name": "password", "data_type": "VARCHAR"},
+                {"name": "role", "data_type": "VARCHAR"},
+                {"name": "created_at", "data_type": "TIMESTAMP"}
+            ],
+            "indexes": [
+                {"name": "users_pkey", "columns": ["id"], "unique": True}
+            ]
+        },
+        {
+            "name": "cart",
+            "columns": [
+                {"name": "id", "data_type": "INTEGER"},
+                {"name": "user_id", "data_type": "INTEGER"},
+                {"name": "total", "data_type": "DECIMAL"}
+            ]
+        }
+    ]
+}
 
-# Định nghĩa Schema Database (Đây là ngữ cảnh bắt buộc)
-# Ví dụ: Một DB quản lý nhân sự đơn giản
-db_schema = """
-CREATE TABLE employees (
-    emp_id INT PRIMARY KEY,
-    first_name VARCHAR(50),
-    last_name VARCHAR(50),
-    department_id INT,
-    salary DECIMAL(10, 2),
-    hire_date DATE
-);
+input_sql = "SELECT * FROM users WHERE email = 'kfc@gmail.com'"
 
-CREATE TABLE departments (
-    dept_id INT PRIMARY KEY,
-    dept_name VARCHAR(50),
-    location VARCHAR(100)
-);
+# --- 3. HÀM XỬ LÝ SCHEMA (Dict -> Text) ---
+def format_schema_to_text(schema_dict):
+    """Chuyển schema từ dict sang text gọn nhẹ để tiết kiệm token cho LLM"""
+    schema_text = []
+    for table in schema_dict.get("tables", []):
+        cols = []
+        for col in table["columns"]:
+            col_str = f"{col['name']} {col['data_type']}"
+            if col.get("primary_key"):
+                col_str += " PK"
+            cols.append(col_str)
+        
+        indexes = []
+        if "indexes" in table:
+            for idx in table["indexes"]:
+                indexes.append(f"INDEX({', '.join(idx['columns'])})")
+        
+        table_desc = f"TABLE {table['name']} ({', '.join(cols)})"
+        if indexes:
+            table_desc += f" [Existing Indexes: {', '.join(indexes)}]"
+        schema_text.append(table_desc)
+    
+    return "\n".join(schema_text)
+
+# --- 4. GỌI OLLAMA ---
+def suggest_optimization(sql, schema_dict):
+    # Chuẩn bị schema dạng text
+    filtered_schema_text = format_schema_to_text(schema_dict)
+    
+    # SYSTEM PROMPT (Của bạn)
+    sys_prompt = """You are a PostgreSQL Performance Expert. Output STRICT JSON only.
+
+### LOGIC RULES:
+1. **Analyze Existing Indexes:** Check the "indexes" list in the schema.
+2. **Identify Missing Indexes:** If a column is used in `WHERE`, `JOIN`, or `ORDER BY` but is NOT in the "indexes" list, you MUST suggest a new index.
+3. **Primary Key Rule:** An index on `id` (Primary Key) DOES NOT help when searching by other columns like `email`, `status`, or `name`.
+4. **Output Format:** Return JSON with `optimized_sql`, `index_suggestion`, and `reasoning`.
+
+### EXAMPLES:
+User: SELECT * FROM users WHERE email = 'abc@gmail.com'
+Schema: Table users(id PK, email) [Indexes: users_pkey(id)]
+Assistant: {
+  "optimized_sql": "SELECT * FROM users WHERE email = 'abc@gmail.com'",
+  "index_suggestion": "CREATE INDEX idx_users_email ON users (email);",
+  "reasoning": "Filtering by 'email' causes a sequential scan because existing index is only on 'id'."
+}
 """
 
-# Câu hỏi của bạn (Tiếng Việt hoặc Anh đều được, nhưng Anh tốt hơn cho base model này)
-# Ta thử tiếng Việt luôn xem khả năng của nó
-question = "Tìm tên và lương của những nhân viên thuộc phòng IT có lương trên 2000"
+    # USER PROMPT (Của bạn)
+    user_prompt = f"""Input SQL: {input_sql}
+Relevant Schema: {format_schema_to_text(db_schema)}
 
-# --- 2. GỌI OLLAMA ---
+Task: Analyze if the columns in the WHERE clause are indexed.
+Response (JSON):"""
 
-payload = {
-    "model": "sqlcoder-thesis",
-    "prompt": question,
-    "system": db_schema,
-    "stream": False,
-    "options": {
-        "num_ctx": 1024,    # Giảm cửa sổ ngữ cảnh (Mặc định là 2048/4096). 
-                            # Schema của bạn ngắn, để 1024 là quá đủ và giúp xử lý đầu vào nhanh hơn.
-        
-        "num_thread": 4,    # Quan trọng: Số luồng CPU sử dụng. 
-                            # Mẹo: Hãy set bằng số nhân VẬT LÝ (Physical Cores) của máy bạn - 1.
-                            # Ví dụ: Chip 4 nhân thì để 3 hoặc 4. Đừng để quá cao sẽ bị chậm đi.
-        
-        "temperature": 0.0  # Giữ nguyên để chính xác
+    payload = {
+        "model": MODEL_NAME,
+        "prompt": user_prompt,
+        "system": sys_prompt,
+        "stream": False,
+        "keep_alive": "60m",
+        "options": {
+            "temperature": 0.1, # Cần chút sáng tạo để viết reasoning nhưng vẫn phải đúng format
+            "num_predict": 512, # Đủ dài cho JSON
+            "top_p": 0.9
+        },
+        "format": "json" # <--- QUAN TRỌNG: Ollama hỗ trợ mode JSON native
     }
-}
-print(f"Đang gửi câu hỏi tới CPU... (Question: {question})")
+
+    print(f"--- Đang phân tích SQL với {MODEL_NAME}... ---")
+    try:
+        response = requests.post(API_URL, json=payload)
+        res_json = response.json()
+        
+        raw_content = res_json.get("response", "")
+        
+        # Parse JSON từ kết quả (đề phòng model trả về markdown block)
+        # Qwen hay bọc trong ```json ... ```
+        clean_json = re.sub(r"```json|```", "", raw_content).strip()
+        
+        return json.loads(clean_json)
+
+    except Exception as e:
+        return {"error": str(e), "raw": raw_content if 'raw_content' in locals() else ""}
+
+# --- 5. CHẠY THỬ ---
+import time
 start_time = time.time()
+result = suggest_optimization(input_sql, db_schema)
+end_time = time.time()
 
-try:
-    response = requests.post(url, json=payload)
-    response_data = response.json()
-    
-    end_time = time.time()
-    
-    # --- 3. KẾT QUẢ ---
-    print("\n" + "="*40)
-    print("KẾT QUẢ SQL SINH RA:")
-    print("="*40)
-    
-    # Lấy phần code SQL từ phản hồi
-    sql_result = response_data.get('response', '')
-    print(sql_result)
-    
-    print("-" * 40)
-    print(f"Thời gian xử lý: {end_time - start_time:.2f} giây")
-
-except Exception as e:
-    print(f"Lỗi: {e}")
+print(f"Time: {end_time - start_time}")
+print("\n=== KẾT QUẢ TỪ MODEL ===")
+print(json.dumps(result, indent=2, ensure_ascii=False))
