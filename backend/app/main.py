@@ -1,10 +1,15 @@
+import asyncio
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.app.core.config import settings
 from backend.app.api.v1.api import api_router
+from backend.app.core.config import settings
 from backend.app.schemas.sql import HealthResponse
 from backend.app.services.llm_service import llm_service
+
+logger = logging.getLogger(__name__)
 
 # Create FastAPI app
 app = FastAPI(
@@ -27,23 +32,31 @@ app.add_middleware(
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
 
+@app.on_event("startup")
+async def startup_event():
+    """Run model warm-up on startup to avoid cold start delays"""
+    logger.info("Running startup tasks...")
+    asyncio.create_task(llm_service.warmup_models())
+    logger.info("Startup tasks initiated")
+
+
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """
     Health check endpoint
-    
+
     Returns:
         - status: API status
         - project_name: Project name
-        - model_name: LLM model name in use
+        - llm_model: LLM model name in use
         - model_available: Whether the model is available in Ollama
     """
     model_available = await llm_service.check_health()
-    
+
     return HealthResponse(
         status="online",
         project_name=settings.PROJECT_NAME,
-        model_name=settings.MODEL_NAME,
+        llm_model=settings.MODEL_NAME,
         model_available=model_available
     )
 

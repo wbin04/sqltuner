@@ -9,6 +9,7 @@ venv/
 
 # Log
 *.log
+frontend/dist/
 
 # Dependency directories
 node_modules/

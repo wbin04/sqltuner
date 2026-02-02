@@ -9,6 +9,7 @@ import {
 import { useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '../lib/utils';
 import { ThemeToggle } from '../components/ui/ThemeToggle';
+import { useAuth } from '../context/AuthContext';
 
 interface MainLayoutProps {
   children: React.ReactNode;
@@ -25,7 +26,6 @@ interface MenuItem {
 const menuItems: MenuItem[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, path: '/' },
   { id: 'workspaces', label: 'Workspaces', icon: Database, path: '/workspaces' },
-  { id: 'optimize', label: 'Optimize Query', icon: Zap, path: '/optimize' },
   { id: 'history', label: 'History', icon: FileText, path: '/history' },
   { id: 'settings', label: 'Settings', icon: Settings, path: '/settings' },
 ];
@@ -33,6 +33,7 @@ const menuItems: MenuItem[] = [
 export function MainLayout({ children, onLogout }: MainLayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   const handleMenuClick = (path: string) => {
     navigate(path);
@@ -69,7 +70,7 @@ export function MainLayout({ children, onLogout }: MainLayoutProps) {
                 onClick={() => handleMenuClick(item.path)}
                 className={cn(
                   'w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200',
-                  'hover:bg-surface-highlight-DEFAULT dark:hover:bg-surface-highlight-dark group',
+                  'hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark group',
                   isActive && 'bg-surface-highlight-DEFAULT dark:bg-surface-highlight-dark border border-primary/30 dark:border-primary-dark/30'
                 )}
               >
@@ -94,11 +95,11 @@ export function MainLayout({ children, onLogout }: MainLayoutProps) {
 
         {/* User Section */}
         <div className="p-4 border-t border-border dark:border-border-dark">
-          <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-surface-highlight-DEFAULT dark:bg-surface-highlight-dark">
+          <div className="flex items-center gap-3 px-3 py-3 rounded-lg bg-slate-200 dark:bg-surface-highlight-dark">
             <ThemeToggle />
             <div className="flex-1">
-              <p className="text-sm font-medium text-text-main-DEFAULT dark:text-text-main-dark">User</p>
-              <p className="text-xs text-text-muted-DEFAULT dark:text-text-muted-dark">user@sqltuner.dev</p>
+              <p className="text-sm font-medium text-text-main-DEFAULT dark:text-text-main-dark">{user?.email?.split('@')[0] || 'user'}</p>
+              <p className="text-xs text-text-muted-DEFAULT dark:text-text-muted-dark">User</p>
             </div>
             <button 
               onClick={onLogout}

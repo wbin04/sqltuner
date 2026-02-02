@@ -1,43 +1,79 @@
-import { useState, useEffect } from 'react';
-import { Routes, Route, Navigate, useNavigate, Outlet } from 'react-router-dom';
+import { useState } from 'react';
+import { Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { ThemeProvider } from './context/ThemeContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { MainLayout } from './layouts/MainLayout';
 import { AdminLayout } from './layouts/AdminLayout';
 import { DashboardHome } from './pages/DashboardHome';
-import { QueryEditor } from './pages/QueryEditor';
 import { LoginPage } from './pages/LoginPage';
+import { WorkspacesPage } from './pages/WorkspacesPage';
+import { EditorPage } from './pages/EditorPage';
+import { HistoryPage } from './pages/HistoryPage';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { FeedbackReview } from './pages/admin/FeedbackReview';
 import { UserManagement } from './pages/admin/UserManagement';
 
 type AdminPage = 'dashboard' | 'users' | 'feedback' | 'connections' | 'settings';
 
-function App() {
+function LoginRoute() {
+  const { isAuthenticated, user } = useAuth();
+  const location = useLocation();
+
+  if (isAuthenticated) {
+    if (location.pathname === '/login') {
+      return <Navigate to={user?.role === 'admin' ? '/admin' : '/workspaces'} replace />;
+    }
+    return null;
+  }
+
+  return <LoginPage />;
+}
+
+function AppContent() {
   const [currentAdminPage, setCurrentAdminPage] = useState<AdminPage>('dashboard');
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    // Check authentication on mount
-    const authStatus = localStorage.getItem('isAuthenticated') === 'true';
-    setIsAuthenticated(authStatus);
-  }, []);
-
-  const handleLogout = () => {
-    localStorage.removeItem('isAuthenticated');
-    localStorage.removeItem('userRole');
-    setIsAuthenticated(false);
-    navigate('/login');
-  };
+  const { isAuthenticated, isLoading, logout, user } = useAuth();
 
   const ProtectedUserLayout = () => {
+    if (isLoading) {
+      return (
+        <div className="flex items-center justify-center h-screen">
+          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-primary"></div>
+        </div>
+      );
+    }
     if (!isAuthenticated) {
       return <Navigate to="/login" replace />;
     }
     return (
-      <MainLayout onLogout={handleLogout}>
+      <MainLayout onLogout={logout}>
         <Outlet />
       </MainLayout>
+    );
+  };
+
+  const ProtectedAdminLayout = () => {
+    if (isLoading) {
+      return (
+        <div className="flex items-center justify-center h-screen">
+          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-primary"></div>
+        </div>
+      );
+    }
+    if (!isAuthenticated) {
+      return <Navigate to="/login" replace />;
+    }
+    // Check if user is admin
+    if (user?.role !== 'admin') {
+      return <Navigate to="/workspaces" replace />;
+    }
+    return (
+      <AdminLayout 
+        currentPage={currentAdminPage} 
+        onNavigate={(page) => setCurrentAdminPage(page as AdminPage)}
+        onLogout={logout}
+      >
+        {renderAdminPage()}
+      </AdminLayout>
     );
   };
 
@@ -67,58 +103,51 @@ function App() {
   };
 
   return (
-    <ThemeProvider>
-      <Routes>
-        <Route path="/login" element={
-          isAuthenticated ? (
-            localStorage.getItem('userRole') === 'admin' 
-              ? <Navigate to="/admin" replace /> 
-              : <Navigate to="/optimize" replace />
-          ) : (
-            <LoginPage onLoginSuccess={() => setIsAuthenticated(true)} />
-          )
-        } />
-        
-        {/* Admin Routes */}
-        <Route path="/admin/*" element={
-          !isAuthenticated ? (
-            <Navigate to="/login" replace />
-          ) : (
-            <AdminLayout 
-              currentPage={currentAdminPage} 
-              onNavigate={(page) => setCurrentAdminPage(page as AdminPage)}
-              onLogout={handleLogout}
-            >
-              {renderAdminPage()}
-            </AdminLayout>
-          )
-        } />
-        
-        {/* User Routes */}
-        <Route element={<ProtectedUserLayout />}>
-          <Route path="/dashboard" element={<DashboardHome />} />
-          <Route path="/workspaces" element={<DashboardHome />} />
-          <Route path="/optimize" element={<QueryEditor />} />
-          <Route path="/history" element={
-            <div className="flex items-center justify-center h-full">
-              <div className="text-center">
-                <h2 className="text-2xl font-bold text-text-main-DEFAULT dark:text-text-main-dark mb-2">History</h2>
-                <p className="text-text-muted-DEFAULT dark:text-text-muted-dark">Coming soon...</p>
-              </div>
+    <Routes>
+      <Route path="/login" element={<LoginRoute />} />
+      
+      {/* Admin Routes */}
+      <Route path="/admin/*" element={<ProtectedAdminLayout />} />
+      
+      {/* User Routes */}
+      <Route element={<ProtectedUserLayout />}>
+        <Route path="/dashboard" element={<DashboardHome />} />
+        <Route path="/workspaces" element={<WorkspacesPage />} />
+        <Route path="/history" element={<HistoryPage />} />
+        <Route path="/settings" element={
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center">
+              <h2 className="text-2xl font-bold text-text-main-DEFAULT dark:text-text-main-dark mb-2">Settings</h2>
+              <p className="text-text-muted-DEFAULT dark:text-text-muted-dark">Coming soon...</p>
             </div>
-          } />
-          <Route path="/settings" element={
-            <div className="flex items-center justify-center h-full">
-              <div className="text-center">
-                <h2 className="text-2xl font-bold text-text-main-DEFAULT dark:text-text-main-dark mb-2">Settings</h2>
-                <p className="text-text-muted-DEFAULT dark:text-text-muted-dark">Coming soon...</p>
-              </div>
-            </div>
-          } />
-        </Route>
+          </div>
+        } />
+      </Route>
 
-        <Route path="/" element={<Navigate to="/optimize" replace />} />
-      </Routes>
+      {/* Editor Route - Outside MainLayout for full-screen experience */}
+      <Route path="/editor/:workspaceId" element={
+        isLoading ? (
+          <div className="flex items-center justify-center h-screen">
+            <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-primary"></div>
+          </div>
+        ) : isAuthenticated ? (
+          <EditorPage />
+        ) : (
+          <Navigate to="/login" replace />
+        )
+      } />
+
+      <Route path="/" element={<Navigate to="/workspaces" replace />} />
+    </Routes>
+  );
+}
+
+function App() {
+  return (
+    <ThemeProvider>
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
     </ThemeProvider>
   );
 }

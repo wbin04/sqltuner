@@ -11,14 +11,14 @@ export default {
       colors: {
         // Semantic colors that work for both light and dark modes
         background: {
-          DEFAULT: '#f8fafc', // Light: slate-50
+          light: '#f8fafc', // Light: slate-50
           dark: '#020617',    // Dark: slate-950
         },
         surface: {
           DEFAULT: '#ffffff',   // Light: white
           dark: '#0F172A',      // Dark: slate-900
           highlight: {
-            DEFAULT: '#f1f5f9', // Light: slate-100
+            light: '#e2e8f0', // Light: slate-200
             dark: '#1E293B',    // Dark: slate-800
           }
         },

@@ -23,6 +23,9 @@ alembic upgrade head || echo "Migration failed or not configured yet"
 # Return to app directory
 cd /app
 
+echo "Seeding initial database data..."
+python -m backend.app.db.init_db || echo "Database seeding failed or already completed"
+
 echo "Starting FastAPI application..."
 # Check if DEV_MODE is enabled
 if [ "${DEV_MODE}" = "true" ]; then
