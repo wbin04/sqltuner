@@ -179,6 +179,7 @@ class StatementExecutor:
                 f"[{self.log_prefix}] Statement {stmt_num} "
                 f"returned {len(rows)} rows"
             )
+            conn.commit()
             return columns, rows
         else:
             conn.commit()

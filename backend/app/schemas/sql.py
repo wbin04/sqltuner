@@ -16,6 +16,10 @@ class ChatCompletionResponse(BaseModel):
     role: str  # "assistant"
     content: str
     sql_generated: Optional[str] = None
+    detected_sql: Optional[str] = Field(
+        None,
+        description="Extracted SQL from user message for action buttons"
+    )
 
 
 class SQLExecuteRequest(BaseModel):
@@ -28,6 +32,18 @@ class SQLExecuteResponse(BaseModel):
     rows: List[Dict[str, Any]]
     execution_time_ms: float
     row_count: int
+    total_rows: int = Field(
+        ...,
+        description="Total number of rows in result set (before truncation)"
+    )
+    truncated: bool = Field(
+        False,
+        description="Whether result set was truncated due to size limit"
+    )
+    max_rows: int = Field(
+        10000,
+        description="Maximum number of rows returned"
+    )
 
 
 class SQLExplainPlanRequest(BaseModel):

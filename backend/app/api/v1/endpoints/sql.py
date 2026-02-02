@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from backend.app.api.v1.endpoints.auth import get_current_user
+from backend.app.core.config import settings
 from backend.app.core.security import decrypt_password
 from backend.app.db.session import get_db
 from backend.app.models.models import DBConnection, DBType, User
@@ -118,16 +119,24 @@ async def execute_sql(
 
             execution_time_ms = (time.time() - start_time) * 1000
 
+            total_rows = result['row_count']
+            rows = result['rows'][:settings.SANDBOX_MAX_ROWS]
+            truncated = total_rows > settings.SANDBOX_MAX_ROWS
+
             logger.info(
-                f"[SANDBOX] Success! Rows: {result['row_count']}, "
+                f"[SANDBOX] Success! Total rows: {total_rows}, "
+                f"Returned: {len(rows)}, Truncated: {truncated}, "
                 f"Time: {execution_time_ms}ms"
             )
 
             return SQLExecuteResponse(
                 columns=result['columns'],
-                rows=result['rows'],
+                rows=rows,
                 execution_time_ms=execution_time_ms,
-                row_count=result['row_count']
+                row_count=len(rows),
+                total_rows=total_rows,
+                truncated=truncated,
+                max_rows=settings.SANDBOX_MAX_ROWS
             )
         except Exception as e:
             error_detail = (
@@ -174,28 +183,42 @@ async def execute_sql(
         logger.info("[LIVE] Running query on real database...")
 
         with engine.connect() as conn:
-            result = simulation_executor.execute_real_db_statements(
+            query_start = time.time()
+            result = simulation_executor.execute_in_real_db(
                 conn, request.sql)
-            columns = result["columns"]
-            rows = result["rows"]
-            row_count = result["row_count"]
+            query_duration = (time.time() - query_start) * 1000
+            logger.info(
+                f"[LIVE] Query executed in {query_duration:.2f}ms"
+            )
 
-            row_count = len(rows) if rows else result["row_count"]
+            result_dict = result.to_dict()
+            columns = result_dict["columns"]
+            all_rows = result_dict["rows"]
+            total_rows = (
+                len(all_rows) if all_rows else result_dict["row_count"]
+            )
+
+            rows = all_rows[:settings.RESULT_MAX_ROWS] if all_rows else []
+            truncated = total_rows > settings.RESULT_MAX_ROWS
 
         execution_time_ms = (time.time() - start_time) * 1000
 
         engine.dispose()
 
         logger.info(
-            f"[LIVE] Success! Retrieved {row_count} rows from real database "
-            f"in {execution_time_ms:.2f}ms"
+            f"[LIVE] Success! Total rows: {total_rows}, "
+            f"Returned: {len(rows)}, Truncated: {truncated}, "
+            f"in {execution_time_ms:.2f}ms (total including connection)"
         )
 
         return SQLExecuteResponse(
             columns=columns,
             rows=rows,
             execution_time_ms=execution_time_ms,
-            row_count=row_count
+            row_count=len(rows),
+            total_rows=total_rows,
+            truncated=truncated,
+            max_rows=settings.RESULT_MAX_ROWS
         )
 
     except Exception as e:

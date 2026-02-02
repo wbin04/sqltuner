@@ -6,9 +6,9 @@ import { FeedbackPanel } from '../feedback/FeedbackPanel';
 
 interface ChatMessageProps {
   message: QueryLog;
-  onExplain?: (queryLogId: string) => void;
-  onOptimize?: (queryLogId: string) => void;
-  onExecute?: () => void;
+  onExplain?: (sql: string) => void;
+  onOptimize?: (sql: string) => void;
+  onExecute?: (sql: string) => void;
   onFeedback?: (queryLogId: string, rating: 0 | 1, correctedSql?: string, comment?: string) => void;
 }
 

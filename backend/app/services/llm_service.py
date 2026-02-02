@@ -186,6 +186,73 @@ class LLMService:
 
         return await self._make_ollama_request(payload, url)
 
+    def _is_sql_query(self, message: str) -> bool:
+        try:
+            clean_message = re.sub(
+                r'```sql\s*|\s*```', '', message, flags=re.IGNORECASE
+            )
+            clean_message = clean_message.strip()
+
+            sqlglot.parse_one(clean_message)
+            logger.info("[INTENT] SQL detected via sqlglot parsing")
+            return True
+        except Exception:
+            pass
+
+        sql_keywords = [
+            'SELECT', 'INSERT', 'UPDATE', 'DELETE',
+            'CREATE', 'ALTER', 'DROP', 'WITH',
+            'TRUNCATE', 'MERGE', 'GRANT', 'REVOKE'
+        ]
+
+        message_upper = message.upper()
+
+        for keyword in sql_keywords:
+            if re.search(rf'\b{keyword}\b', message_upper):
+                logger.info(f"[INTENT] SQL detected via keyword: {keyword}")
+                return True
+
+        logger.info("[INTENT] No SQL detected - treating as general chat")
+        return False
+
+    def _extract_sql_from_message(self, message: str) -> Optional[str]:
+        markdown_pattern = r'```sql\s*(.*?)\s*```'
+        markdown_matches = re.findall(
+            markdown_pattern, message, re.DOTALL | re.IGNORECASE
+        )
+
+        if markdown_matches:
+            for candidate_sql in markdown_matches:
+                candidate_sql = candidate_sql.strip()
+                if self._validate_sql(candidate_sql):
+                    logger.info("[EXTRACT] SQL extracted from markdown block")
+                    return candidate_sql
+
+        sql_pattern = (
+            r'\b(SELECT|WITH|INSERT|UPDATE|DELETE|CREATE|'
+            r'ALTER|DROP|TRUNCATE)\b.*?(?:;|$)'
+        )
+        raw_matches = re.findall(
+            sql_pattern, message, re.DOTALL | re.IGNORECASE
+        )
+
+        if raw_matches:
+            for candidate_sql in raw_matches:
+                candidate_sql = candidate_sql.strip()
+                if self._validate_sql(candidate_sql):
+                    logger.info("[EXTRACT] SQL extracted from raw text")
+                    return candidate_sql
+
+        logger.info("[EXTRACT] No valid SQL found in message")
+        return None
+
+    def _validate_sql(self, sql: str) -> bool:
+        try:
+            sqlglot.parse_one(sql)
+            return True
+        except Exception:
+            return False
+
     def _extract_table_names(self, sql_query: str) -> List[str]:
         try:
             parsed = sqlglot.parse_one(sql_query)
