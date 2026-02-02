@@ -1,64 +1,104 @@
-"""
-Chat API Endpoints
-Implements conversational AI for database queries with schema context
-"""
+import json
+import logging
+import time
+from datetime import datetime
+from functools import lru_cache
+from uuid import UUID, uuid4
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from uuid import UUID, uuid4
-from datetime import datetime
 
-from backend.app.db.session import get_db
-from backend.app.models.models import DBConnection, Conversation, QueryLog, ChatRole, DBType, User
-from backend.app.schemas.sql import ChatCompletionRequest, ChatCompletionResponse
-from backend.app.services.llm_service import llm_service
 from backend.app.api.v1.endpoints.auth import get_current_user
+from backend.app.db.session import get_db
+from backend.app.models.models import (ChatRole, Conversation, DBConnection,
+                                       QueryLog, User)
+from backend.app.schemas.sql import (ChatCompletionRequest,
+                                     ChatCompletionResponse)
+from backend.app.services.llm_service import llm_service
 
 router = APIRouter()
 
+logger = logging.getLogger(__name__)
 
-def format_schema_for_prompt(meta_schema: dict) -> str:
-    """
-    Format meta_schema into a concise text representation for LLM context
-    
-    Args:
-        meta_schema: Schema definition from db_connections.meta_schema
-        
-    Returns:
-        Formatted schema string for system prompt
-    """
+
+@lru_cache(maxsize=128)
+def _cached_format_schema(
+    schema_json: str,
+    limit_tables: int,
+    mentioned_table_names: tuple
+) -> str:
+    meta_schema = json.loads(schema_json)
+    all_tables = meta_schema.get("tables", [])
+
+    mentioned_tables = None
+    if mentioned_table_names:
+        mentioned_tables = [t for t in all_tables
+                            if t.get("name") in mentioned_table_names]
+
+    return format_schema_for_prompt(meta_schema,
+                                    limit_tables,
+                                    mentioned_tables)
+
+
+def extract_mentioned_tables(message: str, all_tables: list) -> list:
+    message_lower = message.lower()
+    mentioned = []
+
+    for table in all_tables:
+        table_name = table.get("name", "").lower()
+        if table_name in message_lower:
+            mentioned.append(table)
+
+    return mentioned
+
+
+def format_schema_for_prompt(
+    meta_schema: dict,
+    limit_tables: int = 10,
+    mentioned_tables: list = None
+) -> str:
     if not meta_schema or "tables" not in meta_schema:
         return "No schema information available."
-    
+
     schema_lines = ["Database Schema:"]
-    tables = meta_schema.get("tables", [])
-    
+    all_tables = meta_schema.get("tables", [])
+
+    if mentioned_tables:
+        tables = mentioned_tables[:limit_tables]
+        if len(mentioned_tables) > limit_tables:
+            schema_lines.append(
+                f"(Showing {limit_tables} of {len(mentioned_tables)}"
+                "relevant tables)")
+    else:
+        tables = all_tables[:limit_tables]
+        if len(all_tables) > limit_tables:
+            schema_lines.append(
+                f"(Showing {limit_tables} of {len(all_tables)} tables)")
+
     for table in tables:
         table_name = table.get("name", "unknown")
         columns = table.get("columns", [])
-        
-        # Table header
+
         schema_lines.append(f"\nTable: {table_name}")
-        
-        # Columns
+
         for col in columns:
             col_name = col.get("name", "unknown")
-            col_type = col.get("data_type", "unknown")
-            nullable = "NULL" if col.get("nullable", True) else "NOT NULL"
-            pk = " PRIMARY KEY" if col.get("primary_key", False) else ""
-            
+            col_type = col.get("type", col.get("data_type", "unknown"))
+            nullable = "NULL" if col.get("is_nullable", True) else "NOT NULL"
+            pk = " PRIMARY KEY" if col.get("is_pk", False) else ""
+
             schema_lines.append(f"  - {col_name}: {col_type} {nullable}{pk}")
-        
-        # Foreign keys
+
         foreign_keys = table.get("foreign_keys", [])
         if foreign_keys:
             schema_lines.append("  Foreign Keys:")
             for fk in foreign_keys:
                 fk_col = fk.get("column", "")
-                ref_table = fk.get("referenced_table", "")
-                ref_col = fk.get("referenced_column", "")
+                ref_table = fk.get("ref_table", fk.get("referenced_table", ""))
+                ref_col = fk.get("ref_column", fk.get("referenced_column", ""))
                 schema_lines.append(f"    - {fk_col} -> {ref_table}.{ref_col}")
-    
+
     return "\n".join(schema_lines)
 
 
@@ -68,18 +108,6 @@ async def chat_completion(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Generate AI chat completion with database schema context
-    
-    Flow:
-    1. Fetch connection and meta_schema
-    2. Create or fetch conversation
-    3. Build system prompt with schema context
-    4. Call LLM service
-    5. Save user message and AI response to query_logs
-    6. Return AI response
-    """
-    # 1. Fetch connection and validate ownership
     result = await db.execute(
         select(DBConnection).where(
             DBConnection.id == request.connection_id,
@@ -87,18 +115,16 @@ async def chat_completion(
         )
     )
     connection = result.scalar_one_or_none()
-    
+
     if not connection:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Connection not found or access denied"
         )
-    
-    # 2. Get or create conversation
+
     conversation_id = request.conversation_id
-    
+
     if conversation_id:
-        # Fetch existing conversation
         result = await db.execute(
             select(Conversation).where(
                 Conversation.id == conversation_id,
@@ -106,55 +132,82 @@ async def chat_completion(
             )
         )
         conversation = result.scalar_one_or_none()
-        
+
         if not conversation:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Conversation not found"
             )
     else:
-        # Create new conversation
         conversation = Conversation(
             id=uuid4(),
             connection_id=request.connection_id,
-            title=request.message[:50] + ("..." if len(request.message) > 50 else ""),
+            title=request.message[:50] +
+            ("..." if len(request.message) > 50 else ""),
             created_at=datetime.utcnow()
         )
         db.add(conversation)
         await db.flush()
         conversation_id = conversation.id
-    
-    # 3. Build system prompt with schema context
-    schema_text = format_schema_for_prompt(connection.meta_schema or {})
-    
-    db_type_name = connection.db_type.value if connection.db_type else "PostgreSQL"
-    
-    system_prompt = f"""You are an expert SQL assistant for {db_type_name} databases.
 
-{schema_text}
+    start_time = time.time()
 
-Instructions:
-- Answer user questions about the database
-- Generate SQL queries when requested
-- Explain query results clearly
-- If generating SQL, wrap it in ```sql code blocks
-- Be concise and helpful"""
-    
-    # 4. Call LLM service
+    all_tables = connection.meta_schema.get(
+        "tables",
+        []
+    ) if connection.meta_schema else []
+    mentioned_tables = extract_mentioned_tables(request.message, all_tables)
+
+    logger.info("[CHAT] Mentioned tables:"
+                f"{[t.get('name') for t in mentioned_tables]}")
+
+    schema_json = json.dumps(connection.meta_schema or {})
+    mentioned_names = tuple(
+        sorted([t.get('name') for t in mentioned_tables])
+    ) if mentioned_tables else ()
+
+    schema_text = _cached_format_schema(schema_json, 10, mentioned_names)
+    schema_format_time = time.time() - start_time
+
+    logger.info(f"[CHAT] Schema formatted: {len(schema_text):,} bytes"
+                f"in {schema_format_time:.2f}s")
+
+    db_type_name = (
+        connection.db_type.value if connection.db_type else "PostgreSQL"
+    )
+
+    system_prompt = (
+        f"You are an expert SQL assistant for {db_type_name} databases.\n\n"
+        f"{schema_text}\n\n"
+        f"Instructions:\n"
+        f"- Answer user questions about the database\n"
+        f"- Generate SQL queries when requested\n"
+        f"- Explain query results clearly\n"
+        f"- If generating SQL, wrap it in ```sql code blocks\n"
+        f"- Be concise and helpful"
+    )
+
+    prompt_size = len(system_prompt) + len(request.message)
+    print(f"[DEBUG-CHAT] Total prompt size: {prompt_size:,} bytes")
+    logger.info(f"[CHAT] Total prompt: {prompt_size:,} bytes")
+
     try:
-        llm_response = await llm_service._call_ollama(
-            model=llm_service.chat_model,  # Use chat model for conversations
+        llm_start = time.time()
+        llm_response = await llm_service.chat(
             prompt=request.message,
             system_prompt=system_prompt,
-            temperature=0.3
+            temperature=0.3,
+            max_tokens=256  # Reduced from 512 for faster response
         )
+        llm_duration = time.time() - llm_start
+        print(f"[DEBUG-CHAT] LLM took: {llm_duration:.2f}s")
+        logger.info(f"[CHAT] LLM took: {llm_duration:.2f}s")
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"LLM service error: {str(e)}"
         )
-    
-    # 5. Extract SQL from response if present (between ```sql and ```)
+
     sql_generated = None
     if "```sql" in llm_response:
         try:
@@ -162,9 +215,8 @@ Instructions:
             sql_end = llm_response.index("```", sql_start)
             sql_generated = llm_response[sql_start:sql_end].strip()
         except (ValueError, IndexError):
-            pass  # No valid SQL block found
-    
-    # 6. Save user message to query_logs
+            pass
+
     user_log = QueryLog(
         id=uuid4(),
         conversation_id=conversation_id,
@@ -173,8 +225,7 @@ Instructions:
         created_at=datetime.utcnow()
     )
     db.add(user_log)
-    
-    # 7. Save AI response to query_logs
+
     assistant_log = QueryLog(
         id=uuid4(),
         conversation_id=conversation_id,
@@ -184,10 +235,9 @@ Instructions:
         created_at=datetime.utcnow()
     )
     db.add(assistant_log)
-    
+
     await db.commit()
-    
-    # 8. Return response
+
     return ChatCompletionResponse(
         conversation_id=conversation_id,
         role="assistant",
@@ -202,10 +252,6 @@ async def get_conversations(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Get all conversations for a connection
-    """
-    # Validate connection ownership
     result = await db.execute(
         select(DBConnection).where(
             DBConnection.id == connection_id,
@@ -213,21 +259,20 @@ async def get_conversations(
         )
     )
     connection = result.scalar_one_or_none()
-    
+
     if not connection:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Connection not found"
         )
-    
-    # Fetch conversations
+
     result = await db.execute(
         select(Conversation)
         .where(Conversation.connection_id == connection_id)
         .order_by(Conversation.created_at.desc())
     )
     conversations = result.scalars().all()
-    
+
     return [
         {
             "id": str(conv.id),
@@ -244,22 +289,17 @@ async def get_conversation_messages(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Get all messages in a conversation
-    """
-    # Fetch conversation and validate access
     result = await db.execute(
         select(Conversation).where(Conversation.id == conversation_id)
     )
     conversation = result.scalar_one_or_none()
-    
+
     if not conversation:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Conversation not found"
         )
-    
-    # Validate connection ownership
+
     result = await db.execute(
         select(DBConnection).where(
             DBConnection.id == conversation.connection_id,
@@ -271,15 +311,14 @@ async def get_conversation_messages(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied"
         )
-    
-    # Fetch messages
+
     result = await db.execute(
         select(QueryLog)
         .where(QueryLog.conversation_id == conversation_id)
         .order_by(QueryLog.created_at.asc())
     )
     messages = result.scalars().all()
-    
+
     return [
         {
             "id": str(msg.id),

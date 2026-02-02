@@ -1,395 +1,411 @@
-"""
-Simulation Execution Service
-Executes SQL queries against virtual schemas using in-memory SQLite
-"""
-from typing import Dict, List, Any, Optional
-from sqlalchemy import create_engine, text, inspect
-from sqlalchemy.exc import OperationalError, ProgrammingError
 import json
-import re
+import logging
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
+
 import sqlparse
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Connection
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ExecutionResult:
+    columns: List[str]
+    rows: List[Dict[str, Any]]
+    row_count: int
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "columns": self.columns,
+            "rows": self.rows,
+            "row_count": self.row_count,
+        }
+
+
+class StatementParser:
+    @staticmethod
+    def parse_sql_query(sql_query: str) -> List[str]:
+        statements = sqlparse.split(sql_query)
+        statements = [
+            stmt.strip() for stmt in statements
+            if stmt.strip() and stmt.strip() != ";"
+        ]
+
+        if not statements:
+            raise ValueError("No valid SQL statements found")
+
+        return statements
+
+
+class ErrorClassifier:
+    @staticmethod
+    def is_duplicate_index_error(error_str: str, statement: str) -> bool:
+        is_create_index = "CREATE INDEX" in statement.upper()
+        if not is_create_index:
+            return False
+
+        duplicate_indicators = [
+            "Duplicate key name" in error_str,
+            "already exists" in error_str,
+            "duplicate key" in error_str.lower(),
+            "index" in statement.upper() and "already" in error_str.lower(),
+        ]
+
+        return any(duplicate_indicators)
+
+
+class PostgresToSQLiteTypeMapper:
+    _TEXT_TYPES = {
+        "UUID",
+        "JSONB",
+        "JSON",
+        "TIMESTAMPTZ",
+        "TIMESTAMP WITH TIME ZONE",
+        "TIMESTAMP WITHOUT TIME ZONE",
+        "TIMESTAMP",
+        "TEXT",
+    }
+
+    _INTEGER_TYPES = {"SERIAL", "BIGSERIAL", "SMALLSERIAL", "BOOLEAN", "BOOL"}
+
+    _INTEGER_KEYWORDS = ["INT", "INTEGER", "BIGINT", "SMALLINT"]
+
+    _REAL_KEYWORDS = ["FLOAT", "DOUBLE", "REAL", "NUMERIC", "DECIMAL"]
+
+    @classmethod
+    def map_type(cls, pg_type: str) -> str:
+        pg_type_upper = pg_type.upper().strip()
+
+        if any(t in pg_type_upper for t in ["UUID", "JSON", "TIMESTAMP"]):
+            return "TEXT"
+
+        if pg_type_upper in cls._TEXT_TYPES:
+            return "TEXT"
+
+        if "ARRAY" in pg_type_upper or pg_type_upper.startswith("_"):
+            return "TEXT"
+
+        if pg_type_upper in cls._INTEGER_TYPES:
+            return "INTEGER"
+
+        if any(keyword in pg_type_upper for keyword in cls._INTEGER_KEYWORDS):
+            return "INTEGER"
+
+        if any(keyword in pg_type_upper for keyword in cls._REAL_KEYWORDS):
+            return "REAL"
+
+        if "VARCHAR" in pg_type_upper or "CHAR" in pg_type_upper:
+            return pg_type
+
+        return pg_type
+
+
+class ValueSanitizer:
+    @staticmethod
+    def sanitize_for_sqlite(value: Any, data_type: str) -> str:
+        if value is None:
+            return "NULL"
+
+        if data_type == "TEXT":
+            return ValueSanitizer._sanitize_text_value(value)
+
+        if data_type in ("INTEGER", "REAL"):
+            return ValueSanitizer._sanitize_numeric_value(value)
+
+        return ValueSanitizer._escape_and_quote(str(value))
+
+    @staticmethod
+    def _sanitize_text_value(value: Any) -> str:
+        if isinstance(value, (dict, list)):
+            escaped = json.dumps(value).replace("'", "''")
+            return f"'{escaped}'"
+        return ValueSanitizer._escape_and_quote(str(value))
+
+    @staticmethod
+    def _sanitize_numeric_value(value: Any) -> str:
+        if isinstance(value, bool):
+            return "1" if value else "0"
+        return str(value)
+
+    @staticmethod
+    def _escape_and_quote(value: str) -> str:
+        return f"'{value.replace(chr(39), chr(39) + chr(39))}'"
+
+
+class StatementExecutor:
+    def __init__(self, log_prefix: str = "EXECUTE"):
+        self.log_prefix = log_prefix
+
+    def execute_statements(
+        self, conn: Connection, sql_query: str
+    ) -> ExecutionResult:
+        statements = StatementParser.parse_sql_query(sql_query)
+        logger.info(
+            f"[{self.log_prefix}] Split into {len(statements)} statements"
+        )
+
+        final_columns = []
+        final_rows = []
+
+        for i, stmt in enumerate(statements):
+            self._log_statement_execution(i + 1, stmt)
+
+            try:
+                result = self._execute_single_statement(conn, stmt, i + 1)
+                if result:
+                    final_columns, final_rows = result
+
+            except Exception as stmt_error:
+                if not self._handle_execution_error(
+                    stmt_error, stmt, i + 1, conn
+                ):
+                    raise
+
+        return ExecutionResult(
+            columns=final_columns, rows=final_rows, row_count=len(final_rows)
+        )
+
+    def _execute_single_statement(
+        self, conn: Connection, stmt: str, stmt_num: int
+    ) -> Optional[tuple[List[str], List[Dict[str, Any]]]]:
+        result = conn.execute(text(stmt))
+
+        if result.returns_rows:
+            columns = list(result.keys())
+            rows = [dict(row._mapping) for row in result.fetchall()]
+            logger.debug(
+                f"[{self.log_prefix}] Statement {stmt_num} "
+                f"returned {len(rows)} rows"
+            )
+            return columns, rows
+        else:
+            conn.commit()
+            logger.debug(
+                f"[{self.log_prefix}] Stmt {stmt_num} executed (no rows)"
+            )
+            return None
+
+    def _handle_execution_error(
+        self, error: Exception, stmt: str, stmt_num: int, conn: Connection
+    ) -> bool:
+        error_str = str(error)
+
+        if ErrorClassifier.is_duplicate_index_error(error_str, stmt):
+            logger.warning(
+                f"[{self.log_prefix}] Statement {stmt_num} skipped: "
+                "Index already exists"
+            )
+            conn.rollback()
+            return True
+
+        logger.error(
+            f"[{self.log_prefix}] Statement {stmt_num} failed: {error_str}"
+        )
+        raise Exception(f"Statement {stmt_num} failed: {error_str}")
+
+    def _log_statement_execution(
+        self, stmt_num: int, stmt: str
+    ) -> None:
+        logger.debug(
+            f"[{self.log_prefix}] Executing statement {stmt_num}: "
+            f"{stmt[:100]}..."
+        )
+
+
+class TableSchemaBuilder:
+    @staticmethod
+    def create_table(
+        conn: Connection, table_name: str, columns: List[Dict[str, Any]]
+    ) -> None:
+        if not table_name or not columns:
+            return
+
+        logger.info(
+            f"[SANDBOX] Creating '{table_name}' with {len(columns)} cols"
+        )
+
+        col_defs, primary_keys = TableSchemaBuilder._build_column_definitions(
+            columns
+        )
+
+        if primary_keys:
+            pk_constraint = TableSchemaBuilder._build_primary_key_constraint(
+                primary_keys
+            )
+            col_defs.append(pk_constraint)
+
+        create_stmt = TableSchemaBuilder._build_create_statement(
+            table_name, col_defs
+        )
+        logger.debug(f"[SANDBOX] SQL: {create_stmt}")
+
+        conn.execute(text(create_stmt))
+        conn.commit()
+
+        col_names = [col.get("name") for col in columns]
+        logger.info(f"[SANDBOX] '{table_name}' created with {col_names}")
+
+    @staticmethod
+    def _build_column_definitions(
+        columns: List[Dict[str, Any]]
+    ) -> tuple[List[str], List[str]]:
+        col_defs = []
+        primary_keys = []
+
+        for col in columns:
+            col_name = col.get("name")
+            pg_type = col.get("type", "TEXT")
+            nullable = col.get("is_nullable", True)
+            is_pk = col.get("is_pk", False)
+
+            sqlite_type = PostgresToSQLiteTypeMapper.map_type(pg_type)
+            col_def = f'"{col_name}" {sqlite_type}'
+
+            if not nullable:
+                col_def += " NOT NULL"
+
+            if is_pk:
+                primary_keys.append(col_name)
+
+            col_defs.append(col_def)
+
+        return col_defs, primary_keys
+
+    @staticmethod
+    def _build_primary_key_constraint(primary_keys: List[str]) -> str:
+        pk_cols = ", ".join(f'"{pk}"' for pk in primary_keys)
+        return f"PRIMARY KEY ({pk_cols})"
+
+    @staticmethod
+    def _build_create_statement(table_name: str, col_defs: List[str]) -> str:
+        col_defs_str = ",\n  ".join(col_defs)
+        return f'CREATE TABLE "{table_name}" (\n  {col_defs_str}\n);'
+
+
+class DataSeeder:
+    @staticmethod
+    def seed_table_data(
+        conn: Connection,
+        table_name: str,
+        columns: List[Dict[str, Any]],
+        rows: List[Dict[str, Any]],
+    ) -> int:
+        if not rows:
+            logger.debug(f"[SANDBOX] No sample data for '{table_name}'")
+            return 0
+
+        logger.info(f"[SANDBOX] Seeding {len(rows)} rows into '{table_name}'")
+
+        type_map = DataSeeder._build_type_map(columns)
+
+        for row in rows:
+            DataSeeder._insert_row(conn, table_name, row, type_map)
+
+        conn.commit()
+        logger.info(f"[SANDBOX] Seeded {len(rows)} rows into '{table_name}'")
+
+        return len(rows)
+
+    @staticmethod
+    def _build_type_map(columns: List[Dict[str, Any]]) -> Dict[str, str]:
+        type_map = {}
+        for col in columns:
+            col_name = col.get("name")
+            pg_type = col.get("type", "TEXT")
+            type_map[col_name] = PostgresToSQLiteTypeMapper.map_type(pg_type)
+        return type_map
+
+    @staticmethod
+    def _insert_row(
+        conn: Connection,
+        table_name: str,
+        row: Dict[str, Any],
+        type_map: Dict[str, str],
+    ) -> None:
+        columns_list = list(row.keys())
+        values_list = [
+            ValueSanitizer.sanitize_for_sqlite(
+                row[col], type_map.get(col, "TEXT")
+            )
+            for col in columns_list
+        ]
+
+        cols_str = ", ".join(
+            f'"{c}"' for c in columns_list
+        )
+        vals_str = ", ".join(values_list)
+        insert_stmt = (
+            f'INSERT INTO "{table_name}" ({cols_str}) VALUES ({vals_str});'
+        )
+
+        conn.execute(text(insert_stmt))
 
 
 class SimulationExecutor:
-    """
-    Executes SQL queries on ephemeral in-memory SQLite databases
-    Maps PostgreSQL schema definitions to SQLite-compatible schema
-    """
-    
     @staticmethod
-    def _execute_statements(conn, sql_query: str) -> Dict[str, Any]:
-        """
-        Execute SQL query supporting multiple statements
-        
-        Args:
-            conn: Database connection
-            sql_query: SQL query (may contain multiple statements)
-            
-        Returns:
-            Dictionary with columns and rows from final SELECT statement
-        """
-        import logging
-        logger = logging.getLogger(__name__)
-        
-        # Split SQL query into individual statements
-        statements = sqlparse.split(sql_query)
-        # Filter out empty statements and whitespace-only statements
-        statements = [stmt.strip() for stmt in statements if stmt.strip() and stmt.strip() != ';']
-        
-        if not statements:
-            raise ValueError("No valid SQL statements found")
-        
-        logger.info(f"[EXECUTE] Split into {len(statements)} statements")
-        
-        final_columns = []
-        final_rows = []
-        
-        for i, stmt in enumerate(statements):
-            logger.debug(f"[EXECUTE] Executing statement {i+1}: {stmt[:100]}...")
-            
-            try:
-                result = conn.execute(text(stmt))
-                
-                # Check if this statement returns rows (SELECT)
-                if result.returns_rows:
-                    columns = list(result.keys())
-                    rows = [dict(row._mapping) for row in result.fetchall()]
-                    final_columns = columns
-                    final_rows = rows
-                    logger.debug(f"[EXECUTE] Statement {i+1} returned {len(rows)} rows")
-                else:
-                    # For DDL/DML statements, just commit
-                    conn.commit()
-                    logger.debug(f"[EXECUTE] Statement {i+1} executed (no rows returned)")
-                    
-            except Exception as stmt_error:
-                error_str = str(stmt_error)
-                
-                # Check if it's a duplicate index error (treat as warning, not failure)
-                is_duplicate_index = (
-                    "Duplicate key name" in error_str or  # MySQL
-                    "already exists" in error_str or       # PostgreSQL
-                    "duplicate key" in error_str.lower() or
-                    "index" in stmt.upper() and "already" in error_str.lower()  # SQLite
-                )
-                
-                if is_duplicate_index and "CREATE INDEX" in stmt.upper():
-                    logger.warning(f"[EXECUTE] Statement {i+1} skipped: Index already exists")
-                    # Rollback the failed transaction
-                    conn.rollback()
-                    # Continue to next statement instead of failing
-                    continue
-                    
-                logger.error(f"[EXECUTE] Statement {i+1} failed: {error_str}")
-                # For multi-statement execution, if one fails, stop and return error
-                raise Exception(f"Statement {i+1} failed: {error_str}")
-        
-        return {
-            "columns": final_columns,
-            "rows": final_rows,
-            "row_count": len(final_rows)
-        }
-    
+    def execute_in_sandbox(
+        conn: Connection, sql_query: str
+    ) -> ExecutionResult:
+        executor = StatementExecutor(log_prefix="EXECUTE")
+        return executor.execute_statements(conn, sql_query)
+
     @staticmethod
-    def execute_real_db_statements(conn, sql_query: str) -> Dict[str, Any]:
-        """
-        Execute SQL query on real database supporting multiple statements
-        
-        Args:
-            conn: Database connection
-            sql_query: SQL query (may contain multiple statements)
-            
-        Returns:
-            Dictionary with columns and rows from final SELECT statement
-        """
-        import logging
-        logger = logging.getLogger(__name__)
-        
-        # Split SQL query into individual statements
-        statements = sqlparse.split(sql_query)
-        # Filter out empty statements and whitespace-only statements
-        statements = [stmt.strip() for stmt in statements if stmt.strip() and stmt.strip() != ';']
-        
-        if not statements:
-            raise ValueError("No valid SQL statements found")
-        
-        logger.info(f"[REAL_DB] Split into {len(statements)} statements")
-        
-        final_columns = []
-        final_rows = []
-        
-        for i, stmt in enumerate(statements):
-            logger.debug(f"[REAL_DB] Executing statement {i+1}: {stmt[:100]}...")
-            
-            try:
-                result = conn.execute(text(stmt))
-                
-                # Check if this statement returns rows (SELECT)
-                if result.returns_rows:
-                    columns = list(result.keys())
-                    rows = [dict(row._mapping) for row in result.fetchall()]
-                    final_columns = columns
-                    final_rows = rows
-                    logger.debug(f"[REAL_DB] Statement {i+1} returned {len(rows)} rows")
-                else:
-                    # For DDL/DML statements, commit is handled by context manager
-                    logger.debug(f"[REAL_DB] Statement {i+1} executed (no rows returned)")
-                    
-            except Exception as stmt_error:
-                error_str = str(stmt_error)
-                
-                # Check if it's a duplicate index error (treat as warning, not failure)
-                is_duplicate_index = (
-                    "Duplicate key name" in error_str or  # MySQL
-                    "already exists" in error_str or       # PostgreSQL
-                    "duplicate key" in error_str.lower()
-                )
-                
-                if is_duplicate_index and "CREATE INDEX" in stmt.upper():
-                    logger.warning(f"[REAL_DB] Statement {i+1} skipped: Index already exists")
-                    # Rollback the failed transaction (required for PostgreSQL)
-                    conn.rollback()
-                    # Continue to next statement instead of failing
-                    continue
-                    
-                logger.error(f"[REAL_DB] Statement {i+1} failed: {error_str}")
-                # For multi-statement execution, if one fails, stop and return error
-                raise Exception(f"Statement {i+1} failed: {error_str}")
-        
-        return {
-            "columns": final_columns,
-            "rows": final_rows,
-            "row_count": len(final_rows)
-        }
-    
-    @staticmethod
-    def _map_postgres_to_sqlite(pg_type: str) -> str:
-        """
-        Convert PostgreSQL data types to SQLite-compatible types
-        
-        Args:
-            pg_type: PostgreSQL type name (e.g., 'UUID', 'TIMESTAMPTZ', 'VARCHAR(255)')
-            
-        Returns:
-            SQLite-compatible type
-        """
-        # Normalize to uppercase for comparison
-        pg_type_upper = pg_type.upper().strip()
-        
-        # UUID -> TEXT
-        if 'UUID' in pg_type_upper:
-            return 'TEXT'
-        
-        # JSON types -> TEXT
-        if pg_type_upper in ('JSONB', 'JSON'):
-            return 'TEXT'
-        
-        # Timestamp types -> TEXT (SQLite will store as ISO8601 strings)
-        if pg_type_upper in ('TIMESTAMPTZ', 'TIMESTAMP WITH TIME ZONE', 'TIMESTAMP WITHOUT TIME ZONE', 'TIMESTAMP'):
-            return 'TEXT'
-        
-        # Array types -> TEXT (store as JSON string)
-        if 'ARRAY' in pg_type_upper or pg_type_upper.startswith('_'):
-            return 'TEXT'
-        
-        # Serial types -> INTEGER
-        if pg_type_upper in ('SERIAL', 'BIGSERIAL', 'SMALLSERIAL'):
-            return 'INTEGER'
-        
-        # Boolean -> INTEGER (0/1)
-        if pg_type_upper in ('BOOLEAN', 'BOOL'):
-            return 'INTEGER'
-        
-        # Numeric types that work in both
-        if any(t in pg_type_upper for t in ['INT', 'INTEGER', 'BIGINT', 'SMALLINT']):
-            return 'INTEGER'
-        
-        if any(t in pg_type_upper for t in ['FLOAT', 'DOUBLE', 'REAL', 'NUMERIC', 'DECIMAL']):
-            return 'REAL'
-        
-        # Text types - extract length if present
-        if 'VARCHAR' in pg_type_upper or 'CHAR' in pg_type_upper:
-            return pg_type  # Keep VARCHAR(n) as is, SQLite accepts it
-        
-        if pg_type_upper == 'TEXT':
-            return 'TEXT'
-        
-        # Default: keep original (many types work on both)
-        return pg_type
-    
-    @staticmethod
-    def _sanitize_value_for_sqlite(value: Any, data_type: str) -> str:
-        """
-        Sanitize and format values for SQLite INSERT
-        
-        Args:
-            value: The value to insert
-            data_type: The target SQLite data type
-            
-        Returns:
-            Properly formatted SQL value string
-        """
-        if value is None:
-            return 'NULL'
-        
-        # For TEXT types, ensure proper escaping
-        if data_type == 'TEXT':
-            if isinstance(value, dict) or isinstance(value, list):
-                # JSON objects/arrays -> stringify
-                return f"'{json.dumps(value).replace(chr(39), chr(39) + chr(39))}'"
-            else:
-                # Regular strings -> escape single quotes
-                return f"'{str(value).replace(chr(39), chr(39) + chr(39))}'"
-        
-        # For INTEGER/REAL, convert to number
-        if data_type in ('INTEGER', 'REAL'):
-            # Boolean -> 0/1
-            if isinstance(value, bool):
-                return '1' if value else '0'
-            return str(value)
-        
-        # Default: quote as string
-        return f"'{str(value).replace(chr(39), chr(39) + chr(39))}'"
-    
+    def execute_in_real_db(
+        conn: Connection, sql_query: str
+    ) -> ExecutionResult:
+        executor = StatementExecutor(log_prefix="REAL_DB")
+        return executor.execute_statements(conn, sql_query)
+
     def execute(
-        self, 
-        meta_schema: Dict[str, Any], 
+        self,
+        meta_schema: Dict[str, Any],
         sql_query: str,
-        sample_data: Optional[Dict[str, List[Dict]]] = None
+        sample_data: Optional[Dict[str, List[Dict]]] = None,
     ) -> Dict[str, Any]:
-        """
-        Execute SQL query against virtual schema in SQLite
-        
-        Args:
-            meta_schema: Schema definition with tables and columns
-            sql_query: User's SQL query to execute
-            sample_data: Optional sample data (deprecated - now uses meta_schema.tables[].sample_data)
-            
-        Returns:
-            Dictionary with columns and rows
-            
-        Raises:
-            Exception: If query execution fails
-        """
-        # Create in-memory SQLite database
         engine = create_engine(
             "sqlite:///:memory:",
             connect_args={"check_same_thread": False},
-            echo=False  # Set to True for debugging
+            echo=False,
         )
-        
+
         try:
             with engine.connect() as conn:
-                # Step 1: Build and execute CREATE TABLE statements
-                tables = meta_schema.get('tables', [])
-                
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.info(f"[SANDBOX] Creating {len(tables)} tables in SQLite sandbox")
-                
+                tables = meta_schema.get("tables", [])
+                logger.info(
+                    f"[SANDBOX] Creating {len(tables)} tables in sandbox"
+                )
+
+                # Create tables
                 for table in tables:
-                    table_name = table.get('name')
-                    columns = table.get('columns', [])
-                    
-                    if not table_name or not columns:
-                        continue
-                    
-                    logger.info(f"[SANDBOX] Creating table '{table_name}' with {len(columns)} columns")
-                    
-                    # Build column definitions
-                    col_defs = []
-                    primary_keys = []
-                    
-                    for col in columns:
-                        col_name = col.get('name')
-                        pg_type = col.get('type', 'TEXT')  # Changed from 'data_type' to 'type'
-                        nullable = col.get('is_nullable', True)  # Changed from 'nullable'
-                        is_pk = col.get('is_pk', False)  # Changed from 'primary_key'
-                        
-                        # Map type to SQLite
-                        sqlite_type = self._map_postgres_to_sqlite(pg_type)
-                        
-                        # Build column definition
-                        col_def = f'"{col_name}" {sqlite_type}'
-                        
-                        if not nullable:
-                            col_def += ' NOT NULL'
-                        
-                        if is_pk:
-                            primary_keys.append(col_name)
-                        
-                        col_defs.append(col_def)
-                    
-                    # Add PRIMARY KEY constraint if any
-                    if primary_keys:
-                        pk_cols = ", ".join(f'"{pk}"' for pk in primary_keys)
-                        pk_constraint = f'PRIMARY KEY ({pk_cols})'
-                        col_defs.append(pk_constraint)
-                    
-                    # Execute CREATE TABLE
-                    col_defs_str = ",\n  ".join(col_defs)
-                    create_stmt = f'CREATE TABLE "{table_name}" (\n  {col_defs_str}\n);'
-                    logger.debug(f"[SANDBOX] SQL: {create_stmt}")
-                    conn.execute(text(create_stmt))
-                    conn.commit()
-                    
-                    # Log created columns for debugging
-                    col_names = [col.get('name') for col in columns]
-                    logger.info(f"[SANDBOX] Table '{table_name}' created with columns: {', '.join(col_names)}")
-                
-                # Step 2: Seed sample data from table definitions or legacy sample_data param
+                    table_name = table.get("name")
+                    columns = table.get("columns", [])
+                    TableSchemaBuilder.create_table(conn, table_name, columns)
+
+                # Seed data
                 total_seeded_rows = 0
                 for table in tables:
-                    table_name = table.get('name')
-                    # Use table's own sample_data first, fall back to legacy param
-                    rows = table.get('sample_data', [])
-                    
+                    table_name = table.get("name")
+                    rows = table.get("sample_data", [])
+
                     if not rows and sample_data:
-                        # Fall back to legacy sample_data parameter
                         rows = sample_data.get(table_name, [])
-                    
-                    if not rows:
-                        logger.debug(f"[SANDBOX] No sample data for table '{table_name}'")
-                        continue
-                    
-                    logger.info(f"[SANDBOX] Seeding {len(rows)} rows into table '{table_name}'")
-                    
-                    # Build type map for proper value formatting
-                    type_map = {}
-                    for col in table.get('columns', []):
-                        col_name = col.get('name')
-                        pg_type = col.get('type', 'TEXT')
-                        type_map[col_name] = self._map_postgres_to_sqlite(pg_type)
-                    
-                    # Insert rows
-                    for row in rows:
-                        columns_list = list(row.keys())
-                        values_list = [
-                            self._sanitize_value_for_sqlite(row[col], type_map.get(col, 'TEXT'))
-                            for col in columns_list
-                        ]
-                        
-                        # Build INSERT statement without backslash in f-string
-                        cols_str = ", ".join(f'"{c}"' for c in columns_list)
-                        vals_str = ", ".join(values_list)
-                        insert_stmt = f'INSERT INTO "{table_name}" ({cols_str}) VALUES ({vals_str});'
-                        conn.execute(text(insert_stmt))
-                        total_seeded_rows += 1
-                    
-                    conn.commit()
-                    logger.info(f"[SANDBOX] Successfully seeded {len(rows)} rows into '{table_name}'")
-                
-                logger.info(f"[SANDBOX] Total seeded rows: {total_seeded_rows}")
-                
-                # Step 3: Execute user query (supporting multiple statements)
-                result = self._execute_statements(conn, sql_query)
-                
-                return result
-        
+
+                    total_seeded_rows += DataSeeder.seed_table_data(
+                        conn, table_name, table.get("columns", []), rows
+                    )
+
+                logger.info(
+                    f"[SANDBOX] Total seeded rows: {total_seeded_rows}"
+                )
+
+                # Execute query
+                result = self.execute_in_sandbox(conn, sql_query)
+                return result.to_dict()
+
         finally:
-            # Cleanup
             engine.dispose()
 
 
-# Singleton instance
 simulation_executor = SimulationExecutor()

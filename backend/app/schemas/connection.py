@@ -1,15 +1,12 @@
-"""
-Pydantic schemas for database connections and related entities
-"""
-from pydantic import BaseModel, EmailStr, Field, ConfigDict
-from typing import Optional, Dict, Any
 from datetime import datetime
+from typing import Any, Dict, Optional
 from uuid import UUID
 
-from backend.app.models.models import UserRole, DBType, ChatRole
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
+
+from backend.app.models.models import ChatRole, DBType, UserRole
 
 
-# User Schemas
 class UserBase(BaseModel):
     email: EmailStr
 
@@ -23,22 +20,20 @@ class UserResponse(UserBase):
     id: UUID
     role: UserRole
     created_at: datetime
-    
+
     model_config = ConfigDict(from_attributes=True)
 
 
-# DBConnection Schemas
 class DBConnectionBase(BaseModel):
     name: str = Field(..., max_length=100)
     db_type: DBType = DBType.POSTGRES
 
 
 class DBConnectionCreate(DBConnectionBase):
-    # For real databases
     host: Optional[str] = Field(None, max_length=255)
     port: Optional[int] = Field(5432, ge=1, le=65535)
     username: Optional[str] = Field(None, max_length=100)
-    password: Optional[str] = None  # Plain password, will be encrypted
+    password: Optional[str] = None
     db_name: Optional[str] = Field(None, max_length=100)
 
 
@@ -62,32 +57,30 @@ class DBConnectionResponse(DBConnectionBase):
     meta_schema: Optional[Dict[str, Any]] = None
     metadata_cache: Optional[Dict[str, Any]] = None
     created_at: datetime
-    
+
     model_config = ConfigDict(from_attributes=True)
 
 
 class DBConnectionWithSchema(DBConnectionResponse):
-    """Response that includes the cached schema metadata"""
-    meta_schema_data: Optional[Dict[str, Any]] = Field(None, alias="meta_schema")
-    
+    meta_schema_data: Optional[Dict[str, Any]
+                               ] = Field(None, alias="meta_schema")
+
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
-# Schema Sync
 class SchemaSyncRequest(BaseModel):
-    """Request to sync schema metadata from target database"""
-    force: bool = Field(default=False, description="Force re-sync even if cache exists")
+    force: bool = Field(
+        default=False,
+        description="Force re-sync even if cache exists")
 
 
 class SchemaSyncResponse(BaseModel):
-    """Response after schema sync"""
     success: bool
     message: str
     tables_count: Optional[int] = None
     schema: Optional[Dict[str, Any]] = None
 
 
-# Conversation Schemas
 class ConversationBase(BaseModel):
     title: Optional[str] = Field(None, max_length=255)
 
@@ -100,11 +93,10 @@ class ConversationResponse(ConversationBase):
     id: UUID
     connection_id: Optional[UUID]
     created_at: datetime
-    
+
     model_config = ConfigDict(from_attributes=True)
 
 
-# QueryLog Schemas
 class QueryLogBase(BaseModel):
     role: ChatRole
     content: str
@@ -119,11 +111,10 @@ class QueryLogResponse(QueryLogBase):
     id: UUID
     conversation_id: UUID
     created_at: datetime
-    
+
     model_config = ConfigDict(from_attributes=True)
 
 
-# Feedback Schemas
 class FeedbackBase(BaseModel):
     rating: Optional[int] = Field(None, ge=1, le=5)
     corrected_sql: Optional[str] = None
@@ -138,11 +129,10 @@ class FeedbackResponse(FeedbackBase):
     id: UUID
     query_log_id: UUID
     created_at: datetime
-    
+
     model_config = ConfigDict(from_attributes=True)
 
 
-# Performance Analysis Schemas
 class PerformanceAnalysisBase(BaseModel):
     execution_time_ms: Optional[float] = None
     total_cost: Optional[float] = None
@@ -158,5 +148,5 @@ class PerformanceAnalysisResponse(PerformanceAnalysisBase):
     id: UUID
     query_log_id: UUID
     created_at: datetime
-    
+
     model_config = ConfigDict(from_attributes=True)

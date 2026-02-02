@@ -43,6 +43,9 @@ docker-compose logs -f backend
 
 # Stop services
 docker-compose down
+
+docker cp test_optimize_direct.py sqltuner_backend:/app/test_optimize_direct.py
+docker-compose exec backend python /app/test_optimize_direct.py
 ```
 
 Services:
