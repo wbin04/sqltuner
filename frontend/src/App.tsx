@@ -12,7 +12,7 @@ import { HistoryPage } from './pages/HistoryPage';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { FeedbackReview } from './pages/admin/FeedbackReview';
 import { UserManagement } from './pages/admin/UserManagement';
-import { SimulationDesigner } from './pages/SimulationDesigner';
+import { SchemaEditor } from './pages/TableEditor';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
@@ -140,14 +140,16 @@ function AppContent() {
         )
       } />
 
-      {/* Simulation Designer Route - Outside MainLayout for full-screen experience */}
-      <Route path="/simulation/:workspaceId" element={
+
+
+      {/* Schema Editor Route - For editing schema of any workspace (real or simulation) */}
+      <Route path="/schema-editor/:workspaceId" element={
         isLoading ? (
           <div className="flex items-center justify-center h-screen">
             <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-primary"></div>
           </div>
         ) : isAuthenticated ? (
-          <SimulationDesigner />
+          <SchemaEditor />
         ) : (
           <Navigate to="/login" replace />
         )

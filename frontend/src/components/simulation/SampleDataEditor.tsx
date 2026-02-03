@@ -9,10 +9,11 @@ import { v4 as uuidv4 } from 'uuid';
 
 interface SampleDataEditorProps {
   table: SimulationTable;
+  isReadOnly?: boolean;
   onUpdateTable: (table: SimulationTable) => void;
 }
 
-export function SampleDataEditor({ table, onUpdateTable }: SampleDataEditorProps) {
+export function SampleDataEditor({ table, isReadOnly = false, onUpdateTable }: SampleDataEditorProps) {
   const handleAddRow = () => {
     const newRow: Record<string, any> = {};
     table.columns.forEach(col => {
@@ -84,7 +85,7 @@ export function SampleDataEditor({ table, onUpdateTable }: SampleDataEditorProps
                   </div>
                 </th>
               ))}
-              <th className="px-4 py-3 text-center text-xs font-semibold text-text-muted-DEFAULT dark:text-text-muted-dark uppercase w-20">
+              <th className={cn("px-4 py-3 text-center text-xs font-semibold text-text-muted-DEFAULT dark:text-text-muted-dark uppercase w-20", isReadOnly && "hidden")}>
                 Actions
               </th>
             </tr>
@@ -115,6 +116,7 @@ export function SampleDataEditor({ table, onUpdateTable }: SampleDataEditorProps
                         value={getCellValue(row, column.name)}
                         onChange={(e) => handleUpdateCell(rowIndex, column.name, e.target.value)}
                         placeholder={column.is_nullable ? 'null' : ''}
+                        readOnly={isReadOnly}
                         className={cn(
                           'w-full px-3 py-1.5 rounded border font-mono text-sm',
                           'bg-background-light dark:bg-background-dark',
@@ -126,10 +128,11 @@ export function SampleDataEditor({ table, onUpdateTable }: SampleDataEditorProps
                       />
                     </td>
                   ))}
-                  <td className="px-4 py-2 text-center">
+                  <td className={cn("px-4 py-2 text-center", isReadOnly && "hidden")}>
                     <button
                       onClick={() => handleDeleteRow(rowIndex)}
-                      className="p-1.5 rounded-lg text-red-500 hover:bg-red-500/10 transition-colors"
+                      disabled={isReadOnly}
+                      className="p-1.5 rounded-lg text-red-500 hover:bg-red-500/10 transition-colors disabled:hidden disabled:cursor-not-allowed"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -144,11 +147,13 @@ export function SampleDataEditor({ table, onUpdateTable }: SampleDataEditorProps
       {/* Add Row Button */}
       <button
         onClick={handleAddRow}
+        disabled={isReadOnly}
         className={cn(
           'mt-4 flex items-center gap-2 px-4 py-2 rounded-lg',
           'text-primary dark:text-primary-dark',
           'hover:bg-primary/5 dark:hover:bg-primary-dark/5',
-          'transition-colors font-medium'
+          'transition-colors font-medium',
+          'disabled:hidden disabled:cursor-not-allowed'
         )}
       >
         <Plus className="w-4 h-4" />

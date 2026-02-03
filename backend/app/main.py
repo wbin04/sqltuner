@@ -4,10 +4,10 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1.api import api_router
-from app.core.config import settings
-from app.schemas.sql import HealthResponse
-from app.services.llm_service import llm_service
+from backend.app.api.v1.api import api_router
+from backend.app.core.config import settings
+from backend.app.schemas.sql import HealthResponse
+from backend.app.services.llm_service import llm_service
 
 logger = logging.getLogger(__name__)
 

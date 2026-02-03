@@ -3,7 +3,8 @@
  * Displays database schema metadata in a collapsible tree view
  */
 import { useState } from 'react';
-import { Database, Table, ChevronDown, ChevronRight, Key, Link, Network } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Database, Table, ChevronDown, ChevronRight, Key, Link, Network, Edit } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { SchemaDiagramModal } from './diagram/SchemaDiagramModal';
 
@@ -42,9 +43,11 @@ interface SchemaDef {
 
 interface SchemaViewerProps {
   schema: Record<string, any> | null | undefined;
+  workspaceId?: string;
 }
 
-export function SchemaViewer({ schema }: SchemaViewerProps) {
+export function SchemaViewer({ schema, workspaceId }: SchemaViewerProps) {
+  const navigate = useNavigate();
   const [expandedTables, setExpandedTables] = useState<Set<string>>(new Set());
   const [isDiagramModalOpen, setIsDiagramModalOpen] = useState(false);
 
@@ -102,22 +105,44 @@ export function SchemaViewer({ schema }: SchemaViewerProps) {
           </p>
         )}
         <div className="flex items-center justify-between">
-          <p className="text-xs text-text-muted-DEFAULT dark:text-text-muted-dark">
+          <p className="text-s text-text-muted-DEFAULT dark:text-text-muted-dark">
             {schemaDef.tables.length} {schemaDef.tables.length === 1 ? 'table' : 'tables'}
           </p>
 
-          {/* Diagram Button */}
-          <button
-            onClick={() => setIsDiagramModalOpen(true)}
-            className={cn(
-              'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all',
-              'bg-primary dark:bg-primary-dark hover:bg-primary-hover dark:hover:bg-primary-dark-hover text-white font-medium',
-              'text-white transition-all hover:shadow-lg hover:shadow-primary/20 dark:hover:shadow-primary-dark/20'
+          {/* Action Buttons */}
+          <div className="flex items-center gap-2">
+            {workspaceId && (
+              <button
+                onClick={() => navigate(`/schema-editor/${workspaceId}`)}
+                className={cn(
+                  'group flex items-center gap-0 px-1 py-1.5 rounded-lg text-sm font-medium transition-all duration-300 ease-in-out',
+                  'group-hover:px-2',
+                  'bg-primary dark:bg-primary-dark hover:bg-primary-hover dark:hover:bg-primary-dark-hover text-white font-medium',
+                'text-white transition-all hover:shadow-lg hover:shadow-primary/20 dark:hover:shadow-primary-dark/20'
+                )}
+              >
+                <Edit className="w-6 h-6" />
+                <span className="max-w-0 overflow-hidden group-hover:max-w-24 group-hover:overflow-visible transition-all duration-300 ease-in-out whitespace-nowrap ml-0 group-hover:ml-2">
+                  Edit Schema
+                </span>
+              </button>
             )}
-          >
-            <Network className="w-4 h-4" />
-            View Diagram
-          </button>
+            
+            <button
+              onClick={() => setIsDiagramModalOpen(true)}
+              className={cn(
+                'group flex items-center gap-0 px-1 py-1.5 rounded-lg text-sm font-medium transition-all duration-300 ease-in-out',
+                'group-hover:px-2',
+                'bg-primary dark:bg-primary-dark hover:bg-primary-hover dark:hover:bg-primary-dark-hover text-white font-medium',
+                'text-white transition-all hover:shadow-lg hover:shadow-primary/20 dark:hover:shadow-primary-dark/20'
+              )}
+            >
+              <Network className="w-6 h-6" />
+              <span className="max-w-0 overflow-hidden group-hover:max-w-24 group-hover:overflow-visible transition-all duration-300 ease-in-out whitespace-nowrap ml-0 group-hover:ml-2">
+                View Diagram
+              </span>
+            </button>
+          </div>
         </div>
       </div>
 

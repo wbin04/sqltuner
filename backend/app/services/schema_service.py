@@ -7,9 +7,9 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import decrypt_password
-from app.models.models import DBType
-from app.repositories.connection_repository import \
+from backend.app.core.security import decrypt_password
+from backend.app.models.models import DBType
+from backend.app.repositories.connection_repository import \
     connection_repository
 
 logger = logging.getLogger(__name__)
@@ -35,14 +35,10 @@ class SchemaService:
         resolved_host = SchemaService._resolve_docker_host(host)
 
         if db_type == DBType.POSTGRES:
-            conn_string = (
+            return (
                 f"postgresql://{username}:{password}@"
                 f"{resolved_host}:{port}/{db_name}"
             )
-            # Add SSL for cloud providers like Supabase
-            if 'supabase' in host.lower() or not host.startswith('localhost'):
-                conn_string += "?sslmode=require"
-            return conn_string
         elif db_type == DBType.MYSQL:
             return (
                 f"mysql+pymysql://{username}:{password}@"
@@ -134,11 +130,7 @@ class SchemaService:
             try:
                 plain_password = decrypt_password(connection.db_password)
             except Exception as e:
-                logger.error(f"[SCHEMA] Failed to decrypt password: {str(e)}")
-                raise ValueError(
-                    f"Database connection error: Invalid credentials configuration. "
-                    f"Please check connection settings or update the password."
-                )
+                raise ValueError(f"Failed to decrypt password: {str(e)}")
 
             conn_string = SchemaService._build_connection_string(
                 db_type=connection.db_type,

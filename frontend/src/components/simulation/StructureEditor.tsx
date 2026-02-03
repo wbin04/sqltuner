@@ -12,10 +12,11 @@ import { ForeignKeyModal } from '../simulation/ForeignKeyModal';
 interface StructureEditorProps {
   table: SimulationTable;
   schema: SimulationSchema;
+  isReadOnly?: boolean;
   onUpdateTable: (table: SimulationTable) => void;
 }
 
-export function StructureEditor({ table, schema, onUpdateTable }: StructureEditorProps) {
+export function StructureEditor({ table, schema, isReadOnly = false, onUpdateTable }: StructureEditorProps) {
   const [editingTableName, setEditingTableName] = useState(false);
   const [tableName, setTableName] = useState(table.name);
   const [fkModalColumn, setFkModalColumn] = useState<SimulationColumn | null>(null);
@@ -128,7 +129,8 @@ export function StructureEditor({ table, schema, onUpdateTable }: StructureEdito
             </h3>
             <button
               onClick={() => setEditingTableName(true)}
-              className="p-1 rounded hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark"
+              disabled={isReadOnly}
+              className="p-1 rounded hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark disabled:hidden disabled:cursor-not-allowed"
             >
               <Edit2 className="w-4 h-4 text-text-muted-DEFAULT dark:text-text-muted-dark" />
             </button>
@@ -156,7 +158,7 @@ export function StructureEditor({ table, schema, onUpdateTable }: StructureEdito
               <th className="px-4 py-3 text-left text-xs font-semibold text-text-muted-DEFAULT dark:text-text-muted-dark uppercase">
                 Foreign Key
               </th>
-              <th className="px-4 py-3 text-center text-xs font-semibold text-text-muted-DEFAULT dark:text-text-muted-dark uppercase w-20">
+              <th className={cn("px-4 py-3 text-center text-xs font-semibold text-text-muted-DEFAULT dark:text-text-muted-dark uppercase w-20", isReadOnly ? "hidden" : "")}>
                 Actions
               </th>
             </tr>
@@ -172,6 +174,7 @@ export function StructureEditor({ table, schema, onUpdateTable }: StructureEdito
                     type="text"
                     value={column.name}
                     onChange={(e) => handleUpdateColumn(column.id, { name: e.target.value })}
+                    readOnly={isReadOnly}
                     className={cn(
                       'w-full px-3 py-1.5 rounded border font-mono text-sm',
                       'bg-background-light dark:bg-background-dark',
@@ -185,6 +188,7 @@ export function StructureEditor({ table, schema, onUpdateTable }: StructureEdito
                   <select
                     value={column.type}
                     onChange={(e) => handleUpdateColumn(column.id, { type: e.target.value as ColumnType })}
+                    disabled={isReadOnly}
                     className={cn(
                       'w-full px-3 py-1.5 rounded border text-sm',
                       'bg-background-light dark:bg-background-dark',
@@ -205,6 +209,7 @@ export function StructureEditor({ table, schema, onUpdateTable }: StructureEdito
                     type="checkbox"
                     checked={column.is_pk}
                     onChange={(e) => handleUpdateColumn(column.id, { is_pk: e.target.checked })}
+                    disabled={isReadOnly}
                     className="w-4 h-4 rounded border-border-DEFAULT dark:border-border-dark"
                   />
                 </td>
@@ -214,14 +219,15 @@ export function StructureEditor({ table, schema, onUpdateTable }: StructureEdito
                     checked={column.is_nullable}
                     onChange={(e) => handleUpdateColumn(column.id, { is_nullable: e.target.checked })}
                     className="w-4 h-4 rounded border-border-DEFAULT dark:border-border-dark"
-                    disabled={column.is_pk}
+                    disabled={column.is_pk || isReadOnly}
                   />
                 </td>
                 <td className="px-4 py-3">
                   <button
                     onClick={() => setFkModalColumn(column)}
+                    disabled={isReadOnly && !getFKInfo(column)}
                     className={cn(
-                      'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-colors w-full',
+                      'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-colors w-full disabled:hidden',
                       column.fk_target
                         ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20'
                         : 'bg-surface-highlight-light dark:bg-surface-highlight-dark text-text-muted-DEFAULT dark:text-text-muted-dark hover:bg-surface-highlight-DEFAULT dark:hover:bg-surface-highlight-dark'
@@ -233,10 +239,11 @@ export function StructureEditor({ table, schema, onUpdateTable }: StructureEdito
                     </span>
                   </button>
                 </td>
-                <td className="px-4 py-3 text-center">
+                <td className={cn("px-4 py-3 text-center", isReadOnly ? "hidden" : "")}>
                   <button
                     onClick={() => handleDeleteColumn(column.id)}
-                    className="p-1.5 rounded-lg text-red-500 hover:bg-red-500/10 transition-colors"
+                    disabled={isReadOnly}
+                    className="p-1.5 rounded-lg text-red-500 hover:bg-red-500/10 transition-colors disabled:hidden disabled:cursor-not-allowed"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -250,11 +257,13 @@ export function StructureEditor({ table, schema, onUpdateTable }: StructureEdito
       {/* Add Column Button */}
       <button
         onClick={handleAddColumn}
+        disabled={isReadOnly}
         className={cn(
           'mt-4 flex items-center gap-2 px-4 py-2 rounded-lg',
           'text-primary dark:text-primary-dark',
           'hover:bg-primary/5 dark:hover:bg-primary-dark/5',
-          'transition-colors font-medium'
+          'transition-colors font-medium',
+          'disabled:hidden disabled:cursor-not-allowed'
         )}
       >
         <Plus className="w-4 h-4" />
@@ -267,6 +276,7 @@ export function StructureEditor({ table, schema, onUpdateTable }: StructureEdito
           column={fkModalColumn}
           schema={schema}
           currentTableId={table.id}
+          isReadOnly={isReadOnly}
           onClose={() => setFkModalColumn(null)}
           onSave={(fkTarget: { table_id: string; column_id: string } | null) => {
             handleUpdateColumn(fkModalColumn.id, { fk_target: fkTarget });

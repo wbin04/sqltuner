@@ -8,19 +8,19 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.api.v1.endpoints.auth import get_current_user
-from app.core.config import settings
-from app.core.security import decrypt_password
-from app.db.session import get_db
-from app.models.models import DBConnection, DBType, User
-from app.schemas.sql import (SQLExecuteRequest, SQLExecuteResponse,
+from backend.app.api.v1.endpoints.auth import get_current_user
+from backend.app.core.config import settings
+from backend.app.core.security import decrypt_password
+from backend.app.db.session import get_db
+from backend.app.models.models import DBConnection, DBType, User
+from backend.app.schemas.sql import (SQLExecuteRequest, SQLExecuteResponse,
                                      SQLExplainPlanRequest,
                                      SQLExplainPlanResponse, SQLExplainRequest,
                                      SQLExplainResponse, SQLOptimizeRequest,
                                      SQLOptimizeResponse)
-from app.services.execution_service import simulation_executor
-from app.services.llm_service import llm_service
-from app.services.optimization_service import optimization_service
+from backend.app.services.execution_service import simulation_executor
+from backend.app.services.llm_service import llm_service
+from backend.app.services.optimization_service import optimization_service
 
 logger = logging.getLogger(__name__)
 
@@ -35,38 +35,16 @@ def resolve_docker_host(host: str) -> str:
 
 
 def build_sync_connection_string(connection: DBConnection) -> str:
-    password = ""
-    if connection.db_password:
-        try:
-            password = decrypt_password(connection.db_password)
-            logger.info("[SQL] Successfully decrypted password"
-                        f" for connection {connection.id}")
-        except Exception as e:
-            logger.error("[SQL] Password decryption failed"
-                         f" for connection {connection.id}: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=(
-                    "Failed to decrypt database password. "
-                    "The connection may have been created with a different ENCRYPTION_KEY. "
-                    "Please delete and recreate this connection."
-                )
-            )
+    password = decrypt_password(
+        connection.db_password) if connection.db_password else ""
 
-    resolved_host = connection.host
-    if connection.host in ['localhost', '127.0.0.1']:
-        resolved_host = 'host.docker.internal'
-
-    logger.info(f"[SQL] Building connection string for {connection.db_type.value} at {resolved_host}:{connection.port}")
+    resolved_host = resolve_docker_host(connection.host)
 
     if connection.db_type == DBType.POSTGRES:
-        conn_string = (
+        return (
             f"postgresql://{connection.username}:{password}@"
             f"{resolved_host}:{connection.port}/{connection.db_name}"
         )
-        if 'supabase' in connection.host.lower() or not connection.host.startswith('localhost'):
-            conn_string += "?sslmode=require"
-        return conn_string
     elif connection.db_type == DBType.MYSQL:
         return (
             f"mysql+pymysql://{connection.username}:{password}@"

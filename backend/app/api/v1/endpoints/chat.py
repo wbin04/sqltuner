@@ -9,15 +9,15 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.api.v1.endpoints.auth import get_current_user
-from app.core.prompts import (CHAT_GENERAL_SYSTEM_PROMPT,
+from backend.app.api.v1.endpoints.auth import get_current_user
+from backend.app.core.prompts import (CHAT_GENERAL_SYSTEM_PROMPT,
                                       get_chat_sql_system_prompt)
-from app.db.session import get_db
-from app.models.models import (ChatRole, Conversation, DBConnection,
+from backend.app.db.session import get_db
+from backend.app.models.models import (ChatRole, Conversation, DBConnection,
                                        QueryLog, User)
-from app.schemas.sql import (ChatCompletionRequest,
+from backend.app.schemas.sql import (ChatCompletionRequest,
                                      ChatCompletionResponse)
-from app.services.llm_service import llm_service
+from backend.app.services.llm_service import llm_service
 
 router = APIRouter()
 

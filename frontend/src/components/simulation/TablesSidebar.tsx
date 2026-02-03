@@ -10,6 +10,7 @@ import { v4 as uuidv4 } from 'uuid';
 interface TablesSidebarProps {
   schema: SimulationSchema;
   selectedTableId: string | null;
+  isReadOnly?: boolean;
   onSelectTable: (tableId: string) => void;
   onUpdateSchema: (schema: SimulationSchema) => void;
 }
@@ -17,6 +18,7 @@ interface TablesSidebarProps {
 export function TablesSidebar({
   schema,
   selectedTableId,
+  isReadOnly = false,
   onSelectTable,
   onUpdateSchema,
 }: TablesSidebarProps) {
@@ -87,11 +89,13 @@ export function TablesSidebar({
         </h2>
         <button
           onClick={handleCreateTable}
+          disabled={isReadOnly}
           className={cn(
             'w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg',
             'bg-primary dark:bg-primary-dark text-white',
             'hover:bg-primary-hover dark:hover:bg-primary-dark-hover',
-            'transition-colors font-medium'
+            'transition-colors font-medium',
+            'disabled:hidden disabled:cursor-not-allowed'
           )}
         >
           <Plus className="w-4 h-4" />
@@ -137,9 +141,11 @@ export function TablesSidebar({
                   </span>
                   <button
                     onClick={(e) => handleDeleteTable(table.id, e)}
+                    disabled={isReadOnly}
                     className={cn(
                       'p-1 rounded hover:bg-red-500/10 text-red-500',
-                      'opacity-0 group-hover:opacity-100 transition-opacity'
+                      'opacity-0 group-hover:opacity-100 transition-opacity',
+                      'disabled:hidden disabled:cursor-not-allowed'
                     )}
                     aria-label="Delete table"
                   >

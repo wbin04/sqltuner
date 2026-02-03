@@ -5,21 +5,21 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.endpoints.auth import get_current_user
-from app.core.security import encrypt_password
-from app.db.session import get_db
-from app.models.models import DBType, User
-from app.repositories.connection_repository import \
+from backend.app.api.v1.endpoints.auth import get_current_user
+from backend.app.core.security import encrypt_password
+from backend.app.db.session import get_db
+from backend.app.models.models import DBType, User
+from backend.app.repositories.connection_repository import \
     connection_repository
-from app.schemas.connection import (DBConnectionCreate,
+from backend.app.schemas.connection import (DBConnectionCreate,
                                             DBConnectionResponse,
                                             DBConnectionUpdate,
                                             DBConnectionWithSchema,
                                             SchemaSyncRequest,
                                             SchemaSyncResponse)
-from app.schemas.schema_def import SchemaDef
-from app.services.inspector_service import inspector_service
-from app.services.simulation_service import simulation_service
+from backend.app.schemas.schema_def import SchemaDef
+from backend.app.services.inspector_service import inspector_service
+from backend.app.services.simulation_service import simulation_service
 
 router = APIRouter()
 

@@ -1,22 +1,24 @@
 /**
- * SimulationDesigner Page
- * No-code database schema designer for simulation workspaces
+ * SchemaEditor Page
+ * Edit database schema for both real databases and simulations
+ * Similar to SimulationDesigner but works with any workspace type
  */
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save, Loader2, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, AlertCircle, Network } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useWorkspace } from '../hooks/useWorkspace';
 import { SimulationSchema, SimulationTable, BackendTable } from '../types/simulation';
 import { workspaceService } from '../services/workspaceService';
 import { DbType } from '../types/workspace';
 import { TablesSidebar, StructureEditor, SampleDataEditor } from '../components/simulation';
+import { SchemaDiagramModal } from '../components/editor/diagram/SchemaDiagramModal';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'react-toastify';
 
 type TabType = 'structure' | 'data';
 
-export function SimulationDesigner() {
+export function SchemaEditor() {
   const { workspaceId } = useParams<{ workspaceId: string }>();
   const navigate = useNavigate();
   const { workspace, isLoading, isError } = useWorkspace(workspaceId!);
@@ -27,37 +29,28 @@ export function SimulationDesigner() {
   });
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('structure');
+  const [isDiagramModalOpen, setIsDiagramModalOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [isLoadingData, setIsLoadingData] = useState(false);
 
-  // Load schema from workspace metadata (only once when workspace loads)
+  // Load schema from workspace metadata
   useEffect(() => {
     if (!workspace) return;
 
-    // Redirect if not a simulation workspace
-    if (workspace.db_type !== DbType.SIMULATION) {
-      navigate(`/editor/${workspaceId}`, { replace: true });
-      return;
-    }
-
-    // Initialize schema from meta_schema or use empty default
-    const loadedSchema: SimulationSchema = workspace.meta_schema && 
+    const loadedSchema = workspace.meta_schema && 
       typeof workspace.meta_schema === 'object' && 
       'tables' in workspace.meta_schema
-        ? (workspace.meta_schema as SimulationSchema)
-        : { is_simulation: true, tables: [] };
+        ? (workspace.meta_schema as any)
+        : { tables: [] };
     
     console.log('Raw schema from backend:', loadedSchema);
     
-    // CRITICAL FIX: Backend doesn't provide IDs for tables/columns, generate them
-    // Also restore FK relationships from foreign_keys array to column.fk_target
-    
-    // Step 1: Cast to backend format and generate IDs for all tables and columns first
+    // Generate IDs for all tables and columns, restore FK relationships
     const backendTables = (loadedSchema.tables || []) as BackendTable[];
-    const tableIdMap = new Map<string, string>(); // tableName -> tableId
-    const columnIdMap = new Map<string, Map<string, string>>(); // tableName -> (columnName -> columnId)
+    const tableIdMap = new Map<string, string>();
+    const columnIdMap = new Map<string, Map<string, string>>();
     
-    // First pass: Generate all IDs and build lookup maps
+    // First pass: Generate all IDs
     const tablesWithIds = backendTables.map(table => {
       const tableId = table.id || uuidv4();
       tableIdMap.set(table.name, tableId);
@@ -87,28 +80,16 @@ export function SimulationDesigner() {
       };
     });
     
-    console.log('Generated table IDs:', Object.fromEntries(tableIdMap));
-    console.log('Generated column IDs:', Object.fromEntries(
-      Array.from(columnIdMap.entries()).map(([table, cols]) => [
-        table,
-        Object.fromEntries(cols)
-      ])
-    ));
-    
-    // Second pass: Restore FK relationships using the ID maps
+    // Second pass: Restore FK relationships
     const schemaWithIds: SimulationSchema = {
-      ...loadedSchema,
+      is_simulation: true,
       tables: tablesWithIds.map(table => {
         const columnsWithFKs = table.columns.map(col => {
-          // Find FK definition for this column
           const fkDef = table.foreign_keys.find(fk => fk.column === col.name);
           
           if (fkDef) {
             const refTableId = tableIdMap.get(fkDef.ref_table);
             const refColId = columnIdMap.get(fkDef.ref_table)?.get(fkDef.ref_column);
-            
-            console.log(`FK for ${table.name}.${col.name} -> ${fkDef.ref_table}.${fkDef.ref_column}`);
-            console.log(`  Resolved IDs: table=${refTableId}, column=${refColId}`);
             
             if (refTableId && refColId) {
               return {
@@ -134,33 +115,80 @@ export function SimulationDesigner() {
     };
     
     console.log('Schema with generated IDs:', schemaWithIds);
-    console.log('Table count:', schemaWithIds.tables.length);
-    console.log('Table IDs:', schemaWithIds.tables.map(t => t.id));
-    
     setSchema(schemaWithIds);
     
-    // Select first table if available and no table is currently selected
+    // Select first table if available
     if (schemaWithIds.tables && schemaWithIds.tables.length > 0 && !selectedTableId) {
-      console.log('Auto-selecting first table:', schemaWithIds.tables[0].id);
       setSelectedTableId(schemaWithIds.tables[0].id);
     }
-  }, [workspace, workspaceId, navigate]); // Removed selectedTableId from dependencies
+  }, [workspace, workspaceId, navigate]);
 
-  // Get selected table
+  // Load table data when selecting a table (for real databases)
+  useEffect(() => {
+    async function loadTableData() {
+      if (!workspace || !selectedTableId) return;
+      
+      const selectedTable = schema.tables.find(t => t.id === selectedTableId);
+      if (!selectedTable) return;
+
+      // If already has data or is simulation, skip
+      if (selectedTable.sample_data.length > 0 || workspace.db_type === DbType.SIMULATION) {
+        return;
+      }
+
+      try {
+        setIsLoadingData(true);
+        const tableData = await workspaceService.getTableData(
+          workspaceId!,
+          selectedTable.name,
+          100 // RESULT_MAX_ROWS
+        );
+
+        // Update table with fetched data
+        setSchema(prev => ({
+          ...prev,
+          tables: prev.tables.map(t =>
+            t.id === selectedTableId
+              ? { ...t, sample_data: tableData.rows }
+              : t
+          ),
+        }));
+      } catch (error) {
+        console.error('Failed to load table data:', error);
+        if ((error as any).response?.status !== 404) {
+          toast.error(`Failed to load data for ${selectedTable.name}`);
+        }
+        // For 404 (no data) or other errors, treat as empty array
+        setSchema(prev => ({
+          ...prev,
+          tables: prev.tables.map(t =>
+            t.id === selectedTableId
+              ? { ...t, sample_data: [] }
+              : t
+          ),
+        }));
+      } finally {
+        setIsLoadingData(false);
+      }
+    }
+
+    loadTableData();
+  }, [selectedTableId, workspace, workspaceId]);
+
   const selectedTable = schema.tables.find(t => t.id === selectedTableId);
+  const isReadOnly = workspace?.db_type !== DbType.SIMULATION;
 
   const handleSaveChanges = async () => {
     if (!workspaceId) return;
 
+    if (workspace?.db_type !== DbType.SIMULATION) {
+      toast.error('Schema editing is only available for simulation workspaces');
+      return;
+    }
+
     setIsSaving(true);
-    setSaveError(null);
 
     try {
-      console.log('Saving schema:', schema);
-      console.log('Number of tables:', schema.tables.length);
-      console.log('Table names:', schema.tables.map(t => t.name));
-      console.log('Table IDs:', schema.tables.map(t => t.id));
-      
       // Transform schema to backend format
       const payload = {
         tables: schema.tables.map(table => ({
@@ -185,13 +213,12 @@ export function SimulationDesigner() {
             }),
           indexes: [],
           sample_data: table.sample_data,
+          row_count: table.sample_data.length,
         })),
       };
 
       await workspaceService.updateSimulationSchema(workspaceId, payload);
       
-      // Show success feedback
-      console.log('Schema saved successfully');
       toast.success('Schema saved successfully!', {
         position: 'top-right',
         autoClose: 3000,
@@ -199,7 +226,6 @@ export function SimulationDesigner() {
     } catch (error) {
       console.error('Failed to save schema:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to save schema';
-      setSaveError(errorMessage);
       toast.error(`Failed to save schema: ${errorMessage}`, {
         position: 'top-right',
         autoClose: 5000,
@@ -236,15 +262,6 @@ export function SimulationDesigner() {
     );
   }
 
-  // Show loading while redirecting non-simulation workspaces
-  if (workspace.db_type !== DbType.SIMULATION) {
-    return (
-      <div className="min-h-screen bg-background-light dark:bg-background-dark flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-primary dark:text-primary-dark" />
-      </div>
-    );
-  }
-
   return (
     <div className="h-screen flex flex-col bg-background-light dark:bg-background-dark">
       {/* Header */}
@@ -255,7 +272,7 @@ export function SimulationDesigner() {
       )}>
         <div className="flex items-center gap-4">
           <button
-            onClick={() => navigate('/workspaces')}
+            onClick={() => navigate(`/editor/${workspaceId}`)}
             className={cn(
               'p-2 rounded-lg transition-colors',
               'hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark'
@@ -268,18 +285,14 @@ export function SimulationDesigner() {
               {workspace.name}
             </h1>
             <p className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark">
-              Simulation Workspace - Schema Designer
+              Schema Editor - {workspace.db_type}
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-3">
-          {saveError && (
-            <p className="text-sm text-red-500">{saveError}</p>
-          )}
           <button
-            onClick={handleSaveChanges}
-            disabled={isSaving}
+            onClick={() => setIsDiagramModalOpen(true)}
             className={cn(
               'flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-white',
               'bg-primary dark:bg-primary-dark',
@@ -288,13 +301,29 @@ export function SimulationDesigner() {
               'transition-colors'
             )}
           >
-            {isSaving ? (
-              <Loader2 className="w-5 h-5 animate-spin" />
-            ) : (
-              <Save className="w-5 h-5" />
-            )}
-            {isSaving ? 'Saving...' : 'Save Changes'}
+            <Network className="w-5 h-5" />
+            View Diagram
           </button>
+          {workspace?.db_type === DbType.SIMULATION && (
+            <button
+              onClick={handleSaveChanges}
+              disabled={isSaving}
+              className={cn(
+                'flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-white',
+                'bg-primary dark:bg-primary-dark',
+                'hover:bg-primary-hover dark:hover:bg-primary-dark-hover',
+                'disabled:opacity-50 disabled:cursor-not-allowed',
+                'transition-colors'
+              )}
+            >
+              {isSaving ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <Save className="w-5 h-5" />
+              )}
+              {isSaving ? 'Saving...' : 'Save Changes'}
+            </button>
+          )}
         </div>
       </header>
 
@@ -304,12 +333,11 @@ export function SimulationDesigner() {
         <TablesSidebar
           schema={schema}
           selectedTableId={selectedTableId}
+          isReadOnly={isReadOnly}
           onSelectTable={(tableId) => {
-            console.log('Selecting table:', tableId);
             setSelectedTableId(tableId);
           }}
           onUpdateSchema={(updatedSchema) => {
-            console.log('Updating schema from sidebar:', updatedSchema);
             setSchema(updatedSchema);
           }}
         />
@@ -344,7 +372,8 @@ export function SimulationDesigner() {
                       : 'text-text-muted-DEFAULT dark:text-text-muted-dark hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark'
                   )}
                 >
-                  Sample Data
+                  Sample Data ({selectedTable.sample_data.length} rows)
+                  {isLoadingData && <Loader2 className="inline w-3 h-3 ml-2 animate-spin" />}
                 </button>
               </div>
 
@@ -355,6 +384,7 @@ export function SimulationDesigner() {
                     key={selectedTable.id}
                     table={selectedTable}
                     schema={schema}
+                    isReadOnly={isReadOnly}
                     onUpdateTable={(updatedTable: SimulationTable) => {
                       setSchema(prev => ({
                         ...prev,
@@ -368,6 +398,7 @@ export function SimulationDesigner() {
                   <SampleDataEditor
                     key={selectedTable.id}
                     table={selectedTable}
+                    isReadOnly={isReadOnly}
                     onUpdateTable={(updatedTable: SimulationTable) => {
                       setSchema(prev => ({
                         ...prev,
@@ -384,12 +415,44 @@ export function SimulationDesigner() {
             <div className="flex-1 flex items-center justify-center">
               <div className="text-center text-text-muted-DEFAULT dark:text-text-muted-dark">
                 <p className="text-lg mb-2">No table selected</p>
-                <p className="text-sm">Create or select a table to get started</p>
+                <p className="text-sm">Select a table to edit its structure and data</p>
               </div>
             </div>
           )}
         </main>
       </div>
+
+      
+      {/* Diagram Modal */}
+      <SchemaDiagramModal
+        isOpen={isDiagramModalOpen}
+        onClose={() => setIsDiagramModalOpen(false)}
+        schema={{
+          database_name: workspace?.name,
+          db_type: 'simulation',
+          tables: schema.tables.map(table => ({
+            name: table.name,
+            columns: table.columns.map(col => ({
+              name: col.name,
+              type: col.type,
+              is_nullable: col.is_nullable,
+              is_pk: col.is_pk
+            })),
+            foreign_keys: table.columns
+              .filter(col => col.fk_target)
+              .map(col => {
+                const refTable = schema.tables.find(t => t.id === col.fk_target!.table_id);
+                const refCol = refTable?.columns.find(c => c.id === col.fk_target!.column_id);
+                return {
+                  column: col.name,
+                  ref_table: refTable!.name,
+                  ref_column: refCol!.name
+                };
+              }),
+            row_count: table.sample_data?.length || 0
+          }))
+        }}
+      />
     </div>
   );
 }

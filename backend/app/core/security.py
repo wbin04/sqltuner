@@ -6,7 +6,7 @@ from cryptography.fernet import Fernet
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
-from app.core.config import settings
+from backend.app.core.config import settings
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -50,7 +50,7 @@ def decode_access_token(token: str) -> Optional[dict]:
 
 class PasswordEncryption:
     def __init__(self):
-        encryption_key = settings.ENCRYPTION_KEY
+        encryption_key = os.getenv("ENCRYPTION_KEY")
         if not encryption_key:
             encryption_key = Fernet.generate_key().decode()
             print(

@@ -79,4 +79,31 @@ export const workspaceService = {
   async updateSimulationSchema(id: string, schema: any): Promise<void> {
     await api.put(`${BASE_URL}/${id}/schema`, schema);
   },
+
+  /**
+   * Get table data with limit
+   * Works for both real and simulation databases
+   */
+  async getTableData(id: string, tableName: string, limit: number = 100): Promise<{
+    columns: string[];
+    rows: Record<string, any>[];
+    total_rows: number;
+  }> {
+    const response = await api.get(`${BASE_URL}/${id}/tables/${tableName}/data`, {
+      params: { limit }
+    });
+    return response.data;
+  },
+
+  /**
+   * Update table data (for simulation or real database)
+   */
+  async updateTableData(id: string, tableName: string, data: {
+    columns: any[];
+    sample_data: any[];
+  }): Promise<void> {
+    // For now, this updates the entire schema
+    // TODO: Create dedicated endpoint for single table update
+    await api.put(`${BASE_URL}/${id}/tables/${tableName}`, data);
+  },
 };

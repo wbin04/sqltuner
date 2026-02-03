@@ -11,6 +11,7 @@ interface ForeignKeyModalProps {
   column: SimulationColumn;
   schema: SimulationSchema;
   currentTableId: string;
+  isReadOnly?: boolean;
   onClose: () => void;
   onSave: (fkTarget: ForeignKeyTarget | null) => void;
 }
@@ -19,6 +20,7 @@ export function ForeignKeyModal({
   column,
   schema,
   currentTableId,
+  isReadOnly = false,
   onClose,
   onSave,
 }: ForeignKeyModalProps) {
@@ -89,12 +91,14 @@ export function ForeignKeyModal({
                 setSelectedTableId(e.target.value);
                 setSelectedColumnId('');
               }}
+              disabled={isReadOnly}
               className={cn(
                 'w-full px-3 py-2 rounded-lg border',
                 'bg-background-light dark:bg-background-dark',
                 'border-border-DEFAULT dark:border-border-dark',
                 'text-text-main-DEFAULT dark:text-text-main-dark',
-                'focus:outline-none focus:ring-2 focus:ring-primary/50'
+                'focus:outline-none focus:ring-2 focus:ring-primary/50',
+                'disabled:opacity-50'
               )}
             >
               <option value="">-- Select Table --</option>
@@ -115,6 +119,7 @@ export function ForeignKeyModal({
               <select
                 value={selectedColumnId}
                 onChange={(e) => setSelectedColumnId(e.target.value)}
+                disabled={isReadOnly}
                 className={cn(
                   'w-full px-3 py-2 rounded-lg border',
                   'bg-background-light dark:bg-background-dark',
@@ -146,9 +151,11 @@ export function ForeignKeyModal({
           {column.fk_target && (
             <button
               onClick={handleRemove}
+              disabled={isReadOnly}
               className={cn(
                 'px-4 py-2 rounded-lg font-medium transition-colors',
-                'bg-red-500 text-white hover:bg-red-600'
+                'bg-red-500 text-white hover:bg-red-600',
+                'disabled:hidden disabled:cursor-not-allowed'
               )}
             >
               Remove FK
@@ -168,12 +175,12 @@ export function ForeignKeyModal({
           </button>
           <button
             onClick={handleSave}
-            disabled={!selectedTableId || !selectedColumnId}
+            disabled={!selectedTableId || !selectedColumnId || isReadOnly}
             className={cn(
               'px-4 py-2 rounded-lg font-medium text-white transition-colors',
               'bg-primary dark:bg-primary-dark',
               'hover:bg-primary-hover dark:hover:bg-primary-dark-hover',
-              'disabled:opacity-50 disabled:cursor-not-allowed'
+              'disabled:hidden disabled:cursor-not-allowed'
             )}
           >
             Save

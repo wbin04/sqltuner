@@ -4,11 +4,11 @@ from uuid import UUID
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import decrypt_password
-from app.models.models import DBType
-from app.repositories.connection_repository import \
+from backend.app.core.security import decrypt_password
+from backend.app.models.models import DBType
+from backend.app.repositories.connection_repository import \
     connection_repository
-from app.schemas.schema_def import (ColumnDef, ForeignKeyDef, IndexDef,
+from backend.app.schemas.schema_def import (ColumnDef, ForeignKeyDef, IndexDef,
                                             SchemaDef, TableDef)
 
 
@@ -119,16 +119,8 @@ class DatabaseInspectorService:
                 connection.db_type.value == 'simulation'):
             raise ValueError("Cannot sync schema from a simulation connection")
 
-        try:
-            password = decrypt_password(connection.db_password)
-        except Exception as e:
-            logger.error(f"[INSPECTOR] Failed to decrypt password: {str(e)}")
-            raise ValueError(
-                f"Database connection error: Invalid credentials configuration. "
-                f"Please delete and recreate this connection."
-            )
+        password = decrypt_password(connection.db_password)
 
-        # Don't resolve to docker host for cloud providers
         resolved_host = connection.host
         if connection.host in ['localhost', '127.0.0.1']:
             resolved_host = 'host.docker.internal'
@@ -138,9 +130,6 @@ class DatabaseInspectorService:
                 f"postgresql://{connection.username}:{password}@"
                 f"{resolved_host}:{connection.port}/{connection.db_name}"
             )
-            # Add SSL for cloud providers like Supabase
-            if 'supabase' in connection.host.lower() or not connection.host.startswith('localhost'):
-                db_url += "?sslmode=require"
         elif connection.db_type == DBType.MYSQL:
             db_url = (
                 f"mysql+pymysql://{connection.username}:{password}@"

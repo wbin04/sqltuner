@@ -5,8 +5,8 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.models import Conversation
-from app.repositories.base import BaseRepository
+from backend.app.models.models import Conversation
+from backend.app.repositories.base import BaseRepository
 
 
 class ConversationCreate(BaseModel):

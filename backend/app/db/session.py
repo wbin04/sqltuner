@@ -3,7 +3,7 @@ from typing import AsyncGenerator
 from sqlalchemy.ext.asyncio import (AsyncSession, async_sessionmaker,
                                     create_async_engine)
 
-from app.core.config import settings
+from backend.app.core.config import settings
 
 if settings.ENABLE_DATABASE and settings.SQLALCHEMY_DATABASE_URL:
     engine = create_async_engine(
@@ -11,16 +11,6 @@ if settings.ENABLE_DATABASE and settings.SQLALCHEMY_DATABASE_URL:
         echo=True,
         future=True,
         pool_pre_ping=True,
-        connect_args={
-            "statement_cache_size": 0,
-            "prepared_statement_cache_size": 0,
-            "server_settings": {
-                "jit": "off",
-                "application_name": "sqltuner"
-            }
-        },
-        pool_size=5,
-        max_overflow=10
     )
 
     AsyncSessionLocal = async_sessionmaker(

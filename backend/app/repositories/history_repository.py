@@ -5,10 +5,10 @@ from sqlalchemy import and_, desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.models import (Conversation, DBConnection,
+from backend.app.models.models import (Conversation, DBConnection,
                                        PerformanceAnalysis, QueryLog)
-from app.repositories.base import BaseRepository
-from app.repositories.query_log_repository import (QueryLogCreate,
+from backend.app.repositories.base import BaseRepository
+from backend.app.repositories.query_log_repository import (QueryLogCreate,
                                                            QueryLogUpdate)
 
 
@@ -110,7 +110,7 @@ class HistoryRepository(
         conversation_id: UUID,
         after_timestamp
     ) -> Optional[QueryLog]:
-        from app.models.models import ChatRole
+        from backend.app.models.models import ChatRole
 
         query = (
             select(QueryLog)

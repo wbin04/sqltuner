@@ -10,10 +10,10 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.core.security import decrypt_password
-from app.models.models import (Conversation, DBConnection, DBType,
+from backend.app.core.security import decrypt_password
+from backend.app.models.models import (Conversation, DBConnection, DBType,
                                        PerformanceAnalysis, QueryLog)
-from app.services.llm_service import llm_service
+from backend.app.services.llm_service import llm_service
 
 logger = logging.getLogger(__name__)
 
@@ -66,40 +66,26 @@ class OptimizationCache:
 class ConnectionStringBuilder:
     @staticmethod
     def resolve_docker_host(host: str) -> str:
-        """Only resolve localhost to docker host, keep cloud providers as-is"""
         if host in ["localhost", "127.0.0.1"]:
             return "host.docker.internal"
         return host
 
     @staticmethod
     def build(connection: DBConnection) -> str:
-        """Build database connection string with SSL support for cloud providers"""
-        password = ""
-        if connection.db_password:
-            try:
-                password = decrypt_password(connection.db_password)
-                logger.info(f"[OPTIMIZE] Password decrypted for connection {connection.id}")
-            except Exception as e:
-                logger.error(f"[OPTIMIZE] Failed to decrypt password: {str(e)}")
-                # Don't raise, return None and let caller handle
-                raise ValueError(
-                    f"Database connection error: Invalid credentials configuration. "
-                    f"Please delete and recreate this connection."
-                )
-        
+        password = (
+            decrypt_password(connection.db_password)
+            if connection.db_password
+            else ""
+        )
         resolved_host = ConnectionStringBuilder.resolve_docker_host(
             connection.host
         )
 
         if connection.db_type == DBType.POSTGRES:
-            conn_string = (
+            return (
                 f"postgresql://{connection.username}:{password}@"
                 f"{resolved_host}:{connection.port}/{connection.db_name}"
             )
-            # Add SSL mode for cloud providers like Supabase
-            if 'supabase' in connection.host.lower() or not connection.host.startswith('localhost'):
-                conn_string += "?sslmode=require"
-            return conn_string
         elif connection.db_type == DBType.MYSQL:
             return (
                 f"mysql+pymysql://{connection.username}:{password}@"
