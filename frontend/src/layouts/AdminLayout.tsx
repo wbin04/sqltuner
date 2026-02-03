@@ -84,7 +84,7 @@ export function AdminLayout({ children, currentPage, onNavigate, onLogout }: Adm
       {/* Main Content */}
       <main className="flex-1 flex flex-col overflow-hidden">
         {/* Topbar */}
-        <header className="h-16 border-b border-border-DEFAULT dark:border-border-dark bg-surface-DEFAULT dark:bg-surface-dark px-6 flex items-center justify-between">
+        <header className="h-16 border-b border-border-DEFAULT dark:border-border-dark bg-surface-light dark:bg-surface-dark px-6 flex items-center justify-between">
           <div className="flex items-center gap-2 text-sm text-text-muted-DEFAULT dark:text-text-muted-dark">
             <span>Admin</span>
             <span>/</span>

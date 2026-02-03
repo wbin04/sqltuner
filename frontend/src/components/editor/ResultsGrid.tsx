@@ -60,7 +60,7 @@ export function ResultsGrid({ result, loading = false }: ResultsGridProps) {
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="px-4 py-3 bg-surface-DEFAULT dark:bg-midnight-900 border-b border-border-DEFAULT dark:border-midnight-800 flex items-center justify-between">
+      <div className="px-4 py-3 bg-surface-light dark:bg-midnight-900 border-b border-border-DEFAULT dark:border-midnight-800 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <span className="text-sm font-medium text-text-main-DEFAULT dark:text-text-main-dark">
             {result.rowCount} {result.rowCount === 1 ? 'row' : 'rows'}
@@ -83,7 +83,7 @@ export function ResultsGrid({ result, loading = false }: ResultsGridProps) {
       {/* Table */}
       <div className="flex-1 overflow-auto">
         <table className="w-full text-sm">
-          <thead className="bg-surface-DEFAULT dark:bg-midnight-900 sticky top-0 z-10">
+          <thead className="bg-surface-light dark:bg-midnight-900 sticky top-0 z-10">
             <tr>
               <th className="px-4 py-2 text-left text-xs font-medium text-text-muted-DEFAULT dark:text-text-muted-dark uppercase tracking-wider border-b border-border-DEFAULT dark:border-midnight-800 w-12">
                 #

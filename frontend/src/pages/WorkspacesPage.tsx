@@ -61,8 +61,8 @@ export function WorkspacesPage() {
         <div className="container mx-auto px-6 py-8">
           {/* Header Skeleton */}
           <div className="mb-8">
-            <div className="h-10 w-48 bg-surface-DEFAULT dark:bg-surface-dark rounded animate-pulse mb-2" />
-            <div className="h-4 w-96 bg-surface-DEFAULT dark:bg-surface-dark rounded animate-pulse" />
+            <div className="h-10 w-48 bg-surface-light dark:bg-surface-dark rounded animate-pulse mb-2" />
+            <div className="h-4 w-96 bg-surface-light dark:bg-surface-dark rounded animate-pulse" />
           </div>
 
           {/* Grid Skeleton */}
@@ -70,7 +70,7 @@ export function WorkspacesPage() {
             {[1, 2, 3, 4, 5, 6].map((i) => (
               <div
                 key={i}
-                className="h-64 bg-surface-DEFAULT dark:bg-surface-dark rounded-xl animate-pulse"
+                className="h-64 bg-surface-light dark:bg-surface-dark rounded-xl animate-pulse"
               />
             ))}
           </div>
@@ -144,7 +144,7 @@ export function WorkspacesPage() {
           <div className="flex flex-col items-center justify-center py-16">
             <div className={cn(
               'w-24 h-24 rounded-full flex items-center justify-center mb-6',
-              'bg-surface-DEFAULT dark:bg-surface-dark',
+              'bg-surface-light dark:bg-surface-dark',
               'border-2 border-dashed border-border-DEFAULT dark:border-border-dark'
             )}>
               <Database className="w-12 h-12 text-text-muted-DEFAULT dark:text-text-muted-dark" />

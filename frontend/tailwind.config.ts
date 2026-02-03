@@ -15,7 +15,7 @@ export default {
           dark: '#020617',    // Dark: slate-950
         },
         surface: {
-          DEFAULT: '#ffffff',   // Light: white
+          light: '#ffffff',   // Light: white
           dark: '#0F172A',      // Dark: slate-900
           highlight: {
             light: '#e2e8f0', // Light: slate-200

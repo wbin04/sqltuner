@@ -100,7 +100,7 @@ export function FeedbackReview() {
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4">
-        <div className="bg-surface-DEFAULT dark:bg-surface-dark rounded-lg border border-border-DEFAULT dark:border-border-dark p-4">
+        <div className="bg-surface-light dark:bg-surface-dark rounded-lg border border-border-DEFAULT dark:border-border-dark p-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-orange-500/10 rounded-lg flex items-center justify-center">
               <Clock className="w-5 h-5 text-orange-500" />
@@ -113,7 +113,7 @@ export function FeedbackReview() {
             </div>
           </div>
         </div>
-        <div className="bg-surface-DEFAULT dark:bg-surface-dark rounded-lg border border-border-DEFAULT dark:border-border-dark p-4">
+        <div className="bg-surface-light dark:bg-surface-dark rounded-lg border border-border-DEFAULT dark:border-border-dark p-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-red-500/10 rounded-lg flex items-center justify-center">
               <AlertCircle className="w-5 h-5 text-red-500" />
@@ -126,7 +126,7 @@ export function FeedbackReview() {
             </div>
           </div>
         </div>
-        <div className="bg-surface-DEFAULT dark:bg-surface-dark rounded-lg border border-border-DEFAULT dark:border-border-dark p-4">
+        <div className="bg-surface-light dark:bg-surface-dark rounded-lg border border-border-DEFAULT dark:border-border-dark p-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-green-500/10 rounded-lg flex items-center justify-center">
               <CheckCircle className="w-5 h-5 text-green-500" />
@@ -142,7 +142,7 @@ export function FeedbackReview() {
       </div>
 
       {/* Table */}
-      <div className="bg-surface-DEFAULT dark:bg-surface-dark rounded-xl border border-border-DEFAULT dark:border-border-dark overflow-hidden">
+      <div className="bg-surface-light dark:bg-surface-dark rounded-xl border border-border-DEFAULT dark:border-border-dark overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-surface-highlight-DEFAULT dark:bg-surface-highlight-dark border-b border-border-DEFAULT dark:border-border-dark">

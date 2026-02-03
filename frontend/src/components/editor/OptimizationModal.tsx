@@ -146,7 +146,7 @@ export function OptimizationModal({
               </div>
             </div>
           ) : (
-            <div className="h-full overflow-auto bg-surface-DEFAULT dark:bg-surface-dark">
+            <div className="h-full overflow-auto bg-surface-light dark:bg-surface-dark">
               <div className="font-mono text-sm">
                 {/* Intelligent Inline Diff View */}
                 {(() => {

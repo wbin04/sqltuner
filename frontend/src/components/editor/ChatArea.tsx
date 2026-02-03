@@ -43,11 +43,28 @@ export function ChatArea({
   const inputValue = externalInputValue !== undefined ? externalInputValue : internalInputValue;
   const setInputValue = onUpdateInput || setInternalInputValue;
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Auto scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Auto-resize textarea based on content
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      // Reset height to auto to get the correct scrollHeight
+      textarea.style.height = 'auto';
+      // Set height to scrollHeight, but limit to max height
+      const maxHeight = 200; // Maximum height in pixels (about 8-10 lines)
+      const scrollHeight = textarea.scrollHeight;
+      textarea.style.height = Math.min(scrollHeight, maxHeight) + 'px';
+      
+      // Add overflow if content exceeds max height
+      textarea.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden';
+    }
+  }, [inputValue]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,7 +98,7 @@ export function ChatArea({
                 onClick={() => setInputValue('Show me all users registered in the last 7 days')}
                 className={cn(
                   'px-4 py-3 rounded-lg text-left text-sm transition-all',
-                  'bg-surface-DEFAULT dark:bg-surface-dark',
+                  'bg-surface-light dark:bg-surface-dark',
                   'border border-border-DEFAULT dark:border-border-dark',
                   'hover:border-primary/50 dark:hover:border-primary-dark/50',
                   'hover:shadow-md'
@@ -98,7 +115,7 @@ export function ChatArea({
                 onClick={() => setInputValue('Why is this query slow?')}
                 className={cn(
                   'px-4 py-3 rounded-lg text-left text-sm transition-all',
-                  'bg-surface-DEFAULT dark:bg-surface-dark',
+                  'bg-surface-light dark:bg-surface-dark',
                   'border border-border-DEFAULT dark:border-border-dark',
                   'hover:border-primary/50 dark:hover:border-primary-dark/50',
                   'hover:shadow-md'
@@ -127,7 +144,7 @@ export function ChatArea({
                     'max-w-3xl rounded-xl px-4 py-3',
                     message.role === 'user'
                       ? 'bg-primary dark:bg-primary-dark text-white'
-                      : 'bg-surface-DEFAULT dark:bg-surface-dark border border-border-DEFAULT dark:border-border-dark'
+                      : 'bg-surface-light dark:bg-surface-dark border border-border-DEFAULT dark:border-border-dark'
                   )}>
                     {/* Loading indicator for Processing message */}
                     {message.content === 'Processing...' && message.role === 'assistant' ? (
@@ -152,7 +169,7 @@ export function ChatArea({
                 {message.sql_generated && (
                   <div className={cn(
                     'max-w-3xl rounded-xl overflow-hidden',
-                    'bg-surface-DEFAULT dark:bg-surface-dark',
+                    'bg-surface-light dark:bg-surface-dark',
                     'border border-border-DEFAULT dark:border-border-dark'
                   )}>
                     {/* SQL Code */}
@@ -186,7 +203,7 @@ export function ChatArea({
                         disabled={isExecuting}
                         className={cn(
                           'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
-                          'bg-surface-DEFAULT dark:bg-surface-dark',
+                          'bg-surface-light dark:bg-surface-dark',
                           'border border-border-DEFAULT dark:border-border-dark',
                           'hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark',
                           'disabled:opacity-50 disabled:cursor-not-allowed'
@@ -223,12 +240,13 @@ export function ChatArea({
       {/* Input Area */}
       <div className={cn(
         'border-t border-border-DEFAULT dark:border-border-dark',
-        'bg-surface-DEFAULT dark:bg-surface-dark',
+        'bg-surface-light dark:bg-surface-dark',
         'p-4'
       )}>
         <form onSubmit={handleSubmit} className="max-w-4xl mx-auto">
-          <div className="flex gap-3">
+          <div className="flex gap-3 items-end">
             <textarea
+              ref={textareaRef}
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               placeholder="Ask me anything about your database..."
@@ -238,9 +256,9 @@ export function ChatArea({
                 'border border-border-DEFAULT dark:border-border-dark',
                 'text-text-main-DEFAULT dark:text-text-main-dark',
                 'placeholder:text-text-muted-DEFAULT dark:placeholder:text-text-muted-dark',
-                'focus:outline-none focus:ring-2 focus:ring-primary/50 dark:focus:ring-primary-dark/50'
+                'focus:outline-none focus:ring-2 focus:ring-primary/50 dark:focus:ring-primary-dark/50',
+                'min-h-[60px] max-h-[200px]'
               )}
-              rows={3}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
@@ -252,11 +270,12 @@ export function ChatArea({
               type="submit"
               disabled={!inputValue.trim() || isLoading}
               className={cn(
-                'px-6 py-3 rounded-lg font-medium text-white flex items-center gap-2',
+                'px-6 py-3 rounded-lg font-medium text-white flex items-center gap-2 flex-shrink-0',
                 'bg-primary dark:bg-primary-dark',
                 'hover:bg-primary-hover dark:hover:bg-primary-dark-hover',
                 'disabled:opacity-50 disabled:cursor-not-allowed',
-                'transition-colors'
+                'transition-colors',
+                'h-[60px]'
               )}
             >
               <Send className="w-5 h-5" />
