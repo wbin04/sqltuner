@@ -10,10 +10,10 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from backend.app.core.security import decrypt_password
-from backend.app.models.models import (Conversation, DBConnection, DBType,
+from app.core.security import decrypt_password
+from app.models.models import (Conversation, DBConnection, DBType,
                                        PerformanceAnalysis, QueryLog)
-from backend.app.services.llm_service import llm_service
+from app.services.llm_service import llm_service
 
 logger = logging.getLogger(__name__)
 

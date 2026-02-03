@@ -1,4 +1,4 @@
-from backend.app.schemas.connection import (ConversationCreate,
+from app.schemas.connection import (ConversationCreate,
                                             ConversationResponse,
                                             DBConnectionCreate,
                                             DBConnectionResponse,

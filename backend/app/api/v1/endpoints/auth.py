@@ -5,12 +5,12 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.core.config import settings
-from backend.app.core.security import (create_access_token,
+from app.core.config import settings
+from app.core.security import (create_access_token,
                                        decode_access_token, verify_password)
-from backend.app.db.session import get_db
-from backend.app.models.models import User
-from backend.app.schemas.token import LoginRequest, LoginResponse, UserResponse
+from app.db.session import get_db
+from app.models.models import User
+from app.schemas.token import LoginRequest, LoginResponse, UserResponse
 
 router = APIRouter()
 

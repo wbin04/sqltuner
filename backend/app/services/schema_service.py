@@ -7,9 +7,9 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.core.security import decrypt_password
-from backend.app.models.models import DBType
-from backend.app.repositories.connection_repository import \
+from app.core.security import decrypt_password
+from app.models.models import DBType
+from app.repositories.connection_repository import \
     connection_repository
 
 logger = logging.getLogger(__name__)

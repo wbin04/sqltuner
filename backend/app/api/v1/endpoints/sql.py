@@ -8,19 +8,19 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from backend.app.api.v1.endpoints.auth import get_current_user
-from backend.app.core.config import settings
-from backend.app.core.security import decrypt_password
-from backend.app.db.session import get_db
-from backend.app.models.models import DBConnection, DBType, User
-from backend.app.schemas.sql import (SQLExecuteRequest, SQLExecuteResponse,
+from app.api.v1.endpoints.auth import get_current_user
+from app.core.config import settings
+from app.core.security import decrypt_password
+from app.db.session import get_db
+from app.models.models import DBConnection, DBType, User
+from app.schemas.sql import (SQLExecuteRequest, SQLExecuteResponse,
                                      SQLExplainPlanRequest,
                                      SQLExplainPlanResponse, SQLExplainRequest,
                                      SQLExplainResponse, SQLOptimizeRequest,
                                      SQLOptimizeResponse)
-from backend.app.services.execution_service import simulation_executor
-from backend.app.services.llm_service import llm_service
-from backend.app.services.optimization_service import optimization_service
+from app.services.execution_service import simulation_executor
+from app.services.llm_service import llm_service
+from app.services.optimization_service import optimization_service
 
 logger = logging.getLogger(__name__)
 

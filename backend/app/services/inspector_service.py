@@ -4,11 +4,11 @@ from uuid import UUID
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.core.security import decrypt_password
-from backend.app.models.models import DBType
-from backend.app.repositories.connection_repository import \
+from app.core.security import decrypt_password
+from app.models.models import DBType
+from app.repositories.connection_repository import \
     connection_repository
-from backend.app.schemas.schema_def import (ColumnDef, ForeignKeyDef, IndexDef,
+from app.schemas.schema_def import (ColumnDef, ForeignKeyDef, IndexDef,
                                             SchemaDef, TableDef)
 
 

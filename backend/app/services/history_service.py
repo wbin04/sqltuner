@@ -3,8 +3,8 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.models.models import ChatRole, QueryLog
-from backend.app.repositories.history_repository import history_repository
+from app.models.models import ChatRole, QueryLog
+from app.repositories.history_repository import history_repository
 
 
 class HistoryService:

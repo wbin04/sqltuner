@@ -4,8 +4,8 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from backend.app.models.models import DBConnection
-from backend.app.schemas.schema_def import SchemaDef
+from app.models.models import DBConnection
+from app.schemas.schema_def import SchemaDef
 
 
 class SimulationService:
