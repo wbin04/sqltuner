@@ -23,6 +23,7 @@ interface ChatAreaProps {
   inputValue?: string;
   onUpdateInput?: (value: string) => void;
   isLoading?: boolean;
+  isExecuting?: boolean;
 }
 
 export function ChatArea({
@@ -34,6 +35,7 @@ export function ChatArea({
   inputValue: externalInputValue,
   onUpdateInput,
   isLoading = false,
+  isExecuting = false,
 }: ChatAreaProps) {
   const [internalInputValue, setInternalInputValue] = useState('');
   
@@ -164,22 +166,30 @@ export function ChatArea({
                     <div className="flex items-center gap-2 px-4 py-3 bg-surface-highlight-DEFAULT dark:bg-surface-highlight-dark border-t border-border-DEFAULT dark:border-border-dark">
                       <button
                         onClick={() => onRunQuery(message.sql_generated!)}
+                        disabled={isExecuting}
                         className={cn(
                           'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
                           'bg-green-600 dark:bg-green-600 text-white',
-                          'hover:bg-green-700 dark:hover:bg-green-700'
+                          'hover:bg-green-700 dark:hover:bg-green-700',
+                          'disabled:opacity-50 disabled:cursor-not-allowed'
                         )}
                       >
-                        <Play className="w-4 h-4" />
-                        Run Query
+                        {isExecuting ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Play className="w-4 h-4" />
+                        )}
+                        {isExecuting ? 'Executing...' : 'Run Query'}
                       </button>
                       <button
                         onClick={() => onExplain(message.sql_generated!)}
+                        disabled={isExecuting}
                         className={cn(
                           'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
                           'bg-surface-DEFAULT dark:bg-surface-dark',
                           'border border-border-DEFAULT dark:border-border-dark',
-                          'hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark'
+                          'hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark',
+                          'disabled:opacity-50 disabled:cursor-not-allowed'
                         )}
                       >
                         <LineChart className="w-4 h-4" />
@@ -187,11 +197,13 @@ export function ChatArea({
                       </button>
                       <button
                         onClick={() => onOptimize(message.sql_generated!)}
+                        disabled={isExecuting}
                         className={cn(
                           'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
                           'bg-gradient-to-r from-primary to-secondary dark:from-primary-dark dark:to-secondary-dark',
                           'text-white',
-                          'hover:shadow-lg'
+                          'hover:shadow-lg',
+                          'disabled:opacity-50 disabled:cursor-not-allowed'
                         )}
                       >
                         <Sparkles className="w-4 h-4" />

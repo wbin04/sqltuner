@@ -14,6 +14,9 @@ export interface SQLExecuteResponse {
   rows: Record<string, any>[];
   execution_time_ms: number;
   row_count: number;
+  total_rows: number;
+  truncated: boolean;
+  max_rows: number;
 }
 
 export interface SQLExplainPlanRequest {

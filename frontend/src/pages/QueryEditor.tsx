@@ -125,7 +125,8 @@ export function QueryEditor() {
     }, 1000);
   };
 
-  const handleExecuteQuery = () => {
+  const handleExecuteQuery = (sql: string) => {
+    console.log('Executing SQL:', sql);
     setIsExecuting(true);
     setRightPanelTab('results');
     setIsRightPanelOpen(true);
@@ -147,13 +148,13 @@ export function QueryEditor() {
     }, 1500);
   };
 
-  const handleExplain = (queryLogId: string) => {
-    console.log('Explain query:', queryLogId);
+  const handleExplain = (sql: string) => {
+    console.log('Explain query:', sql);
     
     // Mock performance analysis
     const mockAnalysis: PerformanceAnalysis = {
       id: 'perf-1',
-      query_log_id: queryLogId,
+      query_log_id: 'temp-id',
       execution_time_ms: 850,
       total_cost: 125.45,
       explain_plan: {
@@ -175,9 +176,9 @@ export function QueryEditor() {
     setIsPerformanceModalOpen(true);
   };
 
-  const handleOptimize = (queryLogId: string) => {
-    console.log('Optimize query:', queryLogId);
-    // TODO: Trigger optimization
+  const handleOptimize = (sql: string) => {
+    console.log('Optimize query:', sql);
+    // TODO: Trigger optimization with the actual SQL
   };
 
   const handleFeedback = (queryLogId: string, rating: 0 | 1, correctedSql?: string, comment?: string) => {

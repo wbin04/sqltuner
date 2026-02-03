@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from backend.app.api.v1.endpoints.auth import get_current_user
+from backend.app.core.prompts import (CHAT_GENERAL_SYSTEM_PROMPT,
+                                      get_chat_sql_system_prompt)
 from backend.app.db.session import get_db
 from backend.app.models.models import (ChatRole, Conversation, DBConnection,
                                        QueryLog, User)
@@ -176,16 +178,39 @@ async def chat_completion(
         connection.db_type.value if connection.db_type else "PostgreSQL"
     )
 
-    system_prompt = (
-        f"You are an expert SQL assistant for {db_type_name} databases.\n\n"
-        f"{schema_text}\n\n"
-        f"Instructions:\n"
-        f"- Answer user questions about the database\n"
-        f"- Generate SQL queries when requested\n"
-        f"- Explain query results clearly\n"
-        f"- If generating SQL, wrap it in ```sql code blocks\n"
-        f"- Be concise and helpful"
-    )
+    dialect = connection.db_type.value if connection.db_type else "postgres"
+
+    is_sql_query = llm_service._is_sql_query(request.message)
+    extracted_sql = None
+
+    if is_sql_query:
+        extracted_sql = llm_service._extract_sql_from_message(request.message)
+
+        sql_system_prompt = get_chat_sql_system_prompt(dialect)
+        system_note = (
+            f"[SYSTEM NOTE: Ensure all SQL syntax is valid "
+            f"for {dialect.upper()}]"
+        )
+        system_prompt = (
+            f"{sql_system_prompt}\n\n"
+            f"Database Type: {db_type_name}\n\n"
+            f"{schema_text}\n\n"
+            f"{system_note}"
+        )
+        logger.info(f"[CHAT] Using SQL analysis prompt for dialect: {dialect}")
+    else:
+        system_prompt = (
+            f"{CHAT_GENERAL_SYSTEM_PROMPT}\n\n"
+            f"Database Type: {db_type_name}\n\n"
+            f"{schema_text}\n\n"
+            f"Instructions:\n"
+            f"- Answer user questions about the database\n"
+            f"- Generate SQL queries when requested\n"
+            f"- Explain query results clearly\n"
+            f"- If generating SQL, wrap it in ```sql code blocks\n"
+            f"- Be concise and helpful"
+        )
+        logger.info("[CHAT] Using general chat system prompt")
 
     prompt_size = len(system_prompt) + len(request.message)
     print(f"[DEBUG-CHAT] Total prompt size: {prompt_size:,} bytes")
@@ -197,7 +222,7 @@ async def chat_completion(
             prompt=request.message,
             system_prompt=system_prompt,
             temperature=0.3,
-            max_tokens=256  # Reduced from 512 for faster response
+            max_tokens=256
         )
         llm_duration = time.time() - llm_start
         print(f"[DEBUG-CHAT] LLM took: {llm_duration:.2f}s")
@@ -216,6 +241,8 @@ async def chat_completion(
             sql_generated = llm_response[sql_start:sql_end].strip()
         except (ValueError, IndexError):
             pass
+
+    detected_sql = extracted_sql
 
     user_log = QueryLog(
         id=uuid4(),
@@ -238,12 +265,18 @@ async def chat_completion(
 
     await db.commit()
 
-    return ChatCompletionResponse(
-        conversation_id=conversation_id,
-        role="assistant",
-        content=llm_response,
-        sql_generated=sql_generated
-    )
+    response_data = {
+        "conversation_id": conversation_id,
+        "role": "assistant",
+        "content": llm_response,
+        "sql_generated": sql_generated
+    }
+
+    if detected_sql:
+        response_data["detected_sql"] = detected_sql
+        logger.info(f"[CHAT] Returning detected SQL: {detected_sql[:50]}...")
+
+    return ChatCompletionResponse(**response_data)
 
 
 @router.get("/conversations/{connection_id}")

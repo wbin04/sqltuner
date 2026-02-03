@@ -19,13 +19,16 @@ class Settings(BaseSettings):
 
     BACKEND_CORS_ORIGINS: list[str] = ["http://localhost:5173"]
 
-    ENCRYPTION_KEY: Optional[str] = None
+    ENCRYPTION_KEY: str
 
-    SECRET_KEY: str = "your-secret-key-change-in-production"
+    SECRET_KEY: str
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
     ENABLE_DATABASE: bool = True
+
+    SANDBOX_MAX_ROWS: int = 10000
+    RESULT_MAX_ROWS: int = 100
 
     @property
     def SQLALCHEMY_DATABASE_URL(self) -> str:
