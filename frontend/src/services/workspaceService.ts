@@ -71,4 +71,12 @@ export const workspaceService = {
     const response = await api.get<string>(`${BASE_URL}/${id}/ddl`);
     return response.data;
   },
+
+  /**
+   * Update simulation schema
+   * Only for simulation workspaces
+   */
+  async updateSimulationSchema(id: string, schema: any): Promise<void> {
+    await api.put(`${BASE_URL}/${id}/schema`, schema);
+  },
 };

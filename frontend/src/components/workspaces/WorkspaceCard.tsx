@@ -53,7 +53,12 @@ export function WorkspaceCard({ workspace, onDelete, onSync, onEdit }: Workspace
   };
 
   const handleConnect = () => {
-    navigate(`/editor/${workspace.id}`);
+    // Navigate to simulation designer for simulation workspaces
+    if (workspace.db_type === DbType.SIMULATION) {
+      navigate(`/simulation/${workspace.id}`);
+    } else {
+      navigate(`/editor/${workspace.id}`);
+    }
   };
 
   const getBadgeColor = () => {
