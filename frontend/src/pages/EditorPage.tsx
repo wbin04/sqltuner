@@ -411,7 +411,7 @@ export function EditorPage() {
           'bg-surface-light dark:bg-surface-dark',
           'border-l border-border-DEFAULT dark:border-border-dark'
         )}>
-          <SchemaViewer schema={workspace.meta_schema} />
+          <SchemaViewer schema={workspace.meta_schema} workspaceId={workspace.id} />
         </aside>
       </div>
 
