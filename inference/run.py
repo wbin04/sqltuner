@@ -37,21 +37,40 @@ def format_chat_prompt(messages):
     return prompt
 
 
+def format_generate_prompt(prompt_text, system_text=None):
+    formatted = ""
+    
+    if system_text:
+        formatted += f"<|im_start|>system\n{system_text}\n<|im_end|>\n"
+    
+    formatted += f"<|im_start|>user\n{prompt_text}\n<|im_end|>\n"
+    formatted += "<|im_start|>assistant\n"
+    
+    return formatted
+
+
 @app.route('/api/generate', methods=['POST'])
 def generate():
     data = request.json
     prompt = data.get('prompt', '')
+    system = data.get('system', None)  # Backend sends 'system' not 'system_prompt'
     model = data.get('model', 'qwen2.5:3b')
     stream = data.get('stream', False)
     options = data.get('options', {})
+    format_type = data.get('format', None)  # Check if JSON mode requested
 
     temperature = options.get('temperature', 0.7)
     max_tokens = options.get('num_predict', 512)
 
+    print(f"[/api/generate] stream={stream}, format={format_type}, model={model}")
+    print(f"[/api/generate] prompt_len={len(prompt)}, system={'YES' if system else 'NO'}")
+
+    formatted_prompt = format_generate_prompt(prompt, system)
+
     if stream:
         def generate_stream():
             output = llm(
-                prompt,
+                formatted_prompt,
                 max_tokens=max_tokens,
                 temperature=temperature,
                 stop=["<|im_end|>", "<|im_start|>"],
@@ -79,7 +98,7 @@ def generate():
         return Response(generate_stream(), mimetype='application/x-ndjson')
     else:
         output = llm(
-            prompt,
+            formatted_prompt,
             max_tokens=max_tokens,
             temperature=temperature,
             stop=["<|im_end|>", "<|im_start|>"],
@@ -87,6 +106,8 @@ def generate():
         )
 
         response_text = output["choices"][0]["text"].strip()
+        
+        print(f"[/api/generate] response_len={len(response_text)}")
 
         return jsonify({
             "model": model,
@@ -224,5 +245,5 @@ if __name__ == "__main__":
     print("   - GET  /api/tags")
     print("   - POST /api/show")
     print("="*50 + "\n")
-    # Quoc_Huy_2004
+    
     app.run(host='0.0.0.0', port=11434, debug=False)

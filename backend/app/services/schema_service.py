@@ -35,10 +35,14 @@ class SchemaService:
         resolved_host = SchemaService._resolve_docker_host(host)
 
         if db_type == DBType.POSTGRES:
-            return (
+            conn_string = (
                 f"postgresql://{username}:{password}@"
                 f"{resolved_host}:{port}/{db_name}"
             )
+            # Add SSL for cloud providers like Supabase
+            if 'supabase' in host.lower() or not host.startswith('localhost'):
+                conn_string += "?sslmode=require"
+            return conn_string
         elif db_type == DBType.MYSQL:
             return (
                 f"mysql+pymysql://{username}:{password}@"
@@ -130,7 +134,11 @@ class SchemaService:
             try:
                 plain_password = decrypt_password(connection.db_password)
             except Exception as e:
-                raise ValueError(f"Failed to decrypt password: {str(e)}")
+                logger.error(f"[SCHEMA] Failed to decrypt password: {str(e)}")
+                raise ValueError(
+                    f"Database connection error: Invalid credentials configuration. "
+                    f"Please check connection settings or update the password."
+                )
 
             conn_string = SchemaService._build_connection_string(
                 db_type=connection.db_type,

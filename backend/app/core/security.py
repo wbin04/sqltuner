@@ -50,7 +50,7 @@ def decode_access_token(token: str) -> Optional[dict]:
 
 class PasswordEncryption:
     def __init__(self):
-        encryption_key = os.getenv("ENCRYPTION_KEY")
+        encryption_key = settings.ENCRYPTION_KEY
         if not encryption_key:
             encryption_key = Fernet.generate_key().decode()
             print(

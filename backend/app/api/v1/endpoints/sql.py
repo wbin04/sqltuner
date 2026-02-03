@@ -35,16 +35,38 @@ def resolve_docker_host(host: str) -> str:
 
 
 def build_sync_connection_string(connection: DBConnection) -> str:
-    password = decrypt_password(
-        connection.db_password) if connection.db_password else ""
+    password = ""
+    if connection.db_password:
+        try:
+            password = decrypt_password(connection.db_password)
+            logger.info("[SQL] Successfully decrypted password"
+                        f" for connection {connection.id}")
+        except Exception as e:
+            logger.error("[SQL] Password decryption failed"
+                         f" for connection {connection.id}: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=(
+                    "Failed to decrypt database password. "
+                    "The connection may have been created with a different ENCRYPTION_KEY. "
+                    "Please delete and recreate this connection."
+                )
+            )
 
-    resolved_host = resolve_docker_host(connection.host)
+    resolved_host = connection.host
+    if connection.host in ['localhost', '127.0.0.1']:
+        resolved_host = 'host.docker.internal'
+
+    logger.info(f"[SQL] Building connection string for {connection.db_type.value} at {resolved_host}:{connection.port}")
 
     if connection.db_type == DBType.POSTGRES:
-        return (
+        conn_string = (
             f"postgresql://{connection.username}:{password}@"
             f"{resolved_host}:{connection.port}/{connection.db_name}"
         )
+        if 'supabase' in connection.host.lower() or not connection.host.startswith('localhost'):
+            conn_string += "?sslmode=require"
+        return conn_string
     elif connection.db_type == DBType.MYSQL:
         return (
             f"mysql+pymysql://{connection.username}:{password}@"
