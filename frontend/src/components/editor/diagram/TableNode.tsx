@@ -24,10 +24,13 @@ export interface TableNodeData {
   tableName: string;
   columns: Column[];
   foreign_keys?: ForeignKey[];
+  isEditable?: boolean;
 }
 
 export const TableNode = memo(({ data }: NodeProps) => {
   const nodeData = data as unknown as TableNodeData;
+  const isEditable = nodeData.isEditable || false;
+  
   return (
     <div
       className={cn(
@@ -36,12 +39,6 @@ export const TableNode = memo(({ data }: NodeProps) => {
         'bg-surface-light dark:bg-surface-dark'
       )}
     >
-      {/* Target Handle (Left) */}
-      <Handle
-        type="target"
-        position={Position.Left}
-        className="w-3 h-3 !bg-primary dark:!bg-primary-dark"
-      />
 
       {/* Table Header */}
       <div
@@ -64,11 +61,25 @@ export const TableNode = memo(({ data }: NodeProps) => {
           <div
             key={idx}
             className={cn(
-              'flex items-center gap-2 px-2 py-1.5 rounded text-sm',
+              'flex items-center gap-2 px-2 py-1.5 rounded text-sm group relative',
               'hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark',
               'transition-colors'
             )}
           >
+            {/* Column Target Handle (Left) */}
+            {isEditable && (
+              <Handle
+                type="target"
+                position={Position.Left}
+                id={`${nodeData.tableName}__${column.name}__target`}
+                className={cn(
+                  'w-2.5 h-2.5 !bg-blue-500 dark:!bg-blue-400 !border-2 !border-white dark:!border-gray-800',
+                  'opacity-0 group-hover:opacity-100 transition-opacity',
+                  '!left-[-8px]'
+                )}
+                style={{ top: '50%', transform: 'translateY(-50%)' }}
+              />
+            )}
             {/* Icons */}
             <div className="flex items-center gap-1 flex-shrink-0">
               {column.is_pk && (
@@ -97,16 +108,40 @@ export const TableNode = memo(({ data }: NodeProps) => {
             >
               {column.type.length > 15 ? column.type.substring(0, 12) + '...' : column.type}
             </span>
+            
+            {/* Column Source Handle (Right) */}
+            {isEditable && (
+              <Handle
+                type="source"
+                position={Position.Right}
+                id={`${nodeData.tableName}__${column.name}__source`}
+                className={cn(
+                  'w-2.5 h-2.5 !bg-green-500 dark:!bg-green-400 !border-2 !border-white dark:!border-gray-800',
+                  'opacity-0 group-hover:opacity-100 transition-opacity',
+                  '!right-[-8px]'
+                )}
+                style={{ top: '50%', transform: 'translateY(-50%)' }}
+              />
+            )}
           </div>
         ))}
       </div>
 
-      {/* Source Handle (Right) */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        className="w-3 h-3 !bg-primary dark:!bg-primary-dark"
-      />
+      {/* Fallback handles for non-editable mode */}
+      {!isEditable && (
+        <>
+          <Handle
+            type="target"
+            position={Position.Left}
+            className="w-3 h-3 !bg-primary dark:!bg-primary-dark"
+          />
+          <Handle
+            type="source"
+            position={Position.Right}
+            className="w-3 h-3 !bg-primary dark:!bg-primary-dark"
+          />
+        </>
+      )}
     </div>
   );
 });
