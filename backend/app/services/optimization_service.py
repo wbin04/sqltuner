@@ -10,6 +10,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from backend.app.core.exceptions import NotFoundError, ValidationError
 from backend.app.core.security import decrypt_password
 from backend.app.models.models import (Conversation, DBConnection, DBType,
                                        PerformanceAnalysis, QueryLog)
@@ -92,7 +93,7 @@ class ConnectionStringBuilder:
                 f"{resolved_host}:{connection.port}/{connection.db_name}"
             )
         else:
-            raise ValueError(
+            raise ValidationError(
                 f"Unsupported database type: {connection.db_type}"
             )
 
@@ -308,7 +309,7 @@ class QueryLogManager:
         conversation = result.scalar_one_or_none()
 
         if not conversation:
-            raise ValueError(f"Conversation {conversation_id} not found")
+            raise NotFoundError(f"Conversation {conversation_id} not found")
 
         query_log = QueryLog(
             conversation_id=conversation.id,
@@ -433,7 +434,7 @@ class OptimizationService:
         connection = result.scalar_one_or_none()
 
         if not connection:
-            raise ValueError(f"Connection {connection_id} not found")
+            raise NotFoundError(f"Connection {connection_id} not found")
 
         logger.info(
             f"[OPTIMIZE] Fetch connection: {time.time() - start_step:.2f}s"

@@ -410,7 +410,7 @@ export function EditorPage() {
           'w-90 flex-shrink-0',
           'bg-surface-light dark:bg-surface-dark',
           'border-l border-border-DEFAULT dark:border-border-dark'
-        )}>
+        )} style={{ minWidth: '360px' }}>
           <SchemaViewer schema={workspace.meta_schema} workspaceId={workspace.id} />
         </aside>
       </div>

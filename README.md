@@ -32,6 +32,11 @@ cd SQLTuner
 cp .env.example .env
 # Edit .env with your settings
 
+# Generate SECRET_KEY
+python -c "import secrets; print(secrets.token_hex(32))"
+# Generate ENCRYPTION_KEY
+python -c "import secrets, base64; print(base64.b64encode(secrets.token_bytes(32)).decode())"
+
 # Start all services
 docker-compose up --build -d
 
@@ -43,9 +48,6 @@ docker-compose logs -f backend
 
 # Stop services
 docker-compose down
-
-docker cp test_optimize_direct.py sqltuner_backend:/app/test_optimize_direct.py
-docker-compose exec backend python /app/test_optimize_direct.py
 ```
 
 Services:

@@ -7,6 +7,8 @@ import sqlparse
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection
 
+from backend.app.core.exceptions import ExecutionError, ValidationError
+
 logger = logging.getLogger(__name__)
 
 
@@ -34,7 +36,7 @@ class StatementParser:
         ]
 
         if not statements:
-            raise ValueError("No valid SQL statements found")
+            raise ValidationError("No valid SQL statements found")
 
         return statements
 
@@ -204,7 +206,7 @@ class StatementExecutor:
         logger.error(
             f"[{self.log_prefix}] Statement {stmt_num} failed: {error_str}"
         )
-        raise Exception(f"Statement {stmt_num} failed: {error_str}")
+        raise ExecutionError(f"Statement {stmt_num} failed: {error_str}")
 
     def _log_statement_execution(
         self, stmt_num: int, stmt: str
