@@ -10,6 +10,7 @@ export enum ColumnType {
   TIMESTAMP = 'TIMESTAMP',
   TEXT = 'TEXT',
   JSON = 'JSON',
+  JSONB = 'JSONB',
   DECIMAL = 'DECIMAL',
   DATE = 'DATE',
 }
@@ -19,10 +20,17 @@ export interface ForeignKeyTarget {
   column_id: string;
 }
 
+export interface IndexDef {
+  id: string;
+  name: string;
+  columns: string[]; // Array of column IDs
+  unique: boolean;
+}
+
 export interface SimulationColumn {
   id: string;
   name: string;
-  type: ColumnType;
+  type: string; // Full SQL type string like "VARCHAR(255)" or "JSONB"
   is_pk: boolean;
   is_nullable: boolean;
   default?: string | null;
@@ -33,6 +41,7 @@ export interface SimulationTable {
   id: string;
   name: string;
   columns: SimulationColumn[];
+  indexes: IndexDef[];
   sample_data: Record<string, any>[];
 }
 
@@ -43,7 +52,7 @@ export interface BackendTable {
   columns: Array<{
     id?: string;
     name: string;
-    type: ColumnType;
+    type: string; // Full SQL type string like "VARCHAR(255)" or "JSONB"
     is_pk: boolean;
     is_nullable: boolean;
     default?: string | null;
@@ -53,7 +62,12 @@ export interface BackendTable {
     ref_table: string;
     ref_column: string;
   }>;
-  indexes?: any[];
+  indexes?: Array<{
+    id?: string;
+    name: string;
+    column_names: string[]; // Column names (backend format)
+    unique: boolean;
+  }>;
   row_count?: number | null;
   sample_data?: Record<string, any>[];
 }
@@ -80,7 +94,7 @@ export interface UpdateSchemaPayload {
     }>;
     indexes?: Array<{
       name: string;
-      column_names: string[];
+      column_names: string[]; // Column names
       unique: boolean;
     }>;
     sample_data?: Record<string, any>[];

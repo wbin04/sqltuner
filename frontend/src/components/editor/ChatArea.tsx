@@ -17,25 +17,29 @@ interface Message {
 interface ChatAreaProps {
   messages: Message[];
   onSendMessage: (content: string) => void;
-  onRunQuery: (sql: string) => void;
+  onExecute: (sql: string) => void;
   onOptimize: (sql: string) => void;
   onExplain: (sql: string) => void;
   inputValue?: string;
   onUpdateInput?: (value: string) => void;
   isLoading?: boolean;
   isExecuting?: boolean;
+  isExplaining?: boolean;
+  isOptimizing?: boolean;
 }
 
 export function ChatArea({
   messages,
   onSendMessage,
-  onRunQuery,
+  onExecute,
   onOptimize,
   onExplain,
   inputValue: externalInputValue,
   onUpdateInput,
   isLoading = false,
   isExecuting = false,
+  isExplaining = false,
+  isOptimizing = false,
 }: ChatAreaProps) {
   const [internalInputValue, setInternalInputValue] = useState('');
   
@@ -182,8 +186,8 @@ export function ChatArea({
                     {/* Action Bar */}
                     <div className="flex items-center gap-2 px-4 py-3 bg-surface-highlight-DEFAULT dark:bg-surface-highlight-dark border-t border-border-DEFAULT dark:border-border-dark">
                       <button
-                        onClick={() => onRunQuery(message.sql_generated!)}
-                        disabled={isExecuting}
+                        onClick={() => onExecute(message.sql_generated!)}
+                        disabled={isExecuting || isExplaining || isOptimizing}
                         className={cn(
                           'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
                           'bg-green-600 dark:bg-green-600 text-white',
@@ -196,11 +200,11 @@ export function ChatArea({
                         ) : (
                           <Play className="w-4 h-4" />
                         )}
-                        {isExecuting ? 'Executing...' : 'Run Query'}
+                        {isExecuting ? 'Executing...' : 'Execute'}
                       </button>
                       <button
                         onClick={() => onExplain(message.sql_generated!)}
-                        disabled={isExecuting}
+                        disabled={isExecuting || isExplaining || isOptimizing}
                         className={cn(
                           'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
                           'bg-surface-light dark:bg-surface-dark',
@@ -209,12 +213,16 @@ export function ChatArea({
                           'disabled:opacity-50 disabled:cursor-not-allowed'
                         )}
                       >
-                        <LineChart className="w-4 h-4" />
-                        Explain
+                        {isExplaining ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <LineChart className="w-4 h-4" />
+                        )}
+                        {isExplaining ? 'Explaining...' : 'Explain'}
                       </button>
                       <button
                         onClick={() => onOptimize(message.sql_generated!)}
-                        disabled={isExecuting}
+                        disabled={isExecuting || isExplaining || isOptimizing}
                         className={cn(
                           'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
                           'bg-gradient-to-r from-primary to-secondary dark:from-primary-dark dark:to-secondary-dark',
@@ -223,8 +231,12 @@ export function ChatArea({
                           'disabled:opacity-50 disabled:cursor-not-allowed'
                         )}
                       >
-                        <Sparkles className="w-4 h-4" />
-                        Optimize
+                        {isOptimizing ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Sparkles className="w-4 h-4" />
+                        )}
+                        {isOptimizing ? 'Optimizing...' : 'Optimize'}
                       </button>
                     </div>
                   </div>

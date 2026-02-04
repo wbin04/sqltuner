@@ -65,7 +65,7 @@ export function SampleDataEditor({ table, isReadOnly = false, onUpdateTable }: S
       </div>
 
       {/* Data Grid */}
-      <div className="bg-surface-DEFAULT dark:bg-surface-dark rounded-xl border border-border-DEFAULT dark:border-border-dark overflow-auto">
+      <div className="bg-surface-light dark:bg-surface-dark rounded-xl border border-border-DEFAULT dark:border-border-dark overflow-auto">
         <table className="w-full text-sm">
           <thead className="bg-surface-highlight-light dark:bg-surface-highlight-dark sticky top-0">
             <tr>

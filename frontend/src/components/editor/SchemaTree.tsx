@@ -95,7 +95,7 @@ export function SchemaTree({ tables }: SchemaTreeProps) {
                           className="px-3 py-1 text-xs text-text-muted-DEFAULT dark:text-text-muted-dark font-mono"
                         >
                           {index.index_name}
-                          {index.is_unique && (
+                          {index.unique && (
                             <span className="ml-2 text-green-600 dark:text-green-400">UNIQUE</span>
                           )}
                         </div>

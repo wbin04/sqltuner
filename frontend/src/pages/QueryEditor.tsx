@@ -98,6 +98,8 @@ export function QueryEditor() {
   const [rightPanelTab, setRightPanelTab] = useState<'schema' | 'results'>('schema');
   const [queryResult, setQueryResult] = useState<QueryResult | null>(null);
   const [isExecuting, setIsExecuting] = useState(false);
+  const [isExplaining, setIsExplaining] = useState(false);
+  const [isOptimizing, setIsOptimizing] = useState(false);
   const [performanceAnalysis, setPerformanceAnalysis] = useState<PerformanceAnalysis | null>(null);
   const [isPerformanceModalOpen, setIsPerformanceModalOpen] = useState(false);
 
@@ -150,35 +152,45 @@ export function QueryEditor() {
 
   const handleExplain = (sql: string) => {
     console.log('Explain query:', sql);
+    setIsExplaining(true);
     
     // Mock performance analysis
-    const mockAnalysis: PerformanceAnalysis = {
-      id: 'perf-1',
-      query_log_id: 'temp-id',
-      execution_time_ms: 850,
-      total_cost: 125.45,
-      explain_plan: {
-        'Node Type': 'Seq Scan',
-        'Startup Cost': 0,
-        'Total Cost': 125.45,
-        'Plan Rows': 15420,
-        'Plan Width': 256,
-        'Actual Rows': 15420,
-        'Actual Loops': 1,
-        'Relation Name': 'users',
-        Plans: []
-      },
-      index_recommendation: 'CREATE INDEX idx_users_created_at ON users(created_at);',
-      createdAt: new Date().toISOString()
-    };
-    
-    setPerformanceAnalysis(mockAnalysis);
-    setIsPerformanceModalOpen(true);
+    setTimeout(() => {
+      const mockAnalysis: PerformanceAnalysis = {
+        id: 'perf-1',
+        query_log_id: 'temp-id',
+        execution_time_ms: 850,
+        total_cost: 125.45,
+        explain_plan: {
+          'Node Type': 'Seq Scan',
+          'Startup Cost': 0,
+          'Total Cost': 125.45,
+          'Plan Rows': 15420,
+          'Plan Width': 256,
+          'Actual Rows': 15420,
+          'Actual Loops': 1,
+          'Relation Name': 'users',
+          Plans: []
+        },
+        index_recommendation: 'CREATE INDEX idx_users_created_at ON users(created_at);',
+        createdAt: new Date().toISOString()
+      };
+      
+      setPerformanceAnalysis(mockAnalysis);
+      setIsPerformanceModalOpen(true);
+      setIsExplaining(false);
+    }, 1500);
   };
 
   const handleOptimize = (sql: string) => {
     console.log('Optimize query:', sql);
-    // TODO: Trigger optimization with the actual SQL
+    setIsOptimizing(true);
+    
+    // Simulate optimization process
+    setTimeout(() => {
+      // TODO: Trigger optimization with the actual SQL
+      setIsOptimizing(false);
+    }, 1500);
   };
 
   const handleFeedback = (queryLogId: string, rating: 0 | 1, correctedSql?: string, comment?: string) => {
@@ -235,6 +247,9 @@ export function QueryEditor() {
               onOptimize={handleOptimize}
               onExecute={handleExecuteQuery}
               onFeedback={handleFeedback}
+              isExecuting={isExecuting}
+              isExplaining={isExplaining}
+              isOptimizing={isOptimizing}
             />
           ))}
         </div>

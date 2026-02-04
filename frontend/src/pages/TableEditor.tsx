@@ -71,10 +71,21 @@ export function SchemaEditor() {
       
       columnIdMap.set(table.name, colMap);
       
+      // Process indexes: convert column names to column IDs
+      const indexes = (table.indexes || []).map(idx => ({
+        id: idx.id || uuidv4(),
+        name: idx.name,
+        columns: (idx.column_names || [])
+          .map(colName => colMap.get(colName))
+          .filter((id): id is string => !!id),
+        unique: idx.unique || false,
+      }));
+      
       return {
         id: tableId,
         name: table.name,
         columns,
+        indexes,
         foreign_keys: table.foreign_keys || [],
         sample_data: table.sample_data || []
       };
@@ -109,6 +120,7 @@ export function SchemaEditor() {
           id: table.id,
           name: table.name,
           columns: columnsWithFKs,
+          indexes: table.indexes,
           sample_data: table.sample_data
         };
       })
@@ -211,7 +223,13 @@ export function SchemaEditor() {
                 ref_column: refColumn!.name,
               };
             }),
-          indexes: [],
+          indexes: (table.indexes || []).map(idx => ({
+            name: idx.name,
+            column_names: idx.columns
+              .map(colId => table.columns.find(c => c.id === colId)?.name)
+              .filter((name): name is string => !!name),
+            unique: idx.unique,
+          })),
           sample_data: table.sample_data,
           row_count: table.sample_data.length,
         })),
@@ -267,7 +285,7 @@ export function SchemaEditor() {
       {/* Header */}
       <header className={cn(
         'flex items-center justify-between px-6 py-4 flex-shrink-0',
-        'bg-surface-DEFAULT dark:bg-surface-dark',
+        'bg-surface-light dark:bg-surface-dark',
         'border-b border-border-DEFAULT dark:border-border-dark'
       )}>
         <div className="flex items-center gap-4">
@@ -349,7 +367,7 @@ export function SchemaEditor() {
               {/* Tabs */}
               <div className={cn(
                 'flex items-center gap-1 px-6 py-3 border-b',
-                'bg-surface-DEFAULT dark:bg-surface-dark',
+                'bg-surface-light dark:bg-surface-dark',
                 'border-border-DEFAULT dark:border-border-dark'
               )}>
                 <button
