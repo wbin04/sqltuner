@@ -147,7 +147,7 @@ export function useEditorLogic({ connectionId }: UseEditorLogicProps) {
     [sendMessageMutation]
   );
 
-  const handleRunQuery = useCallback(
+  const handleExecute = useCallback(
     async (sql: string) => {
       await executeSqlMutation.mutateAsync(sql);
     },
@@ -234,7 +234,7 @@ export function useEditorLogic({ connectionId }: UseEditorLogicProps) {
 
     // Handlers
     handleSendMessage,
-    handleRunQuery,
+    handleExecute,
     handleOptimize,
     handleExplain,
     handleNewChat,

@@ -4,7 +4,7 @@
  */
 import { Plus, Table, Trash2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { SimulationSchema, SimulationTable, ColumnType } from '../../types/simulation';
+import { SimulationSchema, SimulationTable } from '../../types/simulation';
 import { v4 as uuidv4 } from 'uuid';
 
 interface TablesSidebarProps {
@@ -38,12 +38,13 @@ export function TablesSidebar({
         {
           id: uuidv4(),
           name: 'id',
-          type: ColumnType.UUID,
+          type: 'UUID',
           is_pk: true,
           is_nullable: false,
           fk_target: null,
         },
       ],
+      indexes: [],
       sample_data: [],
     };
 
@@ -79,7 +80,7 @@ export function TablesSidebar({
   return (
     <aside className={cn(
       'w-72 flex-shrink-0 flex flex-col',
-      'bg-surface-DEFAULT dark:bg-surface-dark',
+      'bg-surface-light dark:bg-surface-dark',
       'border-r border-border-DEFAULT dark:border-border-dark'
     )}>
       {/* Header */}

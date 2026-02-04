@@ -4,9 +4,10 @@
  */
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Database, Table, ChevronDown, ChevronRight, Key, Link, Network, Edit } from 'lucide-react';
+import { Database, Table, ChevronDown, ChevronRight, Key, Link, Network, Edit, RefreshCw } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { SchemaDiagramModal } from './diagram/SchemaDiagramModal';
+import { workspaceService } from '../../services/workspaceService';
 
 interface Column {
   name: string;
@@ -44,12 +45,14 @@ interface SchemaDef {
 interface SchemaViewerProps {
   schema: Record<string, any> | null | undefined;
   workspaceId?: string;
+  onSync?: () => void;
 }
 
-export function SchemaViewer({ schema, workspaceId }: SchemaViewerProps) {
+export function SchemaViewer({ schema, workspaceId, onSync }: SchemaViewerProps) {
   const navigate = useNavigate();
   const [expandedTables, setExpandedTables] = useState<Set<string>>(new Set());
   const [isDiagramModalOpen, setIsDiagramModalOpen] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Parse schema to SchemaDef format
   const schemaDef = schema as SchemaDef | null;
@@ -64,6 +67,20 @@ export function SchemaViewer({ schema, workspaceId }: SchemaViewerProps) {
       }
       return next;
     });
+  };
+
+  const handleSync = async () => {
+    if (!workspaceId) return;
+
+    setIsSyncing(true);
+    try {
+      await workspaceService.syncSchema(workspaceId);
+      onSync?.();
+    } catch (error) {
+      console.error('Failed to sync schema:', error);
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   // Empty state
@@ -111,6 +128,22 @@ export function SchemaViewer({ schema, workspaceId }: SchemaViewerProps) {
 
           {/* Action Buttons */}
           <div className="flex items-center gap-2">
+            <button
+              onClick={handleSync}
+              disabled={isSyncing}
+              className={cn(
+                'group flex items-center gap-0 px-1 py-1.5 rounded-lg text-sm font-medium transition-all duration-300 ease-in-out',
+                'group-hover:px-2',
+                'bg-primary dark:bg-primary-dark hover:bg-primary-hover dark:hover:bg-primary-dark-hover text-white font-medium',
+                'text-white transition-all hover:shadow-lg hover:shadow-primary/20 dark:hover:shadow-primary-dark/20'
+              )}
+            >
+              <RefreshCw className={cn('w-6 h-6', isSyncing && 'animate-spin')} />
+              <span className="max-w-0 overflow-hidden group-hover:max-w-24 group-hover:overflow-visible transition-all duration-300 ease-in-out whitespace-nowrap ml-0 group-hover:ml-2">
+                Sync Schema
+              </span>
+            </button>
+            
             {workspaceId && (
               <button
                 onClick={() => navigate(`/schema-editor/${workspaceId}`)}

@@ -42,13 +42,13 @@ export function EditorPage() {
     editorLogic.handleSendMessage(content);
   };
 
-  const handleRunQuery = async (sql: string) => {
+  const handleExecute = async (sql: string) => {
     // Immediately show results panel with loading state
     setActiveResultSql(sql);
     setIsResultsCollapsed(false);
     
     // Execute query (this will update loading state)
-    await editorLogic.handleRunQuery(sql);
+    await editorLogic.handleExecute(sql);
   };
 
   const handleOptimize = (sql: string) => {
@@ -212,13 +212,15 @@ export function EditorPage() {
             <ChatArea
               messages={editorLogic.messages}
               onSendMessage={handleSendMessage}
-              onRunQuery={handleRunQuery}
+              onExecute={handleExecute}
               onOptimize={handleOptimize}
               onExplain={handleExplain}
               inputValue={inputValue}
               onUpdateInput={setInputValue}
               isLoading={editorLogic.isSendingMessage}
               isExecuting={editorLogic.isExecuting}
+              isExplaining={editorLogic.isExplaining}
+              isOptimizing={editorLogic.isOptimizing}
             />
           </div>
 
@@ -436,7 +438,7 @@ export function EditorPage() {
           editorLogic.handleApplyOptimization(sql);
 
           // Auto-run the script
-          handleRunQuery(sql);
+          handleExecute(sql);
         }}
       />
     </div>
