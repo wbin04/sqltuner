@@ -1,7 +1,7 @@
 import json
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import lru_cache
 from uuid import UUID, uuid4
 
@@ -146,7 +146,7 @@ async def chat_completion(
             connection_id=request.connection_id,
             title=request.message[:50] +
             ("..." if len(request.message) > 50 else ""),
-            created_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc)
         )
         db.add(conversation)
         await db.flush()
@@ -249,7 +249,7 @@ async def chat_completion(
         conversation_id=conversation_id,
         role=ChatRole.USER,
         content=request.message,
-        created_at=datetime.utcnow()
+        created_at=datetime.now(timezone.utc)
     )
     db.add(user_log)
 
@@ -259,7 +259,7 @@ async def chat_completion(
         role=ChatRole.ASSISTANT,
         content=llm_response,
         sql_generated=sql_generated,
-        created_at=datetime.utcnow()
+        created_at=datetime.now(timezone.utc)
     )
     db.add(assistant_log)
 

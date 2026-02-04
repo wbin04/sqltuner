@@ -4,6 +4,8 @@ from uuid import UUID
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.core.exceptions import (DatabaseConnectionError,
+                                         ValidationError)
 from backend.app.core.security import decrypt_password
 from backend.app.models.models import DBType
 from backend.app.repositories.connection_repository import \
@@ -112,13 +114,6 @@ class DatabaseInspectorService:
             connection_id: UUID) -> SchemaDef:
         connection = await connection_repository.get(db, id=connection_id)
 
-        if not connection:
-            raise ValueError(f"Connection {connection_id} not found")
-
-        if (connection.db_type == DBType.POSTGRES and
-                connection.db_type.value == 'simulation'):
-            raise ValueError("Cannot sync schema from a simulation connection")
-
         password = decrypt_password(connection.db_password)
 
         resolved_host = connection.host
@@ -136,7 +131,7 @@ class DatabaseInspectorService:
                 f"{resolved_host}:{connection.port}/{connection.db_name}"
             )
         else:
-            raise ValueError(
+            raise ValidationError(
                 f"Unsupported database type: {connection.db_type}")
 
         try:
@@ -284,7 +279,8 @@ class DatabaseInspectorService:
             return schema_def
 
         except Exception as e:
-            raise Exception(f"Failed to connect to target database: {str(e)}")
+            raise DatabaseConnectionError(
+                f"Failed to connect to target database: {str(e)}")
 
 
 inspector_service = DatabaseInspectorService()

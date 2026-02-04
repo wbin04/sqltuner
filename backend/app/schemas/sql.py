@@ -13,7 +13,7 @@ class ChatCompletionRequest(BaseModel):
 
 class ChatCompletionResponse(BaseModel):
     conversation_id: UUID
-    role: str  # "assistant"
+    role: str
     content: str
     sql_generated: Optional[str] = None
     detected_sql: Optional[str] = Field(

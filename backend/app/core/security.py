@@ -1,5 +1,4 @@
-import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from cryptography.fernet import Fernet
@@ -24,9 +23,9 @@ def create_access_token(
         expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(
+        expire = datetime.now(timezone.utc) + timedelta(
             minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
         )
 
@@ -50,7 +49,7 @@ def decode_access_token(token: str) -> Optional[dict]:
 
 class PasswordEncryption:
     def __init__(self):
-        encryption_key = os.getenv("ENCRYPTION_KEY")
+        encryption_key = settings.ENCRYPTION_KEY
         if not encryption_key:
             encryption_key = Fernet.generate_key().decode()
             print(

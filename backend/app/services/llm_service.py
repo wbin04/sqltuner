@@ -11,6 +11,7 @@ from sqlglot import exp
 
 from backend.app.core.config import settings
 from backend.app.core.constants import LLM_REQUEST_TIMEOUT
+from backend.app.core.exceptions import LLMServiceError
 from backend.app.core.prompts import (SQL_OPTIMIZATION_SYSTEM_PROMPT,
                                       get_sql_explanation_prompt,
                                       get_sql_optimization_prompt)
@@ -89,7 +90,7 @@ class LLMService:
                     f"Error: {str(e)}"
                 )
                 logger.error(f"[LLM] {error_msg}")
-                raise Exception(f"Ollama Connection Error: {error_msg}")
+                raise LLMServiceError(f"Ollama Connection Error: {error_msg}")
 
             except httpx.TimeoutException as e:
                 error_msg = (
@@ -97,7 +98,7 @@ class LLMService:
                     f"Error: {str(e)}"
                 )
                 logger.error(f"[LLM] {error_msg}")
-                raise Exception(f"Ollama Timeout Error: {error_msg}")
+                raise LLMServiceError(f"Ollama Timeout Error: {error_msg}")
 
             except httpx.HTTPStatusError as e:
                 error_msg = (
@@ -105,7 +106,7 @@ class LLMService:
                     f"{e.response.text}"
                 )
                 logger.error(f"[LLM] {error_msg}")
-                raise Exception(f"Ollama HTTP Error: {error_msg}")
+                raise LLMServiceError(f"Ollama HTTP Error: {error_msg}")
 
             except Exception as e:
                 error_msg = (
@@ -113,7 +114,7 @@ class LLMService:
                     f"{str(e)}"
                 )
                 logger.error(f"[LLM] {error_msg}")
-                raise Exception(f"Ollama API Error: {error_msg}")
+                raise LLMServiceError(f"Ollama API Error: {error_msg}")
 
     async def _call_ollama(
         self,
