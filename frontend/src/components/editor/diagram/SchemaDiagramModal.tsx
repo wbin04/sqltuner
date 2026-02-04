@@ -3,7 +3,7 @@
  * Full-screen modal overlay for displaying the schema diagram
  */
 import { useState, useEffect } from 'react';
-import { X, Save, Edit } from 'lucide-react';
+import { X, Save, Edit, Loader2 } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 import { SchemaDiagram } from './SchemaDiagram';
 import { toast } from 'react-toastify';
@@ -41,9 +41,11 @@ interface SchemaDiagramModalProps {
   schema: SchemaDef | null;
   isSimulation?: boolean;
   onSave?: (updatedSchema: SchemaDef) => Promise<void>;
+  onAddTable?: (tableName: string, position: { x: number; y: number }) => void;
+  onEditTable?: (tableName: string) => void;
 }
 
-export function SchemaDiagramModal({ isOpen, onClose, schema, isSimulation = false, onSave }: SchemaDiagramModalProps) {
+export function SchemaDiagramModal({ isOpen, onClose, schema, isSimulation = false, onSave, onAddTable, onEditTable }: SchemaDiagramModalProps) {
   const [isEditMode, setIsEditMode] = useState(false);
   const [editedSchema, setEditedSchema] = useState<SchemaDef | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -52,15 +54,21 @@ export function SchemaDiagramModal({ isOpen, onClose, schema, isSimulation = fal
 
   // Initialize edited schema when modal opens and reset when closes
   useEffect(() => {
-    if (isOpen && schema) {
-      // Deep clone to avoid reference issues
-      setEditedSchema(JSON.parse(JSON.stringify(schema)));
+    console.log('[SchemaDiagramModal.useEffect] isOpen:', isOpen, 'schema:', schema);
+    
+    if (isOpen) {
+      // Initialize editedSchema even if schema is null - create empty schema
+      const schemaToClone = schema || { tables: [] };
+      const clonedSchema = JSON.parse(JSON.stringify(schemaToClone));
+      console.log('[SchemaDiagramModal.useEffect] Setting editedSchema:', clonedSchema);
+      setEditedSchema(clonedSchema);
       setHasChanges(false);
       setIsEditMode(false);
       // Force diagram remount with new key
       setDiagramKey(prev => prev + 1);
     } else if (!isOpen) {
       // Reset all state when modal closes
+      console.log('[SchemaDiagramModal.useEffect] Resetting state');
       setEditedSchema(null);
       setHasChanges(false);
       setIsEditMode(false);
@@ -70,6 +78,16 @@ export function SchemaDiagramModal({ isOpen, onClose, schema, isSimulation = fal
   if (!isOpen) return null;
 
   const currentSchema = isEditMode ? editedSchema : schema;
+
+  const handleClose = () => {
+    if (isEditMode && hasChanges) {
+      if (window.confirm('You have unsaved changes. Discard them?')) {
+        onClose();
+      }
+    } else {
+      onClose();
+    }
+  };
 
   const handleAddForeignKey = (sourceTable: string, sourceCol: string, targetTable: string, targetCol: string) => {
     if (!editedSchema) return;
@@ -208,12 +226,198 @@ export function SchemaDiagramModal({ isOpen, onClose, schema, isSimulation = fal
       toast.success('Schema changes saved successfully!');
       setHasChanges(false);
       setIsEditMode(false);
+      setDiagramKey(prev => prev + 1); // Force re-render diagram
     } catch (error) {
-      console.error('Failed to save schema:', error);
+      console.error('Failed to save schema changes:', error);
       toast.error('Failed to save schema changes');
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const handleAddColumn = (tableName: string, column: Column) => {
+    if (!editedSchema) return;
+
+    setEditedSchema(prev => {
+      if (!prev) return prev;
+
+      const updatedTables = prev.tables.map(table => {
+        if (table.name === tableName) {
+          // Check if column already exists
+          if (table.columns.some(col => col.name === column.name)) {
+            toast.error(`Column "${column.name}" already exists in table "${tableName}"`);
+            return table;
+          }
+
+          return {
+            ...table,
+            columns: [...table.columns, column],
+          };
+        }
+        return table;
+      });
+
+      return { ...prev, tables: updatedTables };
+    });
+
+    setHasChanges(true);
+    setDiagramKey(prev => prev + 1);
+    toast.success(`Added column "${column.name}" to table "${tableName}"`);
+  };
+
+  const handleRemoveColumn = (tableName: string, columnName: string) => {
+    if (!editedSchema) return;
+
+    setEditedSchema(prev => {
+      if (!prev) return prev;
+
+      const updatedTables = prev.tables.map(table => {
+        if (table.name === tableName) {
+          // Remove column
+          const updatedColumns = table.columns.filter(col => col.name !== columnName);
+          
+          // Remove any foreign keys that reference this column
+          const updatedForeignKeys = (table.foreign_keys || []).filter(fk => fk.column !== columnName);
+
+          return {
+            ...table,
+            columns: updatedColumns,
+            foreign_keys: updatedForeignKeys,
+          };
+        }
+        return table;
+      });
+
+      // Also remove foreign keys from other tables that reference this column
+      const cleanedTables = updatedTables.map(table => ({
+        ...table,
+        foreign_keys: (table.foreign_keys || []).filter(
+          fk => !(fk.ref_table === tableName && fk.ref_column === columnName)
+        ),
+      }));
+
+      return { ...prev, tables: cleanedTables };
+    });
+
+    setHasChanges(true);
+    setDiagramKey(prev => prev + 1);
+    toast.success(`Removed column "${columnName}" from table "${tableName}"`);
+  };
+
+  const handleUpdateColumn = (tableName: string, columnName: string, newColumn: Column) => {
+    if (!editedSchema) return;
+
+    console.log('[handleUpdateColumn]', { tableName, columnName, newColumn });
+
+    setEditedSchema(prev => {
+      if (!prev) return prev;
+
+      const updatedTables = prev.tables.map(table => {
+        if (table.name === tableName) {
+          const updatedColumns = table.columns.map(col => 
+            col.name === columnName ? newColumn : col
+          );
+
+          return {
+            ...table,
+            columns: updatedColumns,
+          };
+        }
+        return table;
+      });
+
+      return { ...prev, tables: updatedTables };
+    });
+
+    setHasChanges(true);
+    setDiagramKey(prev => prev + 1);
+    
+    if (newColumn.is_pk !== undefined) {
+      toast.success(`${newColumn.is_pk ? 'Set' : 'Removed'} primary key for "${columnName}"`);
+    } else {
+      toast.success(`Updated column "${columnName}" in table "${tableName}"`);
+    }
+  };
+
+  const handleUpdateTableName = (oldName: string, newName: string) => {
+    if (!editedSchema) return;
+
+    console.log('[handleUpdateTableName]', { oldName, newName });
+
+    // Check if new name already exists
+    if (editedSchema.tables.some(t => t.name === newName && t.name !== oldName)) {
+      toast.error(`Table "${newName}" already exists`);
+      return;
+    }
+
+    setEditedSchema(prev => {
+      if (!prev) return prev;
+
+      const updatedTables = prev.tables.map(table => {
+        if (table.name === oldName) {
+          return { ...table, name: newName };
+        }
+        
+        // Update foreign key references
+        if (table.foreign_keys) {
+          return {
+            ...table,
+            foreign_keys: table.foreign_keys.map(fk => 
+              fk.ref_table === oldName 
+                ? { ...fk, ref_table: newName }
+                : fk
+            ),
+          };
+        }
+        
+        return table;
+      });
+
+      return { ...prev, tables: updatedTables };
+    });
+
+    setHasChanges(true);
+    setDiagramKey(prev => prev + 1);
+    toast.success(`Renamed table "${oldName}" to "${newName}"`);
+  };
+
+  const handleAddTableInDiagram = (tableName: string, position: { x: number; y: number }) => {
+    console.log('[handleAddTableInDiagram] Called with:', { tableName, position, editedSchema: !!editedSchema, editedSchemaValue: editedSchema });
+    
+    // Initialize editedSchema if not exists
+    const currentEditedSchema = editedSchema || { tables: [] };
+    
+    // Create new table with empty columns
+    const newTable: TableSchema = {
+      name: tableName,
+      columns: [],
+      foreign_keys: [],
+      indexes: [],
+      row_count: 0,
+    };
+
+    // Check if table already exists
+    if (currentEditedSchema.tables.some(t => t.name === tableName)) {
+      toast.error(`Table "${tableName}" already exists`);
+      return;
+    }
+
+    const updated = {
+      ...currentEditedSchema,
+      tables: [...currentEditedSchema.tables, newTable],
+    };
+    
+    console.log('[handleAddTableInDiagram] Updated schema:', updated);
+    setEditedSchema(updated);
+    setHasChanges(true);
+    setDiagramKey(prev => prev + 1);
+    toast.info(`Table "${tableName}" added. Add columns and save to persist.`);
+  };
+
+  const handleEditTableInDiagram = (_tableName: string) => {
+    // In edit mode, don't close modal when double-clicking table
+    // Just show info that columns can be edited directly on the node
+    toast.info(`Edit columns directly on the table node`);
   };
 
   const handleCancelEdit = () => {
@@ -269,7 +473,15 @@ export function SchemaDiagramModal({ isOpen, onClose, schema, isSimulation = fal
             {/* Edit/View Mode Toggle for Simulations */}
             {isSimulation && !isEditMode && (
               <button
-                onClick={() => setIsEditMode(true)}
+                onClick={() => {
+                  console.log('[Edit Button] Entering edit mode, re-syncing editedSchema');
+                  // Re-sync editedSchema with current schema when entering edit mode
+                  const schemaToClone = schema || { tables: [] };
+                  const clonedSchema = JSON.parse(JSON.stringify(schemaToClone));
+                  console.log('[Edit Button] Setting editedSchema:', clonedSchema);
+                  setEditedSchema(clonedSchema);
+                  setIsEditMode(true);
+                }}
                 className={cn(
                   'flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors',
                   'bg-primary dark:bg-primary-dark text-white',
@@ -309,14 +521,18 @@ export function SchemaDiagramModal({ isOpen, onClose, schema, isSimulation = fal
                     'disabled:opacity-50 disabled:cursor-not-allowed'
                   )}
                 >
-                  <Save className="w-4 h-4" />
+                  {isSaving ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Save className="w-4 h-4" />
+                  )}
                   {isSaving ? 'Saving...' : 'Save Changes'}
                 </button>
               </>
             )}
             
             <button
-              onClick={onClose}
+              onClick={handleClose}
               className={cn(
                 'p-2 rounded-lg transition-colors',
                 'hover:bg-surface-light dark:hover:bg-surface-dark',
@@ -336,9 +552,16 @@ export function SchemaDiagramModal({ isOpen, onClose, schema, isSimulation = fal
             key={diagramKey}
             schema={currentSchema} 
             isEditable={isEditMode}
-            onAddForeignKey={handleAddForeignKey}
-            onRemoveForeignKey={handleRemoveForeignKey}
-            onUpdateForeignKey={handleUpdateForeignKey}
+            isSimulation={isSimulation}
+            onAddForeignKey={isEditMode ? handleAddForeignKey : undefined}
+            onRemoveForeignKey={isEditMode ? handleRemoveForeignKey : undefined}
+            onUpdateForeignKey={isEditMode ? handleUpdateForeignKey : undefined}
+            onAddTable={isEditMode ? handleAddTableInDiagram : onAddTable}
+            onEditTable={isEditMode ? handleEditTableInDiagram : onEditTable}
+            onAddColumn={isEditMode ? handleAddColumn : undefined}
+            onRemoveColumn={isEditMode ? handleRemoveColumn : undefined}
+            onUpdateColumn={isEditMode ? handleUpdateColumn : undefined}
+            onUpdateTableName={isEditMode ? handleUpdateTableName : undefined}
           />
         </div>
       </div>

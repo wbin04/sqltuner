@@ -2,7 +2,7 @@
  * SchemaDiagram Component
  * Interactive Entity Relationship Diagram using React Flow
  */
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useState } from 'react';
 import {
   ReactFlow,
   Background,
@@ -18,9 +18,13 @@ import {
   MarkerType,
   ConnectionLineType,
   OnReconnect,
+  useReactFlow,
+  ReactFlowProvider,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { TableNode } from './TableNode';
+import { ForeignKeyEdge } from './ForeignKeyEdge';
+import { ContextMenu } from './ContextMenu';
 import { transformSchemaToGraph, getLayoutedElements } from './layoutUtils';
 import { cn } from '../../../lib/utils';
 
@@ -54,6 +58,7 @@ interface SchemaDef {
 interface SchemaDiagramProps {
   schema: SchemaDef | null;
   isEditable?: boolean;
+  isSimulation?: boolean;
   onAddForeignKey?: (sourceTable: string, sourceCol: string, targetTable: string, targetCol: string) => void;
   onRemoveForeignKey?: (sourceTable: string, sourceCol: string, targetTable: string, targetCol: string) => void;
   onUpdateForeignKey?: (
@@ -61,6 +66,12 @@ interface SchemaDiagramProps {
     newSource: { table: string; col: string },
     newTarget: { table: string; col: string }
   ) => void;
+  onAddTable?: (tableName: string, position: { x: number; y: number }) => void;
+  onEditTable?: (tableName: string) => void;
+  onAddColumn?: (tableName: string, column: Column) => void;
+  onRemoveColumn?: (tableName: string, columnName: string) => void;
+  onUpdateColumn?: (tableName: string, columnName: string, newColumn: Column) => void;
+  onUpdateTableName?: (oldName: string, newName: string) => void;
 }
 
 // Register custom node types
@@ -68,9 +79,16 @@ const nodeTypes = {
   tableNode: TableNode,
 };
 
-export function SchemaDiagram({ schema, isEditable = false, onAddForeignKey, onRemoveForeignKey, onUpdateForeignKey }: SchemaDiagramProps) {
+// Register custom edge types
+const edgeTypes = {
+  foreignKeyEdge: ForeignKeyEdge,
+};
+
+function SchemaDiagramInner({ schema, isEditable = false, isSimulation = false, onAddForeignKey, onRemoveForeignKey, onUpdateForeignKey, onAddTable, onEditTable, onAddColumn, onRemoveColumn, onUpdateColumn, onUpdateTableName }: SchemaDiagramProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; flowPosition: { x: number; y: number } } | null>(null);
+  const { screenToFlowPosition } = useReactFlow();
 
   // Helper to parse handle IDs like "users__id__target" -> { table: "users", col: "id" }
   const parseHandleId = useCallback((handleId: string | null | undefined) => {
@@ -104,12 +122,16 @@ export function SchemaDiagram({ schema, isEditable = false, onAddForeignKey, onR
           target: connection.target!,
           sourceHandle,
           targetHandle,
-          type: 'smoothstep',
+          type: 'foreignKeyEdge',
           animated: true,
           style: { stroke: '#10b981' },
           markerEnd: {
             type: MarkerType.ArrowClosed,
             color: '#10b981',
+          },
+          data: {
+            onRemoveForeignKey,
+            isEditable,
           },
         };
         setEdges((eds) => addEdge(newEdge, eds));
@@ -118,31 +140,7 @@ export function SchemaDiagram({ schema, isEditable = false, onAddForeignKey, onR
     [isEditable, onAddForeignKey, setEdges]
   );
 
-  // Handle edge deletion
-  const onEdgeClick = useCallback(
-    (event: React.MouseEvent, edge: Edge) => {
-      if (!isEditable || !onRemoveForeignKey) return;
 
-      event.stopPropagation();
-      
-      if (window.confirm('Remove this foreign key relationship?')) {
-        // Parse edge ID or handles
-        const sourceHandle = edge.sourceHandle;
-        const targetHandle = edge.targetHandle;
-
-        if (sourceHandle && targetHandle) {
-          const [sourceTable, sourceCol] = sourceHandle.split('__');
-          const [targetTable, targetCol] = targetHandle.split('__');
-
-          if (sourceTable && sourceCol && targetTable && targetCol) {
-            onRemoveForeignKey(sourceTable, sourceCol, targetTable, targetCol);
-            setEdges((eds) => eds.filter((e) => e.id !== edge.id));
-          }
-        }
-      }
-    },
-    [isEditable, onRemoveForeignKey, setEdges]
-  );
 
   // Handle edge reconnection (drag to different column)
   const onReconnect: OnReconnect = useCallback(
@@ -150,7 +148,6 @@ export function SchemaDiagram({ schema, isEditable = false, onAddForeignKey, onR
       if (!isEditable || !onUpdateForeignKey) return;
 
       const oldSourceData = parseHandleId(oldEdge.sourceHandle);
-      const oldTargetData = parseHandleId(oldEdge.targetHandle);
       const newSourceData = parseHandleId(newConnection.sourceHandle);
       const newTargetData = parseHandleId(newConnection.targetHandle);
 
@@ -161,6 +158,54 @@ export function SchemaDiagram({ schema, isEditable = false, onAddForeignKey, onR
     },
     [isEditable, onUpdateForeignKey, parseHandleId]
   );
+
+  // Handle right-click on canvas
+  const onPaneContextMenu = useCallback(
+    (event: MouseEvent | React.MouseEvent<Element, MouseEvent>) => {
+      // Only allow in edit mode AND simulation
+      if (!isEditable || !isSimulation || !onAddTable) return;
+
+      event.preventDefault();
+
+      // Get cursor position in screen coordinates
+      const screenX = event.clientX;
+      const screenY = event.clientY;
+
+      // Convert to flow coordinates (accounting for zoom/pan)
+      const flowPosition = screenToFlowPosition({ x: screenX, y: screenY });
+
+      setContextMenu({
+        x: screenX,
+        y: screenY,
+        flowPosition,
+      });
+    },
+    [isSimulation, isEditable, onAddTable, screenToFlowPosition]
+  );
+
+  // Handle double-click on node
+  const onNodeDoubleClick = useCallback(
+    (_event: React.MouseEvent, node: Node) => {
+      if (!onEditTable) return;
+
+      onEditTable(node.id);
+    },
+    [onEditTable]
+  );
+
+  // Handle add table from context menu
+  const handleAddTable = useCallback(() => {
+    console.log('[SchemaDiagram.handleAddTable] Called', { hasContextMenu: !!contextMenu, hasOnAddTable: !!onAddTable });
+    
+    if (!contextMenu || !onAddTable) return;
+
+    const timestamp = Date.now();
+    const tableName = `table_${timestamp}`;
+
+    console.log('[SchemaDiagram.handleAddTable] Calling onAddTable with:', { tableName, position: contextMenu.flowPosition });
+    onAddTable(tableName, contextMenu.flowPosition);
+    setContextMenu(null);
+  }, [contextMenu, onAddTable]);
 
   // Transform schema data and apply layout
   useEffect(() => {
@@ -186,10 +231,17 @@ export function SchemaDiagram({ schema, isEditable = false, onAddForeignKey, onR
       edges: rawEdges.map(e => ({ id: e.id, source: e.source, target: e.target }))
     });
 
-    // Add isEditable flag to all nodes
+    // Add isEditable flag and callbacks to all nodes
     const nodesWithEditFlag = rawNodes.map(node => ({
       ...node,
-      data: { ...node.data, isEditable },
+      data: { 
+        ...node.data, 
+        isEditable,
+        onAddColumn,
+        onRemoveColumn,
+        onUpdateColumn,
+        onUpdateTableName,
+      },
     }));
 
     // Apply dagre layout
@@ -204,25 +256,38 @@ export function SchemaDiagram({ schema, isEditable = false, onAddForeignKey, onR
       edgeCount: layoutedEdges.length
     });
 
+    // Add onRemoveForeignKey and isEditable to edge data
+    const edgesWithData = layoutedEdges.map(edge => ({
+      ...edge,
+      data: {
+        ...edge.data,
+        onRemoveForeignKey,
+        isEditable,
+      },
+    }));
+
     // Force new object references to trigger React Flow update
     setNodes([...layoutedNodes]);
-    setEdges([...layoutedEdges]);
-  }, [schema, isEditable]); // Remove setNodes, setEdges from deps to avoid infinite loops
+    setEdges([...edgesWithData]);
+  }, [schema, isEditable, onAddColumn, onRemoveColumn, onUpdateColumn, onUpdateTableName, onRemoveForeignKey]); // Add callbacks to deps to ensure updates
 
-  // Empty state
+  // Empty state - only show for real databases, not simulations
   if (!schema || !schema.tables || schema.tables.length === 0) {
-    return (
-      <div className="h-full flex items-center justify-center">
-        <div className="text-center py-8">
-          <p className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark">
-            No schema available to display
-          </p>
-          <p className="text-xs text-text-muted-DEFAULT dark:text-text-muted-dark mt-1">
-            Connect to a database or define a schema to see the diagram
-          </p>
+    if (!isSimulation) {
+      return (
+        <div className="h-full flex items-center justify-center">
+          <div className="text-center py-8">
+            <p className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark">
+              No schema available to display
+            </p>
+            <p className="text-xs text-text-muted-DEFAULT dark:text-text-muted-dark mt-1">
+              Connect to a database or define a schema to see the diagram
+            </p>
+          </div>
         </div>
-      </div>
-    );
+      );
+    }
+    // For simulations, continue to render empty canvas
   }
 
   return (
@@ -233,9 +298,11 @@ export function SchemaDiagram({ schema, isEditable = false, onAddForeignKey, onR
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={isEditable ? onConnect : undefined}
-        onEdgeClick={isEditable ? onEdgeClick : undefined}
         onReconnect={isEditable ? onReconnect : undefined}
+        onPaneContextMenu={isEditable ? onPaneContextMenu : undefined}
+        onNodeDoubleClick={onNodeDoubleClick}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         fitView
         minZoom={0.1}
         maxZoom={1.5}
@@ -246,11 +313,9 @@ export function SchemaDiagram({ schema, isEditable = false, onAddForeignKey, onR
         proOptions={{ hideAttribution: true }}
         connectionLineStyle={{ stroke: '#10b981', strokeWidth: 2 }}
         connectionLineType={ConnectionLineType.SmoothStep}
-        edgesUpdatable={isEditable}
         defaultEdgeOptions={{
-          type: 'smoothstep',
+          type: 'foreignKeyEdge',
           focusable: true,
-          updatable: isEditable ? 'target' : false,
         }}
       >
         {/* Background Grid */}
@@ -267,8 +332,7 @@ export function SchemaDiagram({ schema, isEditable = false, onAddForeignKey, onR
         <Controls
           className={cn(
             'bg-surface-light dark:bg-surface-dark',
-            'border border-border-DEFAULT dark:border-border-dark',
-            'rounded-lg shadow-lg'
+            'border border-border-DEFAULT dark:border-border-dark'
           )}
         />
 
@@ -276,13 +340,31 @@ export function SchemaDiagram({ schema, isEditable = false, onAddForeignKey, onR
         <MiniMap
           className={cn(
             'bg-surface-light dark:bg-surface-dark',
-            'border border-border-DEFAULT dark:border-border-dark',
-            'rounded-lg shadow-lg'
+            'border border-border-DEFAULT dark:border-border-dark'
           )}
           nodeColor={() => '#6366f1'}
           maskColor="rgba(0, 0, 0, 0.1)"
         />
       </ReactFlow>
+
+      {/* Context Menu */}
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onClose={() => setContextMenu(null)}
+          onAddTable={handleAddTable}
+        />
+      )}
     </div>
+  );
+}
+
+// Export wrapper component with ReactFlowProvider
+export function SchemaDiagram(props: SchemaDiagramProps) {
+  return (
+    <ReactFlowProvider>
+      <SchemaDiagramInner {...props} />
+    </ReactFlowProvider>
   );
 }

@@ -116,7 +116,9 @@ export function transformSchemaToGraph(tables: TableSchema[]): {
           id: `${table.name}.${fk.column}-${fk.ref_table}.${fk.ref_column}`,
           source: table.name,
           target: fk.ref_table,
-          type: 'smoothstep',
+          sourceHandle: `${table.name}__${fk.column}__source`,
+          targetHandle: `${fk.ref_table}__${fk.ref_column}__target`,
+          type: 'foreignKeyEdge',
           animated: false,
           style: { stroke: '#94a3b8', strokeWidth: 2 },
           markerEnd: {
