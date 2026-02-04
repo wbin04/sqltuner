@@ -12,6 +12,9 @@ import { HistoryPage } from './pages/HistoryPage';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { FeedbackReview } from './pages/admin/FeedbackReview';
 import { UserManagement } from './pages/admin/UserManagement';
+import { SchemaEditor } from './pages/TableEditor';
+import { ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 
 type AdminPage = 'dashboard' | 'users' | 'feedback' | 'connections' | 'settings';
 
@@ -137,6 +140,21 @@ function AppContent() {
         )
       } />
 
+
+
+      {/* Schema Editor Route - For editing schema of any workspace (real or simulation) */}
+      <Route path="/schema-editor/:workspaceId" element={
+        isLoading ? (
+          <div className="flex items-center justify-center h-screen">
+            <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-primary"></div>
+          </div>
+        ) : isAuthenticated ? (
+          <SchemaEditor />
+        ) : (
+          <Navigate to="/login" replace />
+        )
+      } />
+
       <Route path="/" element={<Navigate to="/workspaces" replace />} />
     </Routes>
   );
@@ -147,6 +165,18 @@ function App() {
     <ThemeProvider>
       <AuthProvider>
         <AppContent />
+        <ToastContainer
+          position="top-right"
+          autoClose={3000}
+          hideProgressBar={false}
+          newestOnTop={false}
+          closeOnClick
+          rtl={false}
+          pauseOnFocusLoss
+          draggable
+          pauseOnHover
+          theme="light"
+        />
       </AuthProvider>
     </ThemeProvider>
   );

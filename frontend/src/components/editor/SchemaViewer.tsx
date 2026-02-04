@@ -3,8 +3,10 @@
  * Displays database schema metadata in a collapsible tree view
  */
 import { useState } from 'react';
-import { Database, Table, ChevronDown, ChevronRight, Key, Link } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Database, Table, ChevronDown, ChevronRight, Key, Link, Network, Edit } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { SchemaDiagramModal } from './diagram/SchemaDiagramModal';
 
 interface Column {
   name: string;
@@ -41,10 +43,13 @@ interface SchemaDef {
 
 interface SchemaViewerProps {
   schema: Record<string, any> | null | undefined;
+  workspaceId?: string;
 }
 
-export function SchemaViewer({ schema }: SchemaViewerProps) {
+export function SchemaViewer({ schema, workspaceId }: SchemaViewerProps) {
+  const navigate = useNavigate();
   const [expandedTables, setExpandedTables] = useState<Set<string>>(new Set());
+  const [isDiagramModalOpen, setIsDiagramModalOpen] = useState(false);
 
   // Parse schema to SchemaDef format
   const schemaDef = schema as SchemaDef | null;
@@ -82,27 +87,67 @@ export function SchemaViewer({ schema }: SchemaViewerProps) {
   }
 
   return (
-    <div className="h-full overflow-y-auto">
+    <div className="h-full flex flex-col transition-all duration-500 ease-in-out">
       {/* Header */}
-      <div className="sticky top-0 z-10 bg-surface dark:bg-background-dark border-b border-border-DEFAULT dark:border-border-dark p-4">
-        <div className="flex items-center gap-2">
-          <Database className="w-5 h-5 text-primary dark:text-primary-dark" />
-          <h2 className="text-lg font-semibold text-text-main-DEFAULT dark:text-text-main-dark">
-            Database Schema
-          </h2>
+      <div className="flex-shrink-0 bg-surface dark:bg-background-dark border-b border-border-DEFAULT dark:border-border-dark p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Database className="w-5 h-5 text-primary dark:text-primary-dark" />
+            <h2 className="text-lg font-semibold text-text-main-DEFAULT dark:text-text-main-dark">
+              Database Schema
+            </h2>
+          </div>
         </div>
+
         {schemaDef.database_name && (
-          <p className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark mt-1">
+          <p className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark mb-2">
             {schemaDef.database_name} ({schemaDef.db_type})
           </p>
         )}
-        <p className="text-xs text-text-muted-DEFAULT dark:text-text-muted-dark mt-1">
-          {schemaDef.tables.length} {schemaDef.tables.length === 1 ? 'table' : 'tables'}
-        </p>
+        <div className="flex items-center justify-between">
+          <p className="text-s text-text-muted-DEFAULT dark:text-text-muted-dark">
+            {schemaDef.tables.length} {schemaDef.tables.length === 1 ? 'table' : 'tables'}
+          </p>
+
+          {/* Action Buttons */}
+          <div className="flex items-center gap-2">
+            {workspaceId && (
+              <button
+                onClick={() => navigate(`/schema-editor/${workspaceId}`)}
+                className={cn(
+                  'group flex items-center gap-0 px-1 py-1.5 rounded-lg text-sm font-medium transition-all duration-300 ease-in-out',
+                  'group-hover:px-2',
+                  'bg-primary dark:bg-primary-dark hover:bg-primary-hover dark:hover:bg-primary-dark-hover text-white font-medium',
+                'text-white transition-all hover:shadow-lg hover:shadow-primary/20 dark:hover:shadow-primary-dark/20'
+                )}
+              >
+                <Edit className="w-6 h-6" />
+                <span className="max-w-0 overflow-hidden group-hover:max-w-24 group-hover:overflow-visible transition-all duration-300 ease-in-out whitespace-nowrap ml-0 group-hover:ml-2">
+                  Edit Schema
+                </span>
+              </button>
+            )}
+            
+            <button
+              onClick={() => setIsDiagramModalOpen(true)}
+              className={cn(
+                'group flex items-center gap-0 px-1 py-1.5 rounded-lg text-sm font-medium transition-all duration-300 ease-in-out',
+                'group-hover:px-2',
+                'bg-primary dark:bg-primary-dark hover:bg-primary-hover dark:hover:bg-primary-dark-hover text-white font-medium',
+                'text-white transition-all hover:shadow-lg hover:shadow-primary/20 dark:hover:shadow-primary-dark/20'
+              )}
+            >
+              <Network className="w-6 h-6" />
+              <span className="max-w-0 overflow-hidden group-hover:max-w-24 group-hover:overflow-visible transition-all duration-300 ease-in-out whitespace-nowrap ml-0 group-hover:ml-2">
+                View Diagram
+              </span>
+            </button>
+          </div>
+        </div>
       </div>
 
-      {/* Tables List */}
-      <div className="p-2">
+      {/* Tree View */}
+      <div className="flex-1 overflow-y-auto p-2">
         {schemaDef.tables.map((table) => {
           const isExpanded = expandedTables.has(table.name);
           
@@ -110,7 +155,7 @@ export function SchemaViewer({ schema }: SchemaViewerProps) {
             <div
               key={table.name}
               className={cn(
-                'mb-2 rounded-lg border',
+                'mb-2 rounded-lg border transition-all duration-500 ease-in-out',
                 'border-border-DEFAULT dark:border-border-dark',
                 'bg-surface dark:bg-background-dark'
               )}
@@ -146,13 +191,13 @@ export function SchemaViewer({ schema }: SchemaViewerProps) {
 
               {/* Table Columns (Expanded) */}
               {isExpanded && (
-                <div className="px-3 pb-3 space-y-1">
+                <div className="px-3 pb-3 space-y-1 transition-all duration-500 ease-in-out">
                   {table.columns.map((column) => (
                     <div
                       key={column.name}
                       className={cn(
-                        'flex items-center gap-2 p-2 rounded',
-                        'bg-surface-DEFAULT dark:bg-surface-dark',
+                        'flex items-center gap-2 p-2 rounded transition-all duration-400',
+                        'bg-surface-light dark:bg-surface-dark',
                         'text-sm'
                       )}
                     >
@@ -190,14 +235,14 @@ export function SchemaViewer({ schema }: SchemaViewerProps) {
 
                   {/* Foreign Keys Section */}
                   {table.foreign_keys && table.foreign_keys.length > 0 && (
-                    <div className="mt-3 pt-2 border-t border-border-DEFAULT dark:border-border-dark">
+                    <div className="mt-3 pt-2 border-t border-border-DEFAULT dark:border-border-dark transition-all duration-400">
                       <p className="text-xs font-semibold text-text-muted-DEFAULT dark:text-text-muted-dark mb-2">
                         Foreign Keys
                       </p>
                       {table.foreign_keys.map((fk, idx) => (
                         <div
                           key={idx}
-                          className="text-xs text-text-muted-DEFAULT dark:text-text-muted-dark flex items-center gap-1 mb-1"
+                          className="text-xs text-text-muted-DEFAULT dark:text-text-muted-dark flex items-center gap-1 mb-1 transition-all duration-400"
                         >
                           <Link className="w-3 h-3" />
                           <span className="font-mono">{fk.column}</span>
@@ -210,14 +255,14 @@ export function SchemaViewer({ schema }: SchemaViewerProps) {
 
                   {/* Indexes Section */}
                   {table.indexes && table.indexes.length > 0 && (
-                    <div className="mt-3 pt-2 border-t border-border-DEFAULT dark:border-border-dark">
+                    <div className="mt-3 pt-2 border-t border-border-DEFAULT dark:border-border-dark transition-all duration-400">
                       <p className="text-xs font-semibold text-text-muted-DEFAULT dark:text-text-muted-dark mb-2">
                         Indexes
                       </p>
                       {table.indexes.map((index, idx) => (
                         <div
                           key={idx}
-                          className="text-xs text-text-muted-DEFAULT dark:text-text-muted-dark flex items-center gap-1 mb-1"
+                          className="text-xs text-text-muted-DEFAULT dark:text-text-muted-dark flex items-center gap-1 mb-1 transition-all duration-400"
                         >
                           <Key className="w-3 h-3" />
                           <span className="font-mono">{index.name}</span>
@@ -237,6 +282,13 @@ export function SchemaViewer({ schema }: SchemaViewerProps) {
           );
         })}
       </div>
+
+      {/* Diagram Modal */}
+      <SchemaDiagramModal
+        isOpen={isDiagramModalOpen}
+        onClose={() => setIsDiagramModalOpen(false)}
+        schema={schemaDef}
+      />
     </div>
   );
 }

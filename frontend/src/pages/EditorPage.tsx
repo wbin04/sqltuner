@@ -22,7 +22,7 @@ export function EditorPage() {
   const navigate = useNavigate();
   const [autoSyncTriggered, setAutoSyncTriggered] = useState(false);
   const [activeResultSql, setActiveResultSql] = useState<string | null>(null);
-  const [isResultsCollapsed, setIsResultsCollapsed] = useState(false);
+  const [isResultsCollapsed, setIsResultsCollapsed] = useState(true); // Default to collapsed
   const [resultsPanelHeight, setResultsPanelHeight] = useState(300); // Default height in pixels
   const [isResizing, setIsResizing] = useState(false);
   const [inputValue, setInputValue] = useState('');
@@ -143,7 +143,7 @@ export function EditorPage() {
       {/* Header */}
       <header className={cn(
         'flex items-center justify-between px-6 py-4 flex-shrink-0',
-        'bg-surface-DEFAULT dark:bg-surface-dark',
+        'bg-surface-light dark:bg-surface-dark',
         'border-b border-border-DEFAULT dark:border-border-dark'
       )}>
         <div className="flex items-center gap-4">
@@ -187,7 +187,7 @@ export function EditorPage() {
         {/* Pane A: Session Manager (Left Sidebar) */}
         <aside className={cn(
           'w-72 flex-shrink-0',
-          'bg-surface-DEFAULT dark:bg-surface-dark',
+          'bg-surface-light dark:bg-surface-dark',
           'border-r border-border-DEFAULT dark:border-border-dark'
         )}>
           <SessionManager
@@ -205,60 +205,69 @@ export function EditorPage() {
 
         {/* Pane B: Chat Workbench (Center) */}
         <main className="flex-1 flex flex-col overflow-hidden">
-          <ChatArea
-            messages={editorLogic.messages}
-            onSendMessage={handleSendMessage}
-            onRunQuery={handleRunQuery}
-            onOptimize={handleOptimize}
-            onExplain={handleExplain}
-            inputValue={inputValue}
-            onUpdateInput={setInputValue}
-            isLoading={editorLogic.isSendingMessage}
-            isExecuting={editorLogic.isExecuting}
-          />
+          <div className={cn(
+            'flex-1 flex flex-col overflow-hidden',
+            activeResultSql && !isResultsCollapsed && 'min-h-0'
+          )}>
+            <ChatArea
+              messages={editorLogic.messages}
+              onSendMessage={handleSendMessage}
+              onRunQuery={handleRunQuery}
+              onOptimize={handleOptimize}
+              onExplain={handleExplain}
+              inputValue={inputValue}
+              onUpdateInput={setInputValue}
+              isLoading={editorLogic.isSendingMessage}
+              isExecuting={editorLogic.isExecuting}
+            />
+          </div>
 
-          {/* Results Panel (Resizable & Collapsible) */}
-          {activeResultSql && (
-            <div
-              className={cn(
-                'border-t border-border-DEFAULT dark:border-border-dark',
-                'bg-surface-DEFAULT dark:bg-surface-dark',
-                'flex flex-col'
-              )}
-              style={{ height: isResultsCollapsed ? 'auto' : `${resultsPanelHeight}px` }}
-            >
-              {/* Resize Handle */}
-              {!isResultsCollapsed && (
-                <div
-                  className={cn(
-                    'h-1 cursor-ns-resize hover:bg-primary dark:hover:bg-primary-dark transition-colors',
-                    isResizing && 'bg-primary dark:bg-primary-dark'
-                  )}
-                  onMouseDown={() => setIsResizing(true)}
-                />
-              )}
-
-              {/* Header */}
-              <button
-                onClick={() => setIsResultsCollapsed(!isResultsCollapsed)}
+          {/* Results Panel (Resizable & Collapsible) - Always visible */}
+          <div
+            className={cn(
+              'border-t border-border-DEFAULT dark:border-border-dark',
+              'bg-surface-light dark:bg-surface-dark',
+              'flex flex-col flex-shrink-0'
+            )}
+            style={{ height: isResultsCollapsed ? 'auto' : `${resultsPanelHeight}px` }}
+          >
+            {/* Resize Handle */}
+            {!isResultsCollapsed && (
+              <div
                 className={cn(
-                  'w-full flex items-center justify-between px-4 py-2',
-                  'hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark',
-                  'transition-colors'
+                  'h-1 cursor-ns-resize hover:bg-primary dark:hover:bg-primary-dark transition-colors',
+                  isResizing && 'bg-primary dark:bg-primary-dark'
                 )}
-              >
-                <span className="text-sm font-medium text-text-main-DEFAULT dark:text-text-main-dark flex items-center gap-2">
-                  Query Results
-                  {editorLogic.isExecuting && (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  )}
-                </span>
-                {isResultsCollapsed ? (
-                  <ChevronUp className="w-4 h-4" />
-                ) : (
-                  <ChevronDown className="w-4 h-4" />
+                onMouseDown={() => setIsResizing(true)}
+              />
+            )}
+
+            {/* Header */}
+            <button
+              onClick={() => setIsResultsCollapsed(!isResultsCollapsed)}
+              className={cn(
+                'w-full flex items-center justify-between px-4 py-2',
+                'hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark',
+                'transition-colors'
+              )}
+            >
+              <span className="text-sm font-medium text-text-main-DEFAULT dark:text-text-main-dark flex items-center gap-2">
+                Query Results
+                {editorLogic.isExecuting && (
+                  <Loader2 className="w-4 h-4 animate-spin" />
                 )}
-              </button>
+                {!activeResultSql && !editorLogic.isExecuting && (
+                  <span className="text-xs text-text-muted-DEFAULT dark:text-text-muted-dark">
+                    (No results yet)
+                  </span>
+                )}
+              </span>
+              {isResultsCollapsed ? (
+                <ChevronUp className="w-4 h-4" />
+              ) : (
+                <ChevronDown className="w-4 h-4" />
+              )}
+            </button>
 
               {/* Results Content */}
               {!isResultsCollapsed && (
@@ -269,6 +278,17 @@ export function EditorPage() {
                       <p className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark">
                         Executing query on database...
                       </p>
+                    </div>
+                  ) : !activeResultSql ? (
+                    <div className="flex flex-col items-center justify-center h-full space-y-4">
+                      <div className="text-center py-8">
+                        <p className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark">
+                          No results yet
+                        </p>
+                        <p className="text-xs text-text-muted-DEFAULT dark:text-text-muted-dark mt-1">
+                          Execute a query to see results
+                        </p>
+                      </div>
                     </div>
                   ) : editorLogic.executeError ? (
                     <div className="space-y-3">
@@ -383,16 +403,15 @@ export function EditorPage() {
                 </div>
               )}
             </div>
-          )}
         </main>
 
         {/* Pane C: Context Explorer (Right Sidebar) */}
         <aside className={cn(
           'w-90 flex-shrink-0',
-          'bg-surface-DEFAULT dark:bg-surface-dark',
+          'bg-surface-light dark:bg-surface-dark',
           'border-l border-border-DEFAULT dark:border-border-dark'
         )}>
-          <SchemaViewer schema={workspace.meta_schema} />
+          <SchemaViewer schema={workspace.meta_schema} workspaceId={workspace.id} />
         </aside>
       </div>
 

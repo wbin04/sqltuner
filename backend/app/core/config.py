@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     MODEL_NAME: str = "qwen2.5:3b"
     MODEL_CHAT_NAME: str = "qwen2.5:3b"
 
-    BACKEND_CORS_ORIGINS: list[str] = ["http://localhost:5173"]
+    BACKEND_CORS_ORIGINS: str = "http://localhost:5173"
 
     ENCRYPTION_KEY: str
 

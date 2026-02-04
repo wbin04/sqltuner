@@ -22,7 +22,6 @@ const realDbSchema = z.object({
 
 const simulationSchema = z.object({
   name: z.string().min(1, 'Name is required').max(100, 'Name too long'),
-  db_type: z.literal(DbType.SIMULATION),
 });
 
 type FormData = z.infer<typeof realDbSchema> | z.infer<typeof simulationSchema>;
@@ -54,7 +53,22 @@ export function CreateWorkspaceModal({ isOpen, onClose, onSubmit }: CreateWorksp
     },
   });
 
+  // Reset form when workspace type changes
+  const handleWorkspaceTypeChange = (type: 'real' | 'simulation') => {
+    setWorkspaceType(type);
+    reset({
+      name: '',
+      ...(type === 'real' ? {
+        db_type: DbType.POSTGRES,
+        port: 5432,
+      } : {}),
+    });
+  };
+
   const handleFormSubmit = async (data: FormData) => {
+    console.log('Form submitted with data:', data);
+    console.log('Workspace type:', workspaceType);
+    
     setIsSubmitting(true);
     try {
       const payload: CreateWorkspacePayload = {
@@ -69,6 +83,7 @@ export function CreateWorkspaceModal({ isOpen, onClose, onSubmit }: CreateWorksp
         } : {}),
       };
       
+      console.log('Submitting payload:', payload);
       await onSubmit(payload);
       reset();
       onClose();
@@ -111,7 +126,7 @@ export function CreateWorkspaceModal({ isOpen, onClose, onSubmit }: CreateWorksp
           <div className="grid grid-cols-2 gap-4">
             <button
               type="button"
-              onClick={() => setWorkspaceType('real')}
+              onClick={() => handleWorkspaceTypeChange('real')}
               className={cn(
                 'p-4 rounded-xl border-2 transition-all',
                 workspaceType === 'real'
@@ -137,7 +152,7 @@ export function CreateWorkspaceModal({ isOpen, onClose, onSubmit }: CreateWorksp
 
             <button
               type="button"
-              onClick={() => setWorkspaceType('simulation')}
+              onClick={() => handleWorkspaceTypeChange('simulation')}
               className={cn(
                 'p-4 rounded-xl border-2 transition-all',
                 workspaceType === 'simulation'
@@ -188,6 +203,16 @@ export function CreateWorkspaceModal({ isOpen, onClose, onSubmit }: CreateWorksp
               <p className="mt-1 text-sm text-red-500">{errors.name.message}</p>
             )}
           </div>
+
+          {/* Simulation Description */}
+          {workspaceType === 'simulation' && (
+            <div className="p-4 rounded-lg bg-purple-50 dark:bg-purple-900/10 border border-purple-200 dark:border-purple-800">
+              <p className="text-sm text-purple-700 dark:text-purple-300">
+                <strong>Simulation Mode:</strong> Create a virtual database workspace without connecting to a real database. 
+                Perfect for designing schemas, testing queries, and prototyping.
+              </p>
+            </div>
+          )}
 
           {/* Real Database Fields */}
           {workspaceType === 'real' && (
