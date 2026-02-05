@@ -85,25 +85,25 @@ export function UserManagement() {
 
       {/* Stats */}
       <div className="grid grid-cols-4 gap-4">
-        <div className="bg-surface-DEFAULT dark:bg-surface-dark rounded-lg border border-border-DEFAULT dark:border-border-dark p-4">
+        <div className="bg-surface-light dark:bg-surface-dark rounded-lg border border-border-DEFAULT dark:border-border-dark p-4">
           <p className="text-2xl font-bold text-text-main-DEFAULT dark:text-text-main-dark">
             {usersData.length}
           </p>
           <p className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark">Total Users</p>
         </div>
-        <div className="bg-surface-DEFAULT dark:bg-surface-dark rounded-lg border border-border-DEFAULT dark:border-border-dark p-4">
+        <div className="bg-surface-light dark:bg-surface-dark rounded-lg border border-border-DEFAULT dark:border-border-dark p-4">
           <p className="text-2xl font-bold text-green-600 dark:text-green-400">
             {usersData.filter(u => u.status === 'active').length}
           </p>
           <p className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark">Active</p>
         </div>
-        <div className="bg-surface-DEFAULT dark:bg-surface-dark rounded-lg border border-border-DEFAULT dark:border-border-dark p-4">
+        <div className="bg-surface-light dark:bg-surface-dark rounded-lg border border-border-DEFAULT dark:border-border-dark p-4">
           <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">
             {usersData.filter(u => u.role === 'admin').length}
           </p>
           <p className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark">Admins</p>
         </div>
-        <div className="bg-surface-DEFAULT dark:bg-surface-dark rounded-lg border border-border-DEFAULT dark:border-border-dark p-4">
+        <div className="bg-surface-light dark:bg-surface-dark rounded-lg border border-border-DEFAULT dark:border-border-dark p-4">
           <p className="text-2xl font-bold text-red-600 dark:text-red-400">
             {usersData.filter(u => u.status === 'banned').length}
           </p>
@@ -112,7 +112,7 @@ export function UserManagement() {
       </div>
 
       {/* Search */}
-      <div className="bg-surface-DEFAULT dark:bg-surface-dark rounded-xl border border-border-DEFAULT dark:border-border-dark p-4">
+      <div className="bg-surface-light dark:bg-surface-dark rounded-xl border border-border-DEFAULT dark:border-border-dark p-4">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted-DEFAULT dark:text-text-muted-dark" />
           <input
@@ -126,7 +126,7 @@ export function UserManagement() {
       </div>
 
       {/* Users Table */}
-      <div className="bg-surface-DEFAULT dark:bg-surface-dark rounded-xl border border-border-DEFAULT dark:border-border-dark overflow-hidden">
+      <div className="bg-surface-light dark:bg-surface-dark rounded-xl border border-border-DEFAULT dark:border-border-dark overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-surface-highlight-DEFAULT dark:bg-surface-highlight-dark border-b border-border-DEFAULT dark:border-border-dark">
@@ -220,7 +220,7 @@ export function UserManagement() {
                       </button>
                       
                       {activeDropdown === user.id && (
-                        <div className="absolute right-0 mt-2 w-48 bg-surface-DEFAULT dark:bg-surface-dark border border-border-DEFAULT dark:border-border-dark rounded-lg shadow-lg z-10">
+                        <div className="absolute right-0 mt-2 w-48 bg-surface-light dark:bg-surface-dark border border-border-DEFAULT dark:border-border-dark rounded-lg shadow-lg z-10">
                           <button
                             onClick={() => handleAction('edit-role', user.id)}
                             className="w-full px-4 py-2 text-left text-sm text-text-main-DEFAULT dark:text-text-main-dark hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark flex items-center gap-2"

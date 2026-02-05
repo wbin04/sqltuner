@@ -74,7 +74,7 @@ export function AdminDashboard() {
           return (
             <div
               key={stat.title}
-              className="bg-surface-DEFAULT dark:bg-surface-dark rounded-xl border border-border-DEFAULT dark:border-border-dark p-6 hover:shadow-lg transition-shadow"
+              className="bg-surface-light dark:bg-surface-dark rounded-xl border border-border-DEFAULT dark:border-border-dark p-6 hover:shadow-lg transition-shadow"
             >
               <div className="flex items-start justify-between mb-4">
                 <div className={`w-12 h-12 bg-gradient-to-br ${stat.color} rounded-lg flex items-center justify-center shadow-lg`}>
@@ -100,7 +100,7 @@ export function AdminDashboard() {
       {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Queries per Hour Chart */}
-        <div className="bg-surface-DEFAULT dark:bg-surface-dark rounded-xl border border-border-DEFAULT dark:border-border-dark p-6">
+        <div className="bg-surface-light dark:bg-surface-dark rounded-xl border border-border-DEFAULT dark:border-border-dark p-6">
           <h3 className="text-lg font-semibold text-text-main-DEFAULT dark:text-text-main-dark mb-4">
             Queries per Hour (Today)
           </h3>
@@ -143,7 +143,7 @@ export function AdminDashboard() {
         </div>
 
         {/* User Satisfaction Chart */}
-        <div className="bg-surface-DEFAULT dark:bg-surface-dark rounded-xl border border-border-DEFAULT dark:border-border-dark p-6">
+        <div className="bg-surface-light dark:bg-surface-dark rounded-xl border border-border-DEFAULT dark:border-border-dark p-6">
           <h3 className="text-lg font-semibold text-text-main-DEFAULT dark:text-text-main-dark mb-4">
             User Satisfaction Trend (This Week)
           </h3>
@@ -189,7 +189,7 @@ export function AdminDashboard() {
       </div>
 
       {/* Recent Activity */}
-      <div className="bg-surface-DEFAULT dark:bg-surface-dark rounded-xl border border-border-DEFAULT dark:border-border-dark p-6">
+      <div className="bg-surface-light dark:bg-surface-dark rounded-xl border border-border-DEFAULT dark:border-border-dark p-6">
         <h3 className="text-lg font-semibold text-text-main-DEFAULT dark:text-text-main-dark mb-4">
           Recent Activity
         </h3>

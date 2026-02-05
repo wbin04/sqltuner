@@ -35,4 +35,19 @@
   * {
     box-sizing: border-box;
   }
+
+  /* React Flow Edge Highlighting */
+  .react-flow__edge.selected .react-flow__edge-path {
+    stroke: #3b82f6 !important;
+    stroke-width: 3px !important;
+    filter: drop-shadow(0 0 4px rgba(59, 130, 246, 0.5));
+  }
+
+  .react-flow__edge-interaction {
+    cursor: grab;
+  }
+
+  .react-flow__edge-interaction:active {
+    cursor: grabbing;
+  }
 }

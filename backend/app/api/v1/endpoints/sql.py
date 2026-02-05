@@ -6,12 +6,14 @@ import traceback
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 
 from backend.app.api.v1.endpoints.auth import get_current_user
+from backend.app.core.config import settings
 from backend.app.core.security import decrypt_password
 from backend.app.db.session import get_db
-from backend.app.models.models import DBConnection, DBType, User
+from backend.app.models.models import DBType, User
+from backend.app.repositories.connection_repository import \
+    connection_repository
 from backend.app.schemas.sql import (SQLExecuteRequest, SQLExecuteResponse,
                                      SQLExplainPlanRequest,
                                      SQLExplainPlanResponse, SQLExplainRequest,
@@ -19,7 +21,8 @@ from backend.app.schemas.sql import (SQLExecuteRequest, SQLExecuteResponse,
                                      SQLOptimizeResponse)
 from backend.app.services.execution_service import simulation_executor
 from backend.app.services.llm_service import llm_service
-from backend.app.services.optimization_service import optimization_service
+from backend.app.services.optimization_service import (ConnectionStringBuilder,
+                                                       optimization_service)
 
 logger = logging.getLogger(__name__)
 
@@ -27,17 +30,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def resolve_docker_host(host: str) -> str:
-    if host in ['localhost', '127.0.0.1']:
-        return 'host.docker.internal'
-    return host
-
-
-def build_sync_connection_string(connection: DBConnection) -> str:
+def build_sync_connection_string(connection):
     password = decrypt_password(
         connection.db_password) if connection.db_password else ""
 
-    resolved_host = resolve_docker_host(connection.host)
+    resolved_host = ConnectionStringBuilder.resolve_docker_host(
+        connection.host
+    )
 
     if connection.db_type == DBType.POSTGRES:
         return (
@@ -71,19 +70,78 @@ def format_schema_for_llm(meta_schema: dict) -> str:
     return "\n".join(lines)
 
 
+def run_sandbox_execution(
+    connection,
+    request: SQLExecuteRequest
+):
+    logger.info(
+        f"[SANDBOX] Using SQLite sandbox for SIMULATION connection "
+        f"{connection.id}"
+    )
+    logger.info(f"[SANDBOX] SQL: {request.sql}")
+
+    if not connection.meta_schema:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="SIMULATION connection requires meta_schema."
+            "Please sync schema first.")
+
+    tables_count = len(connection.meta_schema.get('tables', []))
+    logger.info(f"[SANDBOX] Tables in meta_schema: {tables_count}")
+
+    try:
+        start_time = time.time()
+
+        result = simulation_executor.execute(
+            meta_schema=connection.meta_schema,
+            sql_query=request.sql,
+            sample_data=connection.meta_schema.get('sample_data')
+        )
+
+        execution_time_ms = (time.time() - start_time) * 1000
+
+        total_rows = result['row_count']
+        rows = result['rows'][:settings.SANDBOX_MAX_ROWS]
+        truncated = total_rows > settings.SANDBOX_MAX_ROWS
+
+        logger.info(
+            f"[SANDBOX] Success! Total rows: {total_rows}, "
+            f"Returned: {len(rows)}, Truncated: {truncated}, "
+            f"Time: {execution_time_ms}ms"
+        )
+
+        return SQLExecuteResponse(
+            columns=result['columns'],
+            rows=rows,
+            execution_time_ms=execution_time_ms,
+            row_count=len(rows),
+            total_rows=total_rows,
+            truncated=truncated,
+            max_rows=settings.SANDBOX_MAX_ROWS
+        )
+    except Exception as e:
+        error_detail = (
+            f"Sandbox execution error: {str(e)}\n"
+            f"{traceback.format_exc()}"
+        )
+        logger.error(f"[SANDBOX ERROR] {error_detail}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error_detail
+        )
+
+
 @router.post("/execute", response_model=SQLExecuteResponse)
 async def execute_sql(
     request: SQLExecuteRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(
-        select(DBConnection).where(
-            DBConnection.id == request.connection_id,
-            DBConnection.user_id == current_user.id
-        )
+    connection = await connection_repository.get_by_user_and_id(
+        db=db,
+        user_id=current_user.id,
+        connection_id=request.connection_id
     )
-    connection = result.scalar_one_or_none()
 
     if not connection:
         raise HTTPException(
@@ -92,53 +150,7 @@ async def execute_sql(
         )
 
     if connection.db_type == DBType.SIMULATION:
-        logger.info(
-            f"[SANDBOX] Using SQLite sandbox for SIMULATION connection "
-            f"{connection.id}"
-        )
-        logger.info(f"[SANDBOX] SQL: {request.sql}")
-
-        if not connection.meta_schema:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="SIMULATION connection requires meta_schema."
-                "Please sync schema first.")
-
-        tables_count = len(connection.meta_schema.get('tables', []))
-        logger.info(f"[SANDBOX] Tables in meta_schema: {tables_count}")
-
-        try:
-            start_time = time.time()
-
-            result = simulation_executor.execute(
-                meta_schema=connection.meta_schema,
-                sql_query=request.sql,
-                sample_data=connection.meta_schema.get('sample_data')
-            )
-
-            execution_time_ms = (time.time() - start_time) * 1000
-
-            logger.info(
-                f"[SANDBOX] Success! Rows: {result['row_count']}, "
-                f"Time: {execution_time_ms}ms"
-            )
-
-            return SQLExecuteResponse(
-                columns=result['columns'],
-                rows=result['rows'],
-                execution_time_ms=execution_time_ms,
-                row_count=result['row_count']
-            )
-        except Exception as e:
-            error_detail = (
-                f"Sandbox execution error: {str(e)}\n"
-                f"{traceback.format_exc()}"
-            )
-            logger.error(f"[SANDBOX ERROR] {error_detail}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=error_detail
-            )
+        return run_sandbox_execution(connection, request)
 
     logger.info(
         f"[LIVE] Executing query on real database: "
@@ -174,28 +186,42 @@ async def execute_sql(
         logger.info("[LIVE] Running query on real database...")
 
         with engine.connect() as conn:
-            result = simulation_executor.execute_real_db_statements(
+            query_start = time.time()
+            result = simulation_executor.execute_in_real_db(
                 conn, request.sql)
-            columns = result["columns"]
-            rows = result["rows"]
-            row_count = result["row_count"]
+            query_duration = (time.time() - query_start) * 1000
+            logger.info(
+                f"[LIVE] Query executed in {query_duration:.2f}ms"
+            )
 
-            row_count = len(rows) if rows else result["row_count"]
+            result_dict = result.to_dict()
+            columns = result_dict["columns"]
+            all_rows = result_dict["rows"]
+            total_rows = (
+                len(all_rows) if all_rows else result_dict["row_count"]
+            )
+
+            rows = all_rows[:settings.RESULT_MAX_ROWS] if all_rows else []
+            truncated = total_rows > settings.RESULT_MAX_ROWS
 
         execution_time_ms = (time.time() - start_time) * 1000
 
         engine.dispose()
 
         logger.info(
-            f"[LIVE] Success! Retrieved {row_count} rows from real database "
-            f"in {execution_time_ms:.2f}ms"
+            f"[LIVE] Success! Total rows: {total_rows}, "
+            f"Returned: {len(rows)}, Truncated: {truncated}, "
+            f"in {execution_time_ms:.2f}ms (total including connection)"
         )
 
         return SQLExecuteResponse(
             columns=columns,
             rows=rows,
             execution_time_ms=execution_time_ms,
-            row_count=row_count
+            row_count=len(rows),
+            total_rows=total_rows,
+            truncated=truncated,
+            max_rows=settings.RESULT_MAX_ROWS
         )
 
     except Exception as e:
@@ -208,10 +234,7 @@ async def execute_sql(
         logger.error(
             f"[LIVE ERROR] {error_detail}\n{traceback.format_exc()}"
         )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=error_detail
-        )
+        return run_sandbox_execution(connection, request)
 
 
 @router.post("/explain", response_model=SQLExplainPlanResponse)
@@ -220,13 +243,11 @@ async def explain_sql_plan(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(
-        select(DBConnection).where(
-            DBConnection.id == request.connection_id,
-            DBConnection.user_id == current_user.id
-        )
+    connection = await connection_repository.get_by_user_and_id(
+        db=db,
+        user_id=current_user.id,
+        connection_id=request.connection_id
     )
-    connection = result.scalar_one_or_none()
 
     if not connection:
         raise HTTPException(
@@ -317,13 +338,11 @@ async def optimize_sql(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(
-        select(DBConnection).where(
-            DBConnection.id == request.connection_id,
-            DBConnection.user_id == current_user.id
-        )
+    connection = await connection_repository.get_by_user_and_id(
+        db=db,
+        user_id=current_user.id,
+        connection_id=request.connection_id
     )
-    connection = result.scalar_one_or_none()
 
     if not connection:
         raise HTTPException(

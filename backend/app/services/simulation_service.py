@@ -4,6 +4,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from backend.app.core.exceptions import NotFoundError
 from backend.app.models.models import DBConnection
 from backend.app.schemas.schema_def import SchemaDef
 
@@ -21,7 +22,7 @@ class SimulationService:
         connection = result.scalar_one_or_none()
 
         if not connection:
-            raise ValueError(f"Connection {connection_id} not found")
+            raise NotFoundError(f"Connection {connection_id} not found")
 
         connection.meta_schema = schema_update.to_json_dict()
 
@@ -116,7 +117,7 @@ class SimulationService:
         schema_def = await self.get_schema_metadata(db, connection_id)
 
         if not schema_def:
-            raise ValueError(
+            raise NotFoundError(
                 f"No schema metadata found for connection {connection_id}"
             )
 

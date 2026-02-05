@@ -17,15 +17,27 @@ class Settings(BaseSettings):
     MODEL_NAME: str = "qwen2.5:3b"
     MODEL_CHAT_NAME: str = "qwen2.5:3b"
 
-    BACKEND_CORS_ORIGINS: list[str] = ["http://localhost:5173"]
+    BACKEND_CORS_ORIGINS: str = "http://localhost:5173"
 
-    ENCRYPTION_KEY: Optional[str] = None
+    ENCRYPTION_KEY: str
 
-    SECRET_KEY: str = "your-secret-key-change-in-production"
+    SECRET_KEY: str
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+
+    # Cookie settings
+    COOKIE_SECURE: bool = False  # Set True in production with HTTPS
+    COOKIE_SAMESITE: str = "Lax"
+    COOKIE_HTTPONLY: bool = True
+    COOKIE_PATH: str = "/"
+    COOKIE_ACCESS_TOKEN_NAME: str = "access_token"
+    COOKIE_REFRESH_TOKEN_NAME: str = "refresh_token"
 
     ENABLE_DATABASE: bool = True
+
+    SANDBOX_MAX_ROWS: int = 10000
+    RESULT_MAX_ROWS: int = 100
 
     @property
     def SQLALCHEMY_DATABASE_URL(self) -> str:

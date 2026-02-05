@@ -1,31 +1,45 @@
-import { useState, useEffect } from 'react';
-import { Play, Zap, FileText, Copy, Check, AlignLeft } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Play, Zap, FileText, Copy, Check, AlignLeft, Loader2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { formatSql } from '../../utils/sqlFormatter';
 
 interface SQLBlockProps {
   sql: string;
-  queryLogId: string;
-  onExplain?: (queryLogId: string) => void;
-  onOptimize?: (queryLogId: string) => void;
-  onExecute?: () => void;
+  queryLogId?: string;
+  onExplain?: (sql: string) => void;
+  onOptimize?: (sql: string) => void;
+  onExecute?: (sql: string) => void;
+  isExecuting?: boolean;
+  isExplaining?: boolean;
+  isOptimizing?: boolean;
 }
 
 export function SQLBlock({
   sql,
-  queryLogId,
   onExplain,
   onOptimize,
-  onExecute
+  onExecute,
+  isExecuting = false,
+  isExplaining = false,
+  isOptimizing = false
 }: SQLBlockProps) {
   const [copied, setCopied] = useState(false);
   const [displaySql, setDisplaySql] = useState(() => formatSql(sql));
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Auto-format SQL whenever it changes
   useEffect(() => {
     const formatted = formatSql(sql);
     setDisplaySql(formatted);
   }, [sql]);
+
+  // Auto-resize textarea
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
+    }
+  }, [displaySql]);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(displaySql);
@@ -36,6 +50,10 @@ export function SQLBlock({
   const handleFormat = () => {
     const formatted = formatSql(displaySql);
     setDisplaySql(formatted);
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setDisplaySql(e.target.value);
   };
 
   return (
@@ -77,52 +95,80 @@ export function SQLBlock({
         </div>
       </div>
 
-      {/* SQL Code */}
-      <div className="p-4 font-mono text-sm overflow-x-auto">
-        <pre className="text-text-main-DEFAULT dark:text-text-main-dark">
-          <code>{displaySql}</code>
-        </pre>
+      {/* SQL Code - Editable Textarea */}
+      <div className="p-4">
+        <textarea
+          ref={textareaRef}
+          value={displaySql}
+          onChange={handleChange}
+          className={cn(
+            'w-full font-mono text-sm resize-none overflow-hidden',
+            'bg-transparent text-text-main-DEFAULT dark:text-text-main-dark',
+            'focus:outline-none focus:ring-0',
+            'border-0 p-0'
+          )}
+          spellCheck={false}
+          style={{ minHeight: '100px' }}
+        />
       </div>
 
       {/* Action Bar */}
       <div className="flex items-center gap-2 px-4 py-3 bg-surface dark:bg-surface-dark border-t border-border dark:border-border-dark">
         {onExecute && (
           <button
-            onClick={() => onExecute()}
+            onClick={() => onExecute(displaySql)}
+            disabled={isExecuting || isExplaining || isOptimizing}
             className={cn(
               'flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all',
               'bg-primary dark:bg-primary-dark hover:bg-primary-hover dark:hover:bg-primary-dark-hover text-white',
-              'hover:shadow-lg hover:shadow-primary/20 dark:hover:shadow-primary-dark/20'
+              'hover:shadow-lg hover:shadow-primary/20 dark:hover:shadow-primary-dark/20',
+              'disabled:opacity-50 disabled:cursor-not-allowed'
             )}
           >
-            <Play className="w-4 h-4" />
-            <span>Run Query</span>
+            {isExecuting ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Play className="w-4 h-4" />
+            )}
+            <span>{isExecuting ? 'Executing...' : 'Run Query'}</span>
           </button>
         )}
 
         {onExplain && (
           <button
-            onClick={() => onExplain(queryLogId)}
+            onClick={() => onExplain(displaySql)}
+            disabled={isExecuting || isExplaining || isOptimizing}
             className={cn(
               'flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all',
-              'bg-surface-highlight-DEFAULT dark:bg-surface-highlight-dark hover:bg-border dark:hover:bg-border-dark text-text-main-DEFAULT dark:text-text-main-dark border border-border dark:border-border-dark'
+              'bg-surface-highlight-DEFAULT dark:bg-surface-highlight-dark hover:bg-border dark:hover:bg-border-dark text-text-main-DEFAULT dark:text-text-main-dark border border-border dark:border-border-dark',
+              'disabled:opacity-50 disabled:cursor-not-allowed'
             )}
           >
-            <FileText className="w-4 h-4" />
-            <span>Explain</span>
+            {isExplaining ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <FileText className="w-4 h-4" />
+            )}
+            <span>{isExplaining ? 'Explaining...' : 'Explain'}</span>
           </button>
         )}
 
         {onOptimize && (
           <button
-            onClick={() => onOptimize(queryLogId)}
+            onClick={() => onOptimize(displaySql)}
+            disabled={isExecuting || isExplaining || isOptimizing}
             className={cn(
               'flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all',
-              'bg-surface-highlight-DEFAULT dark:bg-surface-highlight-dark hover:bg-border dark:hover:bg-border-dark text-text-main-DEFAULT dark:text-text-main-dark border border-border dark:border-border-dark'
+              'bg-surface-highlight-DEFAULT dark:bg-surface-highlight-dark hover:bg-border dark:hover:bg-border-dark text-text-main-DEFAULT dark:text-text-main-dark border border-border dark:border-border-dark',
+              'disabled:opacity-50 disabled:cursor-not-allowed'
             )}
           >
-            <Zap className="w-4 h-4" />
-            <span>Optimize</span>
+            {isOptimizing ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Zap className="w-4 h-4" />
+            )}
+            <span>{isOptimizing ? 'Optimizing...' : 'Optimize'}</span>
           </button>
         )}
       </div>

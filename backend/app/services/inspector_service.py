@@ -4,6 +4,9 @@ from uuid import UUID
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.core.constants import LOCALHOSTS
+from backend.app.core.exceptions import (DatabaseConnectionError,
+                                         ValidationError)
 from backend.app.core.security import decrypt_password
 from backend.app.models.models import DBType
 from backend.app.repositories.connection_repository import \
@@ -112,17 +115,10 @@ class DatabaseInspectorService:
             connection_id: UUID) -> SchemaDef:
         connection = await connection_repository.get(db, id=connection_id)
 
-        if not connection:
-            raise ValueError(f"Connection {connection_id} not found")
-
-        if (connection.db_type == DBType.POSTGRES and
-                connection.db_type.value == 'simulation'):
-            raise ValueError("Cannot sync schema from a simulation connection")
-
         password = decrypt_password(connection.db_password)
 
         resolved_host = connection.host
-        if connection.host in ['localhost', '127.0.0.1']:
+        if connection.host in LOCALHOSTS:
             resolved_host = 'host.docker.internal'
 
         if connection.db_type == DBType.POSTGRES:
@@ -136,7 +132,7 @@ class DatabaseInspectorService:
                 f"{resolved_host}:{connection.port}/{connection.db_name}"
             )
         else:
-            raise ValueError(
+            raise ValidationError(
                 f"Unsupported database type: {connection.db_type}")
 
         try:
@@ -226,32 +222,25 @@ class DatabaseInspectorService:
                             for row in result.mappings():
                                 row_dict = {}
                                 for key, value in row.items():
-                                    col_type = None
-                                    for col in columns:
-                                        if col.name == key:
-                                            col_type = col.type.upper()
-                                            break
-
-                                    exclude = 'JSON' in col_type or \
-                                              'TEXT' in col_type
-                                    if col_type and exclude:
-                                        row_dict[key] = "[EXCLUDED]"
-                                        continue
-
                                     if value is None:
                                         row_dict[key] = None
+                                    elif isinstance(value, dict):
+                                        # JSON/JSONB data - keep as dict
+                                        row_dict[key] = value
                                     elif isinstance(value, (str, int, float,
                                                     bool)):
                                         long_str = isinstance(value, str) and \
-                                                   len(value) > 100
+                                                   len(value) > 500
                                         if long_str:
-                                            row_dict[key] = value[:100] + "..."
+                                            row_dict[key] = value[:500] + "..."
                                         else:
                                             row_dict[key] = value
                                     else:
+                                        # For other complex types, convert
+                                        # to string
                                         str_value = str(value)
-                                        if len(str_value) > 100:
-                                            row_dict[key] = str_value[:100] + \
+                                        if len(str_value) > 500:
+                                            row_dict[key] = str_value[:500] + \
                                                 "..."
                                         else:
                                             row_dict[key] = str_value
@@ -284,7 +273,8 @@ class DatabaseInspectorService:
             return schema_def
 
         except Exception as e:
-            raise Exception(f"Failed to connect to target database: {str(e)}")
+            raise DatabaseConnectionError(
+                f"Failed to connect to target database: {str(e)}")
 
 
 inspector_service = DatabaseInspectorService()

@@ -25,9 +25,15 @@ class UserResponse(BaseModel):
 
 
 class LoginResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
     user: UserResponse
+
+
+class RefreshResponse(BaseModel):
+    message: str = "Token refreshed successfully"
+
+
+class LogoutResponse(BaseModel):
+    message: str = "Logged out successfully"
 
 
 class TokenData(BaseModel):

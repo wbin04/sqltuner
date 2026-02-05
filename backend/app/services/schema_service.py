@@ -7,6 +7,9 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.core.constants import LOCALHOSTS
+from backend.app.core.exceptions import (AuthenticationError, NotFoundError,
+                                         ValidationError)
 from backend.app.core.security import decrypt_password
 from backend.app.models.models import DBType
 from backend.app.repositories.connection_repository import \
@@ -19,7 +22,7 @@ class SchemaService:
 
     @staticmethod
     def _resolve_docker_host(host: str) -> str:
-        if host in ['localhost', '127.0.0.1']:
+        if host in LOCALHOSTS:
             return 'host.docker.internal'
         return host
 
@@ -45,7 +48,7 @@ class SchemaService:
                 f"{resolved_host}:{port}/{db_name}"
             )
         else:
-            raise ValueError(f"Unsupported database type: {db_type}")
+            raise ValidationError(f"Unsupported database type: {db_type}")
 
     @staticmethod
     def _extract_column_info(column_info: Dict[str, Any]) -> Dict[str, Any]:
@@ -112,7 +115,7 @@ class SchemaService:
         try:
             connection = await connection_repository.get(db, id=connection_id)
             if not connection:
-                raise ValueError(
+                raise NotFoundError(
                     f"Connection {connection_id} not found"
                 )
 
@@ -130,7 +133,8 @@ class SchemaService:
             try:
                 plain_password = decrypt_password(connection.db_password)
             except Exception as e:
-                raise ValueError(f"Failed to decrypt password: {str(e)}")
+                raise AuthenticationError(
+                    f"Failed to decrypt password: {str(e)}")
 
             conn_string = SchemaService._build_connection_string(
                 db_type=connection.db_type,

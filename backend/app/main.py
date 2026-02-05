@@ -1,11 +1,17 @@
 import asyncio
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from backend.app.api.v1.api import api_router
 from backend.app.core.config import settings
+from backend.app.core.exceptions import (AuthenticationError,
+                                         DatabaseConnectionError,
+                                         ExecutionError, LLMServiceError,
+                                         NotFoundError, PermissionDeniedError,
+                                         ValidationError)
 from backend.app.schemas.sql import HealthResponse
 from backend.app.services.llm_service import llm_service
 
@@ -30,6 +36,85 @@ app.add_middleware(
 
 # Include API router
 app.include_router(api_router, prefix=settings.API_V1_STR)
+
+
+# Exception handlers
+@app.exception_handler(NotFoundError)
+async def not_found_handler(request: Request, exc: NotFoundError):
+    logger.warning(f"NotFoundError: {exc.message}")
+    return JSONResponse(
+        status_code=404,
+        content={"detail": exc.message}
+    )
+
+
+@app.exception_handler(ValidationError)
+async def validation_error_handler(request: Request, exc: ValidationError):
+    logger.warning(f"ValidationError: {exc.message}")
+    return JSONResponse(
+        status_code=400,
+        content={"detail": exc.message}
+    )
+
+
+@app.exception_handler(AuthenticationError)
+async def authentication_error_handler(
+    request: Request,
+    exc: AuthenticationError
+):
+    logger.warning(f"AuthenticationError: {exc.message}")
+    return JSONResponse(
+        status_code=401,
+        content={"detail": exc.message}
+    )
+
+
+@app.exception_handler(PermissionDeniedError)
+async def permission_denied_handler(
+    request: Request,
+    exc: PermissionDeniedError
+):
+    logger.warning(f"PermissionDeniedError: {exc.message}")
+    return JSONResponse(
+        status_code=403,
+        content={"detail": exc.message}
+    )
+
+
+@app.exception_handler(DatabaseConnectionError)
+async def database_connection_error_handler(
+    request: Request,
+    exc: DatabaseConnectionError
+):
+    logger.error(f"DatabaseConnectionError: {exc.message}")
+    return JSONResponse(
+        status_code=503,
+        content={"detail": exc.message}
+    )
+
+
+@app.exception_handler(LLMServiceError)
+async def llm_service_error_handler(
+    request: Request,
+    exc: LLMServiceError
+):
+    logger.error(f"LLMServiceError: {exc.message}")
+    return JSONResponse(
+        status_code=503,
+        content={"detail": exc.message}
+    )
+
+
+@app.exception_handler(ExecutionError)
+async def execution_error_handler(
+    request: Request,
+    exc: ExecutionError
+):
+    logger.error(f"ExecutionError: {exc.message}")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": exc.message}
+    )
 
 
 @app.on_event("startup")

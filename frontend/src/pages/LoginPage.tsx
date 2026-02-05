@@ -55,7 +55,7 @@ export function LoginPage() {
       <div className="relative w-full max-w-md">
         <div className={cn(
           'rounded-2xl shadow-2xl p-8',
-          'bg-surface-DEFAULT dark:bg-slate-900',
+          'bg-surface-light dark:bg-slate-900',
           'border border-border-DEFAULT dark:border-slate-800'
         )}>
           {/* Logo */}

@@ -53,6 +53,7 @@ export function WorkspaceCard({ workspace, onDelete, onSync, onEdit }: Workspace
   };
 
   const handleConnect = () => {
+    // Navigate to editor for all workspaces (real or simulation)
     navigate(`/editor/${workspace.id}`);
   };
 
@@ -79,7 +80,7 @@ export function WorkspaceCard({ workspace, onDelete, onSync, onEdit }: Workspace
     <div
       className={cn(
         'group relative rounded-xl p-6 transition-all duration-200',
-        'bg-surface-DEFAULT dark:bg-surface-dark',
+        'bg-surface-light dark:bg-surface-dark',
         'border border-border-DEFAULT dark:border-border-dark',
         'hover:border-primary/50 dark:hover:border-primary-dark/50',
         'hover:shadow-lg',

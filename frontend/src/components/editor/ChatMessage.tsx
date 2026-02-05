@@ -6,10 +6,13 @@ import { FeedbackPanel } from '../feedback/FeedbackPanel';
 
 interface ChatMessageProps {
   message: QueryLog;
-  onExplain?: (queryLogId: string) => void;
-  onOptimize?: (queryLogId: string) => void;
-  onExecute?: () => void;
+  onExplain?: (sql: string) => void;
+  onOptimize?: (sql: string) => void;
+  onExecute?: (sql: string) => void;
   onFeedback?: (queryLogId: string, rating: 0 | 1, correctedSql?: string, comment?: string) => void;
+  isExecuting?: boolean;
+  isExplaining?: boolean;
+  isOptimizing?: boolean;
 }
 
 export function ChatMessage({ 
@@ -17,7 +20,10 @@ export function ChatMessage({
   onExplain, 
   onOptimize, 
   onExecute,
-  onFeedback 
+  onFeedback,
+  isExecuting = false,
+  isExplaining = false,
+  isOptimizing = false
 }: ChatMessageProps) {
   const isUser = message.role === 'user';
 
@@ -68,6 +74,9 @@ export function ChatMessage({
             onExplain={onExplain}
             onOptimize={onOptimize}
             onExecute={onExecute}
+            isExecuting={isExecuting}
+            isExplaining={isExplaining}
+            isOptimizing={isOptimizing}
           />
         )}
 

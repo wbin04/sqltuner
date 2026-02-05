@@ -1,18 +1,23 @@
 import json
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import lru_cache
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 
 from backend.app.api.v1.endpoints.auth import get_current_user
+from backend.app.core.prompts import (CHAT_GENERAL_SYSTEM_PROMPT,
+                                      get_chat_sql_system_prompt)
 from backend.app.db.session import get_db
-from backend.app.models.models import (ChatRole, Conversation, DBConnection,
-                                       QueryLog, User)
+from backend.app.models.models import ChatRole, User
+from backend.app.repositories.connection_repository import \
+    connection_repository
+from backend.app.repositories.conversation_repository import \
+    conversation_repository
+from backend.app.repositories.query_log_repository import query_log_repository
 from backend.app.schemas.sql import (ChatCompletionRequest,
                                      ChatCompletionResponse)
 from backend.app.services.llm_service import llm_service
@@ -108,13 +113,11 @@ async def chat_completion(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(
-        select(DBConnection).where(
-            DBConnection.id == request.connection_id,
-            DBConnection.user_id == current_user.id
-        )
+    connection = await connection_repository.get_by_user_and_id(
+        db=db,
+        user_id=current_user.id,
+        connection_id=request.connection_id
     )
-    connection = result.scalar_one_or_none()
 
     if not connection:
         raise HTTPException(
@@ -125,29 +128,27 @@ async def chat_completion(
     conversation_id = request.conversation_id
 
     if conversation_id:
-        result = await db.execute(
-            select(Conversation).where(
-                Conversation.id == conversation_id,
-                Conversation.connection_id == request.connection_id
-            )
+        conversation = await conversation_repository.get(
+            db, id=conversation_id
         )
-        conversation = result.scalar_one_or_none()
 
-        if not conversation:
+        if not conversation or (
+            conversation.connection_id != request.connection_id
+        ):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Conversation not found"
             )
     else:
-        conversation = Conversation(
-            id=uuid4(),
-            connection_id=request.connection_id,
-            title=request.message[:50] +
-            ("..." if len(request.message) > 50 else ""),
-            created_at=datetime.utcnow()
+        conversation = await conversation_repository.create(
+            db,
+            obj_in={
+                "connection_id": request.connection_id,
+                "title": request.message[:50] +
+                ("..." if len(request.message) > 50 else ""),
+                "created_at": datetime.now(timezone.utc)
+            }
         )
-        db.add(conversation)
-        await db.flush()
         conversation_id = conversation.id
 
     start_time = time.time()
@@ -176,16 +177,39 @@ async def chat_completion(
         connection.db_type.value if connection.db_type else "PostgreSQL"
     )
 
-    system_prompt = (
-        f"You are an expert SQL assistant for {db_type_name} databases.\n\n"
-        f"{schema_text}\n\n"
-        f"Instructions:\n"
-        f"- Answer user questions about the database\n"
-        f"- Generate SQL queries when requested\n"
-        f"- Explain query results clearly\n"
-        f"- If generating SQL, wrap it in ```sql code blocks\n"
-        f"- Be concise and helpful"
-    )
+    dialect = connection.db_type.value if connection.db_type else "postgres"
+
+    is_sql_query = llm_service._is_sql_query(request.message)
+    extracted_sql = None
+
+    if is_sql_query:
+        extracted_sql = llm_service._extract_sql_from_message(request.message)
+
+        sql_system_prompt = get_chat_sql_system_prompt(dialect)
+        system_note = (
+            f"[SYSTEM NOTE: Ensure all SQL syntax is valid "
+            f"for {dialect.upper()}]"
+        )
+        system_prompt = (
+            f"{sql_system_prompt}\n\n"
+            f"Database Type: {db_type_name}\n\n"
+            f"{schema_text}\n\n"
+            f"{system_note}"
+        )
+        logger.info(f"[CHAT] Using SQL analysis prompt for dialect: {dialect}")
+    else:
+        system_prompt = (
+            f"{CHAT_GENERAL_SYSTEM_PROMPT}\n\n"
+            f"Database Type: {db_type_name}\n\n"
+            f"{schema_text}\n\n"
+            f"Instructions:\n"
+            f"- Answer user questions about the database\n"
+            f"- Generate SQL queries when requested\n"
+            f"- Explain query results clearly\n"
+            f"- If generating SQL, wrap it in ```sql code blocks\n"
+            f"- Be concise and helpful"
+        )
+        logger.info("[CHAT] Using general chat system prompt")
 
     prompt_size = len(system_prompt) + len(request.message)
     print(f"[DEBUG-CHAT] Total prompt size: {prompt_size:,} bytes")
@@ -197,7 +221,7 @@ async def chat_completion(
             prompt=request.message,
             system_prompt=system_prompt,
             temperature=0.3,
-            max_tokens=256  # Reduced from 512 for faster response
+            max_tokens=256
         )
         llm_duration = time.time() - llm_start
         print(f"[DEBUG-CHAT] LLM took: {llm_duration:.2f}s")
@@ -217,33 +241,41 @@ async def chat_completion(
         except (ValueError, IndexError):
             pass
 
-    user_log = QueryLog(
-        id=uuid4(),
-        conversation_id=conversation_id,
-        role=ChatRole.USER,
-        content=request.message,
-        created_at=datetime.utcnow()
-    )
-    db.add(user_log)
+    detected_sql = extracted_sql
 
-    assistant_log = QueryLog(
-        id=uuid4(),
-        conversation_id=conversation_id,
-        role=ChatRole.ASSISTANT,
-        content=llm_response,
-        sql_generated=sql_generated,
-        created_at=datetime.utcnow()
+    await query_log_repository.create(
+        db,
+        obj_in={
+            "conversation_id": conversation_id,
+            "role": ChatRole.USER,
+            "content": request.message,
+            "created_at": datetime.now(timezone.utc)
+        }
     )
-    db.add(assistant_log)
 
-    await db.commit()
-
-    return ChatCompletionResponse(
-        conversation_id=conversation_id,
-        role="assistant",
-        content=llm_response,
-        sql_generated=sql_generated
+    await query_log_repository.create(
+        db,
+        obj_in={
+            "conversation_id": conversation_id,
+            "role": ChatRole.ASSISTANT,
+            "content": llm_response,
+            "sql_generated": sql_generated,
+            "created_at": datetime.now(timezone.utc)
+        }
     )
+
+    response_data = {
+        "conversation_id": conversation_id,
+        "role": "assistant",
+        "content": llm_response,
+        "sql_generated": sql_generated
+    }
+
+    if detected_sql:
+        response_data["detected_sql"] = detected_sql
+        logger.info(f"[CHAT] Returning detected SQL: {detected_sql[:50]}...")
+
+    return ChatCompletionResponse(**response_data)
 
 
 @router.get("/conversations/{connection_id}")
@@ -252,13 +284,11 @@ async def get_conversations(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(
-        select(DBConnection).where(
-            DBConnection.id == connection_id,
-            DBConnection.user_id == current_user.id
-        )
+    connection = await connection_repository.get_by_user_and_id(
+        db=db,
+        user_id=current_user.id,
+        connection_id=connection_id
     )
-    connection = result.scalar_one_or_none()
 
     if not connection:
         raise HTTPException(
@@ -266,12 +296,10 @@ async def get_conversations(
             detail="Connection not found"
         )
 
-    result = await db.execute(
-        select(Conversation)
-        .where(Conversation.connection_id == connection_id)
-        .order_by(Conversation.created_at.desc())
+    conversations = await conversation_repository.get_by_connection(
+        db=db,
+        connection_id=connection_id
     )
-    conversations = result.scalars().all()
 
     return [
         {
@@ -289,10 +317,7 @@ async def get_conversation_messages(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(
-        select(Conversation).where(Conversation.id == conversation_id)
-    )
-    conversation = result.scalar_one_or_none()
+    conversation = await conversation_repository.get(db, id=conversation_id)
 
     if not conversation:
         raise HTTPException(
@@ -300,24 +325,22 @@ async def get_conversation_messages(
             detail="Conversation not found"
         )
 
-    result = await db.execute(
-        select(DBConnection).where(
-            DBConnection.id == conversation.connection_id,
-            DBConnection.user_id == current_user.id
-        )
+    connection = await connection_repository.get_by_user_and_id(
+        db=db,
+        user_id=current_user.id,
+        connection_id=conversation.connection_id
     )
-    if not result.scalar_one_or_none():
+
+    if not connection:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied"
         )
 
-    result = await db.execute(
-        select(QueryLog)
-        .where(QueryLog.conversation_id == conversation_id)
-        .order_by(QueryLog.created_at.asc())
+    messages = await query_log_repository.get_by_conversation(
+        db=db,
+        conversation_id=conversation_id
     )
-    messages = result.scalars().all()
 
     return [
         {
