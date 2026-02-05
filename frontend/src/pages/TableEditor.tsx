@@ -3,7 +3,7 @@
  * Edit database schema for both real databases and simulations
  * Similar to SimulationDesigner but works with any workspace type
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Save, Loader2, AlertCircle, Network } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -190,7 +190,38 @@ export function SchemaEditor() {
   const selectedTable = schema.tables.find(t => t.id === selectedTableId);
   const isReadOnly = workspace?.db_type !== DbType.SIMULATION;
 
-  const handleSaveChanges = async () => {
+  // Memoize diagram schema to ensure new object on every schema change
+  const diagramSchema = useMemo(() => {
+    if (!workspace || !schema.tables.length) return null;
+    
+    return {
+      database_name: workspace.name,
+      db_type: workspace.db_type || 'simulation',
+      tables: schema.tables.map(table => ({
+        name: table.name,
+        columns: table.columns.map(col => ({
+          name: col.name,
+          type: col.type,
+          is_nullable: col.is_nullable,
+          is_pk: col.is_pk
+        })),
+        foreign_keys: table.columns
+          .filter(col => col.fk_target)
+          .map(col => {
+            const refTable = schema.tables.find(t => t.id === col.fk_target!.table_id);
+            const refCol = refTable?.columns.find(c => c.id === col.fk_target!.column_id);
+            return {
+              column: col.name,
+              ref_table: refTable!.name,
+              ref_column: refCol!.name
+            };
+          }),
+        row_count: table.sample_data?.length || 0
+      }))
+    };
+  }, [workspace, schema]);
+
+  const handleSaveChanges = async (schemaToSave?: SimulationSchema) => {
     if (!workspaceId) return;
 
     if (workspace?.db_type !== DbType.SIMULATION) {
@@ -200,10 +231,12 @@ export function SchemaEditor() {
 
     setIsSaving(true);
 
+    const currentSchema = schemaToSave || schema;
+
     try {
       // Transform schema to backend format
       const payload = {
-        tables: schema.tables.map(table => ({
+        tables: currentSchema.tables.map(table => ({
           name: table.name,
           columns: table.columns.map(col => ({
             name: col.name,
@@ -215,7 +248,7 @@ export function SchemaEditor() {
           foreign_keys: table.columns
             .filter(col => col.fk_target)
             .map(col => {
-              const refTable = schema.tables.find(t => t.id === col.fk_target!.table_id);
+              const refTable = currentSchema.tables.find(t => t.id === col.fk_target!.table_id);
               const refColumn = refTable?.columns.find(c => c.id === col.fk_target!.column_id);
               return {
                 column: col.name,
@@ -250,6 +283,34 @@ export function SchemaEditor() {
       });
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleAddTable = (tableName: string) => {
+    const newTable: SimulationTable = {
+      id: uuidv4(),
+      name: tableName,
+      columns: [],
+      indexes: [],
+      sample_data: [],
+    };
+
+    const newSchema = {
+      ...schema,
+      tables: [...schema.tables, newTable],
+    };
+
+    setSchema(newSchema);
+    setSelectedTableId(newTable.id);
+    toast.info(`Table "${tableName}" added. Add columns and save to persist.`);
+  };
+
+  const handleEditTable = (tableName: string) => {
+    const table = schema.tables.find(t => t.name === tableName);
+    if (table) {
+      setSelectedTableId(table.id);
+      setIsDiagramModalOpen(false);
+      toast.info(`Editing table "${tableName}"`);
     }
   };
 
@@ -324,7 +385,7 @@ export function SchemaEditor() {
           </button>
           {workspace?.db_type === DbType.SIMULATION && (
             <button
-              onClick={handleSaveChanges}
+              onClick={() => handleSaveChanges()}
               disabled={isSaving}
               className={cn(
                 'flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-white',
@@ -445,30 +506,96 @@ export function SchemaEditor() {
       <SchemaDiagramModal
         isOpen={isDiagramModalOpen}
         onClose={() => setIsDiagramModalOpen(false)}
-        schema={{
-          database_name: workspace?.name,
-          db_type: 'simulation',
-          tables: schema.tables.map(table => ({
-            name: table.name,
-            columns: table.columns.map(col => ({
-              name: col.name,
-              type: col.type,
-              is_nullable: col.is_nullable,
-              is_pk: col.is_pk
-            })),
-            foreign_keys: table.columns
-              .filter(col => col.fk_target)
-              .map(col => {
-                const refTable = schema.tables.find(t => t.id === col.fk_target!.table_id);
-                const refCol = refTable?.columns.find(c => c.id === col.fk_target!.column_id);
-                return {
-                  column: col.name,
-                  ref_table: refTable!.name,
-                  ref_column: refCol!.name
-                };
-              }),
-            row_count: table.sample_data?.length || 0
-          }))
+        isSimulation={workspace?.db_type === DbType.SIMULATION}
+        schema={diagramSchema}
+        onAddTable={handleAddTable}
+        onEditTable={handleEditTable}
+        onSave={async (updatedSchema) => {
+          // Transform back to internal schema format
+          const tableNameToIdMap = new Map(schema.tables.map(t => [t.name, t.id]));
+          
+          // Process existing tables and new tables
+          const processedTables: SimulationTable[] = [];
+          
+          for (const updatedTable of updatedSchema.tables) {
+            const existingTable = schema.tables.find(t => t.name === updatedTable.name);
+            
+            if (existingTable) {
+              // Update existing table
+              const columnsWithFKs = existingTable.columns.map(col => {
+                const fkDef = updatedTable.foreign_keys?.find(fk => fk.column === col.name);
+                
+                if (fkDef) {
+                  const refTableId = tableNameToIdMap.get(fkDef.ref_table);
+                  const refTable = schema.tables.find(t => t.id === refTableId);
+                  const refColId = refTable?.columns.find(c => c.name === fkDef.ref_column)?.id;
+
+                  if (refTableId && refColId) {
+                    return {
+                      ...col,
+                      fk_target: { table_id: refTableId, column_id: refColId },
+                    };
+                  }
+                }
+
+                // Check if FK was removed
+                if (col.fk_target && !updatedTable.foreign_keys?.some(fk => fk.column === col.name)) {
+                  return { ...col, fk_target: null };
+                }
+
+                return col;
+              });
+
+              // Handle new columns added from diagram
+              const newColumns = updatedTable.columns
+                .filter(col => !existingTable.columns.some(c => c.name === col.name))
+                .map(col => ({
+                  id: uuidv4(),
+                  name: col.name,
+                  type: col.type,
+                  is_pk: col.is_pk || false,
+                  is_nullable: col.is_nullable !== false, // default true
+                  fk_target: null,
+                }));
+
+              // Handle removed columns
+              const remainingColumns = columnsWithFKs.filter(col => 
+                updatedTable.columns.some(c => c.name === col.name)
+              );
+
+              processedTables.push({
+                ...existingTable,
+                columns: [...remainingColumns, ...newColumns],
+              });
+            } else {
+              // New table created from diagram
+              processedTables.push({
+                id: uuidv4(),
+                name: updatedTable.name,
+                columns: updatedTable.columns.map(col => ({
+                  id: uuidv4(),
+                  name: col.name,
+                  type: col.type,
+                  is_pk: col.is_pk || false,
+                  is_nullable: col.is_nullable !== false,
+                  fk_target: null,
+                })),
+                indexes: (updatedTable as any).indexes || [],
+                sample_data: (updatedTable as any).sample_data || [],
+              });
+            }
+          }
+          
+          const newSchema: SimulationSchema = {
+            ...schema,
+            tables: processedTables,
+          };
+
+          // Save to backend first
+          await handleSaveChanges(newSchema);
+
+          // Only update state after successful save
+          setSchema(newSchema);
         }}
       />
     </div>

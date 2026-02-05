@@ -3,7 +3,7 @@
  * Auto-layout calculation using dagre for graph positioning
  */
 import dagre from 'dagre';
-import { Node, Edge } from '@xyflow/react';
+import { Node, Edge, MarkerType } from '@xyflow/react';
 
 export interface LayoutOptions {
   rankdir?: 'TB' | 'LR' | 'BT' | 'RL';
@@ -108,20 +108,21 @@ export function transformSchemaToGraph(tables: TableSchema[]): {
 
   // Create edges from foreign keys
   const edges: Edge[] = [];
-  let edgeId = 0;
 
   tables.forEach((table) => {
     if (table.foreign_keys && table.foreign_keys.length > 0) {
       table.foreign_keys.forEach((fk) => {
         edges.push({
-          id: `e${edgeId++}`,
+          id: `${table.name}.${fk.column}-${fk.ref_table}.${fk.ref_column}`,
           source: table.name,
           target: fk.ref_table,
-          type: 'smoothstep',
+          sourceHandle: `${table.name}__${fk.column}__source`,
+          targetHandle: `${fk.ref_table}__${fk.ref_column}__target`,
+          type: 'foreignKeyEdge',
           animated: false,
           style: { stroke: '#94a3b8', strokeWidth: 2 },
           markerEnd: {
-            type: 'arrowclosed',
+            type: MarkerType.ArrowClosed,
             color: '#94a3b8',
           },
           label: fk.column,
