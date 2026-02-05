@@ -221,32 +221,25 @@ class DatabaseInspectorService:
                             for row in result.mappings():
                                 row_dict = {}
                                 for key, value in row.items():
-                                    col_type = None
-                                    for col in columns:
-                                        if col.name == key:
-                                            col_type = col.type.upper()
-                                            break
-
-                                    exclude = 'JSON' in col_type or \
-                                              'TEXT' in col_type
-                                    if col_type and exclude:
-                                        row_dict[key] = "[EXCLUDED]"
-                                        continue
-
                                     if value is None:
                                         row_dict[key] = None
+                                    elif isinstance(value, dict):
+                                        # JSON/JSONB data - keep as dict
+                                        row_dict[key] = value
                                     elif isinstance(value, (str, int, float,
                                                     bool)):
                                         long_str = isinstance(value, str) and \
-                                                   len(value) > 100
+                                                   len(value) > 500
                                         if long_str:
-                                            row_dict[key] = value[:100] + "..."
+                                            row_dict[key] = value[:500] + "..."
                                         else:
                                             row_dict[key] = value
                                     else:
+                                        # For other complex types, convert
+                                        # to string
                                         str_value = str(value)
-                                        if len(str_value) > 100:
-                                            row_dict[key] = str_value[:100] + \
+                                        if len(str_value) > 500:
+                                            row_dict[key] = str_value[:500] + \
                                                 "..."
                                         else:
                                             row_dict[key] = str_value

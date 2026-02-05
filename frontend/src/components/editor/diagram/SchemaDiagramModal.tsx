@@ -2,10 +2,11 @@
  * SchemaDiagramModal Component
  * Full-screen modal overlay for displaying the schema diagram
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { X, Save, Edit, Loader2 } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 import { SchemaDiagram } from './SchemaDiagram';
+import { UnsavedChangesModal } from '../../common/UnsavedChangesModal';
 import { toast } from 'react-toastify';
 
 interface Column {
@@ -51,6 +52,12 @@ export function SchemaDiagramModal({ isOpen, onClose, schema, isSimulation = fal
   const [isSaving, setIsSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [diagramKey, setDiagramKey] = useState(0);
+  const [showUnsavedModal, setShowUnsavedModal] = useState(false);
+  
+  // Store initial schema for comparison
+  const initialSchemaRef = useRef<string>('');
+  // Track what action triggered the unsaved modal (for proper Discard behavior)
+  const closeActionRef = useRef<'close' | 'cancel'>('close');
 
   // Initialize edited schema when modal opens and reset when closes
   useEffect(() => {
@@ -62,6 +69,9 @@ export function SchemaDiagramModal({ isOpen, onClose, schema, isSimulation = fal
       const clonedSchema = JSON.parse(JSON.stringify(schemaToClone));
       console.log('[SchemaDiagramModal.useEffect] Setting editedSchema:', clonedSchema);
       setEditedSchema(clonedSchema);
+      
+      // Store initial schema for comparison
+      initialSchemaRef.current = JSON.stringify(clonedSchema);
       setHasChanges(false);
       setIsEditMode(false);
       // Force diagram remount with new key
@@ -72,8 +82,45 @@ export function SchemaDiagramModal({ isOpen, onClose, schema, isSimulation = fal
       setEditedSchema(null);
       setHasChanges(false);
       setIsEditMode(false);
+      setShowUnsavedModal(false);
+      initialSchemaRef.current = '';
     }
   }, [isOpen, schema]);
+
+  // Track changes when in edit mode
+  useEffect(() => {
+    if (!isEditMode || !initialSchemaRef.current || !editedSchema) {
+      if (!isEditMode) {
+        setHasChanges(false);
+      }
+      return;
+    }
+    
+    const currentSchemaStr = JSON.stringify(editedSchema);
+    const hasSchemaChanges = currentSchemaStr !== initialSchemaRef.current;
+    
+    console.log('[SchemaDiagramModal] Change detection:', {
+      hasSchemaChanges,
+      currentLength: currentSchemaStr.length,
+      initialLength: initialSchemaRef.current.length,
+      isEditMode,
+    });
+    
+    setHasChanges(hasSchemaChanges);
+  }, [editedSchema, isEditMode]);
+
+  // Warn before page reload/close when in edit mode with unsaved changes
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isEditMode && hasChanges) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isEditMode, hasChanges]);
 
   if (!isOpen) return null;
 
@@ -81,9 +128,8 @@ export function SchemaDiagramModal({ isOpen, onClose, schema, isSimulation = fal
 
   const handleClose = () => {
     if (isEditMode && hasChanges) {
-      if (window.confirm('You have unsaved changes. Discard them?')) {
-        onClose();
-      }
+      closeActionRef.current = 'close'; // Track that this is a close action
+      setShowUnsavedModal(true);
     } else {
       onClose();
     }
@@ -125,7 +171,6 @@ export function SchemaDiagramModal({ isOpen, onClose, schema, isSimulation = fal
       return { ...prev, tables: updatedTables };
     });
 
-    setHasChanges(true);
     toast.success(`Added foreign key: ${sourceTable}.${sourceCol} → ${targetTable}.${targetCol}`);
   };
 
@@ -150,7 +195,6 @@ export function SchemaDiagramModal({ isOpen, onClose, schema, isSimulation = fal
       return { ...prev, tables: updatedTables };
     });
 
-    setHasChanges(true);
     toast.success(`Removed foreign key: ${sourceTable}.${sourceCol} → ${targetTable}.${targetCol}`);
   };
 
@@ -213,7 +257,6 @@ export function SchemaDiagramModal({ isOpen, onClose, schema, isSimulation = fal
       return { ...prev, tables: updatedTables };
     });
 
-    setHasChanges(true);
     toast.success(`Updated foreign key: ${oldSource.table}.${oldSource.col} → ${newSource.table}.${newSource.col} → ${newTarget.table}.${newTarget.col}`);
   };
 
@@ -224,7 +267,10 @@ export function SchemaDiagramModal({ isOpen, onClose, schema, isSimulation = fal
     try {
       await onSave(editedSchema);
       toast.success('Schema changes saved successfully!');
-      setHasChanges(false);
+      
+      // Update initial schema ref after successful save
+      initialSchemaRef.current = JSON.stringify(editedSchema);
+      // hasChanges will be auto-updated by useEffect
       setIsEditMode(false);
       setDiagramKey(prev => prev + 1); // Force re-render diagram
     } catch (error) {
@@ -260,7 +306,6 @@ export function SchemaDiagramModal({ isOpen, onClose, schema, isSimulation = fal
       return { ...prev, tables: updatedTables };
     });
 
-    setHasChanges(true);
     setDiagramKey(prev => prev + 1);
     toast.success(`Added column "${column.name}" to table "${tableName}"`);
   };
@@ -299,7 +344,6 @@ export function SchemaDiagramModal({ isOpen, onClose, schema, isSimulation = fal
       return { ...prev, tables: cleanedTables };
     });
 
-    setHasChanges(true);
     setDiagramKey(prev => prev + 1);
     toast.success(`Removed column "${columnName}" from table "${tableName}"`);
   };
@@ -329,7 +373,6 @@ export function SchemaDiagramModal({ isOpen, onClose, schema, isSimulation = fal
       return { ...prev, tables: updatedTables };
     });
 
-    setHasChanges(true);
     setDiagramKey(prev => prev + 1);
     
     if (newColumn.is_pk !== undefined) {
@@ -376,7 +419,6 @@ export function SchemaDiagramModal({ isOpen, onClose, schema, isSimulation = fal
       return { ...prev, tables: updatedTables };
     });
 
-    setHasChanges(true);
     setDiagramKey(prev => prev + 1);
     toast.success(`Renamed table "${oldName}" to "${newName}"`);
   };
@@ -409,7 +451,6 @@ export function SchemaDiagramModal({ isOpen, onClose, schema, isSimulation = fal
     
     console.log('[handleAddTableInDiagram] Updated schema:', updated);
     setEditedSchema(updated);
-    setHasChanges(true);
     setDiagramKey(prev => prev + 1);
     toast.info(`Table "${tableName}" added. Add columns and save to persist.`);
   };
@@ -421,21 +462,24 @@ export function SchemaDiagramModal({ isOpen, onClose, schema, isSimulation = fal
   };
 
   const handleCancelEdit = () => {
+    console.log('[handleCancelEdit] Cancel button clicked, hasChanges:', hasChanges);
     if (hasChanges) {
-      if (window.confirm('Discard unsaved changes?')) {
-        setEditedSchema(schema ? JSON.parse(JSON.stringify(schema)) : null);
-        setHasChanges(false);
-        setIsEditMode(false);
-      }
+      closeActionRef.current = 'cancel'; // Track that this is a cancel action
+      setShowUnsavedModal(true);
     } else {
+      // Reset to initial schema
+      if (initialSchemaRef.current) {
+        setEditedSchema(JSON.parse(initialSchemaRef.current));
+      }
       setIsEditMode(false);
+      setDiagramKey(prev => prev + 1);
     }
   };
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center"
-      onClick={onClose}
+      onClick={handleClose}
     >
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/50 dark:bg-black/70 backdrop-blur-sm" />
@@ -515,34 +559,39 @@ export function SchemaDiagramModal({ isOpen, onClose, schema, isSimulation = fal
                   onClick={handleSaveChanges}
                   disabled={!hasChanges || isSaving}
                   className={cn(
-                    'flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors',
-                    'bg-green-600 dark:bg-green-600 text-white',
-                    'hover:bg-green-700 dark:hover:bg-green-700',
+                    'flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-white relative',
+                    'bg-primary dark:bg-primary-dark',
+                    'hover:bg-primary-hover dark:hover:bg-primary-dark-hover',
                     'disabled:opacity-50 disabled:cursor-not-allowed'
                   )}
                 >
+                  {hasChanges && !isSaving && (
+                    <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white dark:border-gray-900" />
+                  )}
                   {isSaving ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
                   ) : (
                     <Save className="w-4 h-4" />
                   )}
-                  {isSaving ? 'Saving...' : 'Save Changes'}
+                  {isSaving ? 'Saving...' : hasChanges ? 'Save Changes *' : 'Saved'}
                 </button>
               </>
             )}
             
-            <button
-              onClick={handleClose}
-              className={cn(
-                'p-2 rounded-lg transition-colors',
-                'hover:bg-surface-light dark:hover:bg-surface-dark',
-                'text-text-muted-DEFAULT dark:text-text-muted-dark',
-                'hover:text-text-main-DEFAULT dark:hover:text-text-main-dark'
-              )}
-              aria-label="Close diagram"
-            >
-              <X className="w-6 h-6" />
-            </button>
+            {!isEditMode && (
+              <button
+                onClick={handleClose}
+                className={cn(
+                  'p-2 rounded-lg transition-colors',
+                  'hover:bg-surface-light dark:hover:bg-surface-dark',
+                  'text-text-muted-DEFAULT dark:text-text-muted-dark',
+                  'hover:text-text-main-DEFAULT dark:hover:text-text-main-dark'
+                )}
+                aria-label="Close diagram"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            )}
           </div>
         </div>
 
@@ -565,6 +614,42 @@ export function SchemaDiagramModal({ isOpen, onClose, schema, isSimulation = fal
           />
         </div>
       </div>
+
+      {/* Unsaved Changes Modal */}
+      <UnsavedChangesModal
+        isOpen={showUnsavedModal}
+        isSaving={isSaving}
+        onSave={async () => {
+          await handleSaveChanges();
+          setShowUnsavedModal(false);
+          // Close diagram modal if we were trying to close it
+          if (!isEditMode) {
+            onClose();
+          }
+        }}
+        onDiscard={() => {
+          console.log('[UnsavedChangesModal.onDiscard] Action triggered by:', closeActionRef.current);
+          setShowUnsavedModal(false);
+          // Reset to initial schema
+          if (initialSchemaRef.current) {
+            setEditedSchema(JSON.parse(initialSchemaRef.current));
+          }
+          setIsEditMode(false);
+          setDiagramKey(prev => prev + 1);
+          // Only close diagram modal if this was triggered by close action (X button or backdrop)
+          // Don't close if triggered by Cancel button
+          if (closeActionRef.current === 'close') {
+            console.log('[UnsavedChangesModal.onDiscard] Closing diagram modal');
+            onClose();
+          } else {
+            console.log('[UnsavedChangesModal.onDiscard] Staying in diagram (edit mode disabled)');
+          }
+        }}
+        onCancel={() => {
+          setShowUnsavedModal(false);
+          // Don't do anything else - just close the unsaved modal and stay in edit mode
+        }}
+      />
     </div>
   );
 }

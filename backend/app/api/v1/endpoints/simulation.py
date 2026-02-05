@@ -181,7 +181,7 @@ async def generate_mock_data_with_fk(
             f"Generating data for '{request.table_name}' "
             f"({request.count} rows)"
         )
-        
+
         tables_before = {
             t['name']: len(t.get('sample_data', []))
             for t in tables
@@ -194,17 +194,17 @@ async def generate_mock_data_with_fk(
             schema_json=request.schema,
             count=request.count
         )
-        
+
         tables_after = {
             t['name']: len(t.get('sample_data', []))
             for t in request.schema.get('tables', [])
         }
-        
+
         tables_modified = [
             name for name in tables_after
             if tables_after.get(name, 0) != tables_before.get(name, 0)
         ]
-        
+
         logger.info(f"Tables modified: {tables_modified}")
 
         return GenerateDataWithFKResponse(
