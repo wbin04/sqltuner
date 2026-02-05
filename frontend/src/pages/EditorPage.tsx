@@ -14,6 +14,7 @@ import { SchemaViewer } from '../components/editor/SchemaViewer';
 import { SessionManager } from '../components/editor/SessionManager';
 import { ChatArea } from '../components/editor/ChatArea';
 import { OptimizationModal } from '../components/editor/OptimizationModal';
+import { JSONViewerModal } from '../components/editor/JSONViewerModal';
 import { DbType } from '../types/workspace';
 import { extractErrorMessage, getSQLErrorSuggestion } from '../utils/sqlErrorHelper';
 
@@ -26,6 +27,7 @@ export function EditorPage() {
   const [resultsPanelHeight, setResultsPanelHeight] = useState(300); // Default height in pixels
   const [isResizing, setIsResizing] = useState(false);
   const [inputValue, setInputValue] = useState('');
+  const [jsonViewerData, setJsonViewerData] = useState<{ data: any; column: string } | null>(null);
 
   if (!workspaceId) {
     navigate('/workspaces');
@@ -273,7 +275,7 @@ export function EditorPage() {
 
               {/* Results Content */}
               {!isResultsCollapsed && (
-                <div className="flex-1 p-4 overflow-auto">
+                <div className="flex-1 flex flex-col overflow-hidden">
                   {editorLogic.isExecuting ? (
                     <div className="flex flex-col items-center justify-center h-full space-y-4">
                       <Loader2 className="w-12 h-12 animate-spin text-primary dark:text-primary-dark" />
@@ -293,7 +295,7 @@ export function EditorPage() {
                       </div>
                     </div>
                   ) : editorLogic.executeError ? (
-                    <div className="space-y-3">
+                    <div className="space-y-3 p-4">
                       <div className="flex items-start gap-3 p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
                         <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
                         <div className="flex-1 min-w-0">
@@ -327,41 +329,47 @@ export function EditorPage() {
                       </div>
                     </div>
                   ) : editorLogic.queryResults.get(activeResultSql) ? (
-                    <div>
-                      {/* Truncation Warning */}
-                      {editorLogic.queryResults.get(activeResultSql)?.data.truncated && (
-                        <div className="mb-3 flex items-start gap-3 p-3 rounded-lg bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800">
-                          <AlertCircle className="w-5 h-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" />
-                          <div className="flex-1 min-w-0">
-                            <h4 className="text-sm font-semibold text-yellow-800 dark:text-yellow-300 mb-1">
-                              Result Set Truncated
-                            </h4>
-                            <p className="text-xs text-yellow-700 dark:text-yellow-400">
-                              Showing {editorLogic.queryResults.get(activeResultSql)?.data.row_count.toLocaleString()} of{' '}
-                              {editorLogic.queryResults.get(activeResultSql)?.data.total_rows.toLocaleString()} total rows
-                              (limited to {editorLogic.queryResults.get(activeResultSql)?.data.max_rows.toLocaleString()} rows to prevent UI freeze).
-                              Consider adding LIMIT clause to your query.
-                            </p>
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="mb-2 text-xs text-text-muted-DEFAULT dark:text-text-muted-dark">
-                        Execution time: {editorLogic.queryResults.get(activeResultSql)?.data.execution_time_ms.toFixed(2)}ms
-                        {' | '}
-                        Rows: {editorLogic.queryResults.get(activeResultSql)?.data.row_count.toLocaleString()}
+                    <>
+                      {/* Fixed header section - doesn't scroll */}
+                      <div className="px-4 pt-4 pb-2 flex-shrink-0">
+                        {/* Truncation Warning */}
                         {editorLogic.queryResults.get(activeResultSql)?.data.truncated && (
-                          <span className="text-yellow-600 dark:text-yellow-400">
-                            {' '}(of {editorLogic.queryResults.get(activeResultSql)?.data.total_rows.toLocaleString()} total)
-                          </span>
+                          <div className="mb-3 flex items-start gap-3 p-3 rounded-lg bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800">
+                            <AlertCircle className="w-5 h-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" />
+                            <div className="flex-1 min-w-0">
+                              <h4 className="text-sm font-semibold text-yellow-800 dark:text-yellow-300 mb-1">
+                                Result Set Truncated
+                              </h4>
+                              <p className="text-xs text-yellow-700 dark:text-yellow-400">
+                                Showing {editorLogic.queryResults.get(activeResultSql)?.data.row_count.toLocaleString()} of{' '}
+                                {editorLogic.queryResults.get(activeResultSql)?.data.total_rows.toLocaleString()} total rows
+                                (limited to {editorLogic.queryResults.get(activeResultSql)?.data.max_rows.toLocaleString()} rows to prevent UI freeze).
+                                Consider adding LIMIT clause to your query.
+                              </p>
+                            </div>
+                          </div>
                         )}
+
+                        <div className="mb-2 text-xs text-text-muted-DEFAULT dark:text-text-muted-dark">
+                          Execution time: {editorLogic.queryResults.get(activeResultSql)?.data.execution_time_ms.toFixed(2)}ms
+                          {' | '}
+                          Rows: {editorLogic.queryResults.get(activeResultSql)?.data.row_count.toLocaleString()}
+                          {editorLogic.queryResults.get(activeResultSql)?.data.truncated && (
+                            <span className="text-yellow-600 dark:text-yellow-400">
+                              {' '}(of {editorLogic.queryResults.get(activeResultSql)?.data.total_rows.toLocaleString()} total)
+                            </span>
+                          )}
+                        </div>
                       </div>
 
-                      {editorLogic.queryResults.get(activeResultSql)?.data.columns.length! > 0 ? (
-                        <div className="overflow-x-auto">
-                          <table className="min-w-full text-sm border border-border-DEFAULT dark:border-border-dark">
-                            <thead className="bg-surface-highlight-light dark:bg-surface-highlight-dark">
-                              <tr>
+                      {/* Scrollable table section */}
+                      <div className="flex-1 px-4 pb-4 overflow-x-auto">
+                        {editorLogic.queryResults.get(activeResultSql)?.data.columns.length! > 0 ? (
+                          <div className="inline-block min-w-full">
+                            <div className="overflow-y-auto" style={{ maxHeight: 'calc(100% - 40px)' }}>
+                              <table className="min-w-full text-sm border border-border-DEFAULT dark:border-border-dark">
+                                <thead className="bg-surface-highlight-light dark:bg-surface-highlight-dark sticky top-0 z-10">
+                                  <tr>
                                 {editorLogic.queryResults.get(activeResultSql)?.data.columns.map((col) => (
                                   <th
                                     key={col}
@@ -370,35 +378,64 @@ export function EditorPage() {
                                     {col}
                                   </th>
                                 ))}
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {editorLogic.queryResults.get(activeResultSql)?.data.rows.map((row, idx) => (
-                                <tr
-                                  key={idx}
-                                  className="hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark"
-                                >
-                                  {editorLogic.queryResults.get(activeResultSql)?.data.columns.map((col) => (
-                                    <td
-                                      key={col}
-                                      className="px-4 py-2 text-text-main-DEFAULT dark:text-text-main-dark border-b border-border-DEFAULT dark:border-border-dark"
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {editorLogic.queryResults.get(activeResultSql)?.data.rows.map((row, idx) => (
+                                    <tr
+                                      key={idx}
+                                      className="hover:bg-surface-highlight-light dark:bg-surface-highlight-dark"
                                     >
-                                      {row[col] !== null ? String(row[col]) : <span className="text-text-muted-DEFAULT dark:text-text-muted-dark italic">null</span>}
-                                    </td>
+                                  {editorLogic.queryResults.get(activeResultSql)?.data.columns.map((col) => {
+                                    const value = row[col];
+                                    const isNull = value === null || value === undefined;
+                                    const isObject = !isNull && typeof value === 'object';
+                                    const displayValue = isNull 
+                                      ? null
+                                      : isObject 
+                                        ? JSON.stringify(value) // Single line for display
+                                        : String(value);
+                                    const tooltipValue = isNull
+                                      ? 'NULL'
+                                      : isObject
+                                        ? 'Click to view JSON'
+                                        : String(value);
+
+                                    return (
+                                      <td
+                                        key={col}
+                                        className={cn(
+                                          'px-4 py-2 border-b border-border-DEFAULT dark:border-border-dark font-mono text-xs',
+                                          'max-w-xs truncate', // Fixed max width with truncate
+                                          isNull ? 'text-text-muted-DEFAULT dark:text-text-muted-dark italic' : 'text-text-main-DEFAULT dark:text-text-main-dark',
+                                          isObject && 'cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:text-blue-600 dark:hover:text-blue-400'
+                                        )}
+                                        title={tooltipValue}
+                                        onClick={() => {
+                                          if (isObject) {
+                                            setJsonViewerData({ data: value, column: col });
+                                          }
+                                        }}
+                                      >
+                                        {isNull ? 'null' : displayValue}
+                                      </td>
+                                    );
+                                  })}
+                                    </tr>
                                   ))}
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      ) : (
-                        <div className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark">
-                          Query executed successfully (no rows returned)
-                        </div>
-                      )}
-                    </div>
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark">
+                            Query executed successfully (no rows returned)
+                          </div>
+                        )}
+                      </div>
+                    </>
                   ) : (
-                    <div className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark">
+                    <div className="p-4 text-sm text-text-muted-DEFAULT dark:text-text-muted-dark">
                       No results yet
                     </div>
                   )}
@@ -440,6 +477,14 @@ export function EditorPage() {
           // Auto-run the script
           handleExecute(sql);
         }}
+      />
+
+      {/* JSON Viewer Modal */}
+      <JSONViewerModal
+        isOpen={jsonViewerData !== null}
+        onClose={() => setJsonViewerData(null)}
+        jsonData={jsonViewerData?.data}
+        columnName={jsonViewerData?.column}
       />
     </div>
   );

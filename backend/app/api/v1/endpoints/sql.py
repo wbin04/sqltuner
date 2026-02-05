@@ -72,6 +72,67 @@ def format_schema_for_llm(meta_schema: dict) -> str:
     return "\n".join(lines)
 
 
+def run_sandbox_execution(
+    connection: DBConnection,
+    request: SQLExecuteRequest
+):
+    logger.info(
+        f"[SANDBOX] Using SQLite sandbox for SIMULATION connection "
+        f"{connection.id}"
+    )
+    logger.info(f"[SANDBOX] SQL: {request.sql}")
+
+    if not connection.meta_schema:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="SIMULATION connection requires meta_schema."
+            "Please sync schema first.")
+
+    tables_count = len(connection.meta_schema.get('tables', []))
+    logger.info(f"[SANDBOX] Tables in meta_schema: {tables_count}")
+
+    try:
+        start_time = time.time()
+
+        result = simulation_executor.execute(
+            meta_schema=connection.meta_schema,
+            sql_query=request.sql,
+            sample_data=connection.meta_schema.get('sample_data')
+        )
+
+        execution_time_ms = (time.time() - start_time) * 1000
+
+        total_rows = result['row_count']
+        rows = result['rows'][:settings.SANDBOX_MAX_ROWS]
+        truncated = total_rows > settings.SANDBOX_MAX_ROWS
+
+        logger.info(
+            f"[SANDBOX] Success! Total rows: {total_rows}, "
+            f"Returned: {len(rows)}, Truncated: {truncated}, "
+            f"Time: {execution_time_ms}ms"
+        )
+
+        return SQLExecuteResponse(
+            columns=result['columns'],
+            rows=rows,
+            execution_time_ms=execution_time_ms,
+            row_count=len(rows),
+            total_rows=total_rows,
+            truncated=truncated,
+            max_rows=settings.SANDBOX_MAX_ROWS
+        )
+    except Exception as e:
+        error_detail = (
+            f"Sandbox execution error: {str(e)}\n"
+            f"{traceback.format_exc()}"
+        )
+        logger.error(f"[SANDBOX ERROR] {error_detail}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error_detail
+        )
+
+
 @router.post("/execute", response_model=SQLExecuteResponse)
 async def execute_sql(
     request: SQLExecuteRequest,
@@ -93,61 +154,7 @@ async def execute_sql(
         )
 
     if connection.db_type == DBType.SIMULATION:
-        logger.info(
-            f"[SANDBOX] Using SQLite sandbox for SIMULATION connection "
-            f"{connection.id}"
-        )
-        logger.info(f"[SANDBOX] SQL: {request.sql}")
-
-        if not connection.meta_schema:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="SIMULATION connection requires meta_schema."
-                "Please sync schema first.")
-
-        tables_count = len(connection.meta_schema.get('tables', []))
-        logger.info(f"[SANDBOX] Tables in meta_schema: {tables_count}")
-
-        try:
-            start_time = time.time()
-
-            result = simulation_executor.execute(
-                meta_schema=connection.meta_schema,
-                sql_query=request.sql,
-                sample_data=connection.meta_schema.get('sample_data')
-            )
-
-            execution_time_ms = (time.time() - start_time) * 1000
-
-            total_rows = result['row_count']
-            rows = result['rows'][:settings.SANDBOX_MAX_ROWS]
-            truncated = total_rows > settings.SANDBOX_MAX_ROWS
-
-            logger.info(
-                f"[SANDBOX] Success! Total rows: {total_rows}, "
-                f"Returned: {len(rows)}, Truncated: {truncated}, "
-                f"Time: {execution_time_ms}ms"
-            )
-
-            return SQLExecuteResponse(
-                columns=result['columns'],
-                rows=rows,
-                execution_time_ms=execution_time_ms,
-                row_count=len(rows),
-                total_rows=total_rows,
-                truncated=truncated,
-                max_rows=settings.SANDBOX_MAX_ROWS
-            )
-        except Exception as e:
-            error_detail = (
-                f"Sandbox execution error: {str(e)}\n"
-                f"{traceback.format_exc()}"
-            )
-            logger.error(f"[SANDBOX ERROR] {error_detail}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=error_detail
-            )
+        return run_sandbox_execution(connection, request)
 
     logger.info(
         f"[LIVE] Executing query on real database: "
@@ -231,10 +238,7 @@ async def execute_sql(
         logger.error(
             f"[LIVE ERROR] {error_detail}\n{traceback.format_exc()}"
         )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=error_detail
-        )
+        return run_sandbox_execution(connection, request)
 
 
 @router.post("/explain", response_model=SQLExplainPlanResponse)
