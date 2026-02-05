@@ -3,18 +3,21 @@ import logging
 import time
 from datetime import datetime, timezone
 from functools import lru_cache
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 
 from backend.app.api.v1.endpoints.auth import get_current_user
 from backend.app.core.prompts import (CHAT_GENERAL_SYSTEM_PROMPT,
                                       get_chat_sql_system_prompt)
 from backend.app.db.session import get_db
-from backend.app.models.models import (ChatRole, Conversation, DBConnection,
-                                       QueryLog, User)
+from backend.app.models.models import ChatRole, User
+from backend.app.repositories.connection_repository import \
+    connection_repository
+from backend.app.repositories.conversation_repository import \
+    conversation_repository
+from backend.app.repositories.query_log_repository import query_log_repository
 from backend.app.schemas.sql import (ChatCompletionRequest,
                                      ChatCompletionResponse)
 from backend.app.services.llm_service import llm_service
@@ -110,13 +113,11 @@ async def chat_completion(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(
-        select(DBConnection).where(
-            DBConnection.id == request.connection_id,
-            DBConnection.user_id == current_user.id
-        )
+    connection = await connection_repository.get_by_user_and_id(
+        db=db,
+        user_id=current_user.id,
+        connection_id=request.connection_id
     )
-    connection = result.scalar_one_or_none()
 
     if not connection:
         raise HTTPException(
@@ -127,29 +128,27 @@ async def chat_completion(
     conversation_id = request.conversation_id
 
     if conversation_id:
-        result = await db.execute(
-            select(Conversation).where(
-                Conversation.id == conversation_id,
-                Conversation.connection_id == request.connection_id
-            )
+        conversation = await conversation_repository.get(
+            db, id=conversation_id
         )
-        conversation = result.scalar_one_or_none()
 
-        if not conversation:
+        if not conversation or (
+            conversation.connection_id != request.connection_id
+        ):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Conversation not found"
             )
     else:
-        conversation = Conversation(
-            id=uuid4(),
-            connection_id=request.connection_id,
-            title=request.message[:50] +
-            ("..." if len(request.message) > 50 else ""),
-            created_at=datetime.now(timezone.utc)
+        conversation = await conversation_repository.create(
+            db,
+            obj_in={
+                "connection_id": request.connection_id,
+                "title": request.message[:50] +
+                ("..." if len(request.message) > 50 else ""),
+                "created_at": datetime.now(timezone.utc)
+            }
         )
-        db.add(conversation)
-        await db.flush()
         conversation_id = conversation.id
 
     start_time = time.time()
@@ -244,26 +243,26 @@ async def chat_completion(
 
     detected_sql = extracted_sql
 
-    user_log = QueryLog(
-        id=uuid4(),
-        conversation_id=conversation_id,
-        role=ChatRole.USER,
-        content=request.message,
-        created_at=datetime.now(timezone.utc)
+    await query_log_repository.create(
+        db,
+        obj_in={
+            "conversation_id": conversation_id,
+            "role": ChatRole.USER,
+            "content": request.message,
+            "created_at": datetime.now(timezone.utc)
+        }
     )
-    db.add(user_log)
 
-    assistant_log = QueryLog(
-        id=uuid4(),
-        conversation_id=conversation_id,
-        role=ChatRole.ASSISTANT,
-        content=llm_response,
-        sql_generated=sql_generated,
-        created_at=datetime.now(timezone.utc)
+    await query_log_repository.create(
+        db,
+        obj_in={
+            "conversation_id": conversation_id,
+            "role": ChatRole.ASSISTANT,
+            "content": llm_response,
+            "sql_generated": sql_generated,
+            "created_at": datetime.now(timezone.utc)
+        }
     )
-    db.add(assistant_log)
-
-    await db.commit()
 
     response_data = {
         "conversation_id": conversation_id,
@@ -285,13 +284,11 @@ async def get_conversations(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(
-        select(DBConnection).where(
-            DBConnection.id == connection_id,
-            DBConnection.user_id == current_user.id
-        )
+    connection = await connection_repository.get_by_user_and_id(
+        db=db,
+        user_id=current_user.id,
+        connection_id=connection_id
     )
-    connection = result.scalar_one_or_none()
 
     if not connection:
         raise HTTPException(
@@ -299,12 +296,10 @@ async def get_conversations(
             detail="Connection not found"
         )
 
-    result = await db.execute(
-        select(Conversation)
-        .where(Conversation.connection_id == connection_id)
-        .order_by(Conversation.created_at.desc())
+    conversations = await conversation_repository.get_by_connection(
+        db=db,
+        connection_id=connection_id
     )
-    conversations = result.scalars().all()
 
     return [
         {
@@ -322,10 +317,7 @@ async def get_conversation_messages(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(
-        select(Conversation).where(Conversation.id == conversation_id)
-    )
-    conversation = result.scalar_one_or_none()
+    conversation = await conversation_repository.get(db, id=conversation_id)
 
     if not conversation:
         raise HTTPException(
@@ -333,24 +325,22 @@ async def get_conversation_messages(
             detail="Conversation not found"
         )
 
-    result = await db.execute(
-        select(DBConnection).where(
-            DBConnection.id == conversation.connection_id,
-            DBConnection.user_id == current_user.id
-        )
+    connection = await connection_repository.get_by_user_and_id(
+        db=db,
+        user_id=current_user.id,
+        connection_id=conversation.connection_id
     )
-    if not result.scalar_one_or_none():
+
+    if not connection:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied"
         )
 
-    result = await db.execute(
-        select(QueryLog)
-        .where(QueryLog.conversation_id == conversation_id)
-        .order_by(QueryLog.created_at.asc())
+    messages = await query_log_repository.get_by_conversation(
+        db=db,
+        conversation_id=conversation_id
     )
-    messages = result.scalars().all()
 
     return [
         {

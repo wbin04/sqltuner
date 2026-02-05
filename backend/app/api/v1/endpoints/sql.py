@@ -6,13 +6,14 @@ import traceback
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 
 from backend.app.api.v1.endpoints.auth import get_current_user
 from backend.app.core.config import settings
 from backend.app.core.security import decrypt_password
 from backend.app.db.session import get_db
-from backend.app.models.models import DBConnection, DBType, User
+from backend.app.models.models import DBType, User
+from backend.app.repositories.connection_repository import \
+    connection_repository
 from backend.app.schemas.sql import (SQLExecuteRequest, SQLExecuteResponse,
                                      SQLExplainPlanRequest,
                                      SQLExplainPlanResponse, SQLExplainRequest,
@@ -20,7 +21,8 @@ from backend.app.schemas.sql import (SQLExecuteRequest, SQLExecuteResponse,
                                      SQLOptimizeResponse)
 from backend.app.services.execution_service import simulation_executor
 from backend.app.services.llm_service import llm_service
-from backend.app.services.optimization_service import optimization_service
+from backend.app.services.optimization_service import (ConnectionStringBuilder,
+                                                       optimization_service)
 
 logger = logging.getLogger(__name__)
 
@@ -28,17 +30,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def resolve_docker_host(host: str) -> str:
-    if host in ['localhost', '127.0.0.1']:
-        return 'host.docker.internal'
-    return host
-
-
-def build_sync_connection_string(connection: DBConnection) -> str:
+def build_sync_connection_string(connection):
     password = decrypt_password(
         connection.db_password) if connection.db_password else ""
 
-    resolved_host = resolve_docker_host(connection.host)
+    resolved_host = ConnectionStringBuilder.resolve_docker_host(
+        connection.host
+    )
 
     if connection.db_type == DBType.POSTGRES:
         return (
@@ -73,7 +71,7 @@ def format_schema_for_llm(meta_schema: dict) -> str:
 
 
 def run_sandbox_execution(
-    connection: DBConnection,
+    connection,
     request: SQLExecuteRequest
 ):
     logger.info(
@@ -139,13 +137,11 @@ async def execute_sql(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(
-        select(DBConnection).where(
-            DBConnection.id == request.connection_id,
-            DBConnection.user_id == current_user.id
-        )
+    connection = await connection_repository.get_by_user_and_id(
+        db=db,
+        user_id=current_user.id,
+        connection_id=request.connection_id
     )
-    connection = result.scalar_one_or_none()
 
     if not connection:
         raise HTTPException(
@@ -247,13 +243,11 @@ async def explain_sql_plan(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(
-        select(DBConnection).where(
-            DBConnection.id == request.connection_id,
-            DBConnection.user_id == current_user.id
-        )
+    connection = await connection_repository.get_by_user_and_id(
+        db=db,
+        user_id=current_user.id,
+        connection_id=request.connection_id
     )
-    connection = result.scalar_one_or_none()
 
     if not connection:
         raise HTTPException(
@@ -344,13 +338,11 @@ async def optimize_sql(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(
-        select(DBConnection).where(
-            DBConnection.id == request.connection_id,
-            DBConnection.user_id == current_user.id
-        )
+    connection = await connection_repository.get_by_user_and_id(
+        db=db,
+        user_id=current_user.id,
+        connection_id=request.connection_id
     )
-    connection = result.scalar_one_or_none()
 
     if not connection:
         raise HTTPException(

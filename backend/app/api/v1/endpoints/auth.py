@@ -2,7 +2,6 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import (APIRouter, Depends, HTTPException, Request, Response,
                      status)
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.config import settings
@@ -10,7 +9,10 @@ from backend.app.core.security import (create_access_token,
                                        create_refresh_token,
                                        decode_access_token, verify_password)
 from backend.app.db.session import get_db
-from backend.app.models.models import User, UserSession
+from backend.app.models.models import User
+from backend.app.repositories.user_repository import user_repository
+from backend.app.repositories.user_session_repository import \
+    user_session_repository
 from backend.app.schemas.token import (LoginRequest, LoginResponse,
                                        LogoutResponse, RefreshResponse,
                                        UserResponse)
@@ -48,8 +50,7 @@ async def get_current_user(
     if email is None or user_id is None:
         raise credentials_exception
 
-    result = await db.execute(select(User).where(User.email == email))
-    user = result.scalar_one_or_none()
+    user = await user_repository.get_by_email(db, email=email)
 
     if user is None:
         raise credentials_exception
@@ -72,9 +73,7 @@ async def login(
     db: AsyncSession = Depends(get_db)
 ):
     # Authenticate user
-    result = await db.execute(select(User).where(
-        User.email == login_data.email))
-    user = result.scalar_one_or_none()
+    user = await user_repository.get_by_email(db, email=login_data.email)
 
     if not user or not verify_password(login_data.password, user.password):
         raise HTTPException(
@@ -108,17 +107,18 @@ async def login(
     user_agent = request.headers.get("user-agent", "")
     ip_address = request.client.host if request.client else None
 
-    # Create UserSession in database
-    session_db = UserSession(
-        user_id=user.id,
-        refresh_token=refresh_token,
-        user_agent=user_agent,
-        ip_address=ip_address,
-        expires_at=datetime.now(timezone.utc) + refresh_token_expires,
-        is_revoked=False
+    # Create UserSession in database using repository
+    await user_session_repository.create(
+        db,
+        obj_in={
+            "user_id": user.id,
+            "refresh_token": refresh_token,
+            "user_agent": user_agent,
+            "ip_address": ip_address,
+            "expires_at": datetime.now(timezone.utc) + refresh_token_expires,
+            "is_revoked": False
+        }
     )
-    db.add(session_db)
-    await db.commit()
 
     # Set HttpOnly cookies
     response.set_cookie(
@@ -196,12 +196,10 @@ async def refresh_token(
         raise credentials_exception
 
     # Check if session exists in database and is valid
-    result = await db.execute(
-        select(UserSession).where(
-            UserSession.refresh_token == refresh_token
-        )
+    old_session = await user_session_repository.get_by_refresh_token(
+        db,
+        refresh_token=refresh_token
     )
-    old_session = result.scalar_one_or_none()
 
     if not old_session:
         response.delete_cookie(
@@ -248,9 +246,7 @@ async def refresh_token(
         )
 
     # Get user from session
-    result = await db.execute(select(User).where(
-        User.id == old_session.user_id))
-    user = result.scalar_one_or_none()
+    user = await user_repository.get(db, id=old_session.user_id)
 
     if not user or not user.is_active:
         response.delete_cookie(
@@ -267,7 +263,11 @@ async def refresh_token(
         )
 
     # Revoke old session
-    old_session.is_revoked = True
+    await user_session_repository.update(
+        db,
+        db_obj=old_session,
+        obj_in={"is_revoked": True}
+    )
 
     # Create new tokens
     access_token_expires = timedelta(
@@ -287,17 +287,18 @@ async def refresh_token(
     user_agent = request.headers.get("user-agent", "")
     ip_address = request.client.host if request.client else None
 
-    # Create new UserSession in database
-    new_session = UserSession(
-        user_id=user.id,
-        refresh_token=new_refresh_token,
-        user_agent=user_agent,
-        ip_address=ip_address,
-        expires_at=datetime.now(timezone.utc) + refresh_token_expires,
-        is_revoked=False
+    # Create new UserSession in database using repository
+    await user_session_repository.create(
+        db,
+        obj_in={
+            "user_id": user.id,
+            "refresh_token": new_refresh_token,
+            "user_agent": user_agent,
+            "ip_address": ip_address,
+            "expires_at": datetime.now(timezone.utc) + refresh_token_expires,
+            "is_revoked": False
+        }
     )
-    db.add(new_session)
-    await db.commit()
 
     # Set new cookies
     response.set_cookie(
@@ -335,17 +336,11 @@ async def logout(
     )
 
     if refresh_token:
-        # Mark session as revoked in database
-        result = await db.execute(
-            select(UserSession).where(
-                UserSession.refresh_token == refresh_token
-            )
+        # Mark session as revoked in database using repository
+        await user_session_repository.revoke_by_refresh_token(
+            db,
+            refresh_token=refresh_token
         )
-        session = result.scalar_one_or_none()
-
-        if session:
-            session.is_revoked = True
-            await db.commit()
 
     # Delete both cookies
     response.delete_cookie(
