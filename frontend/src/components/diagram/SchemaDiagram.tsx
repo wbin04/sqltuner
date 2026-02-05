@@ -26,7 +26,7 @@ import { TableNode } from './TableNode';
 import { ForeignKeyEdge } from './ForeignKeyEdge';
 import { ContextMenu } from './ContextMenu';
 import { transformSchemaToGraph, getLayoutedElements } from './layoutUtils';
-import { cn } from '../../../lib/utils';
+import { cn } from '../../lib/utils';
 
 interface Column {
   name: string;

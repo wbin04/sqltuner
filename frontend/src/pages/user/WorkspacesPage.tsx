@@ -5,12 +5,12 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Database } from 'lucide-react';
-import { cn } from '../lib/utils';
-import { workspaceService } from '../services/workspaceService';
-import { WorkspaceCard } from '../components/workspaces/WorkspaceCard';
-import { CreateWorkspaceModal } from '../components/workspaces/CreateWorkspaceModal';
-import { EditWorkspaceModal } from '../components/workspaces/EditWorkspaceModal';
-import { CreateWorkspacePayload, Workspace } from '../types/workspace';
+import { cn } from '../../lib/utils';
+import { workspaceService } from '../../services/workspaceService';
+import { WorkspaceCard } from '../../components/workspaces/WorkspaceCard';
+import { CreateWorkspaceModal } from '../../components/workspaces/CreateWorkspaceModal';
+import { EditWorkspaceModal } from '../../components/workspaces/EditWorkspaceModal';
+import { CreateWorkspacePayload, Workspace } from '../../types/workspace';
 
 export function WorkspacesPage() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);

@@ -11,7 +11,7 @@ import {
   useReactFlow,
 } from '@xyflow/react';
 import { X } from 'lucide-react';
-import { cn } from '../../../lib/utils';
+import { cn } from '../../lib/utils';
 
 interface ForeignKeyEdgeData {
   onRemoveForeignKey?: (sourceTable: string, sourceCol: string, targetTable: string, targetCol: string) => void;

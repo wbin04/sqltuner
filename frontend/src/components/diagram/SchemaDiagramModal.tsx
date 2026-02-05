@@ -4,9 +4,9 @@
  */
 import { useState, useEffect, useRef } from 'react';
 import { X, Save, Edit, Loader2 } from 'lucide-react';
-import { cn } from '../../../lib/utils';
+import { cn } from '../../lib/utils';
 import { SchemaDiagram } from './SchemaDiagram';
-import { UnsavedChangesModal } from '../../common/UnsavedChangesModal';
+import { UnsavedChangesModal } from '../common/UnsavedChangesModal';
 import { toast } from 'react-toastify';
 
 interface Column {

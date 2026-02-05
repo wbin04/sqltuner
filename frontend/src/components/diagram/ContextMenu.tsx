@@ -4,7 +4,7 @@
  */
 import { memo } from 'react';
 import { Plus } from 'lucide-react';
-import { cn } from '../../../lib/utils';
+import { cn } from '../../lib/utils';
 
 interface ContextMenuProps {
   x: number;

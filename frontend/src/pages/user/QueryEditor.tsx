@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { Database, FileText, Maximize2, Minimize2 } from 'lucide-react';
-import { cn } from '../lib/utils';
-import { ConversationSidebar } from '../components/editor/ConversationSidebar';
-import { ChatMessage } from '../components/editor/ChatMessage';
-import { ChatInput } from '../components/editor/ChatInput';
-import { SchemaTree } from '../components/editor/SchemaTree';
-import { ResultsGrid } from '../components/editor/ResultsGrid';
-import { PerformanceModal } from '../components/performance/PerformanceModal';
-import type { Conversation, QueryLog, TableSchema, QueryResult, PerformanceAnalysis } from '../types';
+import { cn } from '../../lib/utils';
+import { ConversationSidebar } from '../../components/editor/ConversationSidebar';
+import { ChatMessage } from '../../components/editor/ChatMessage';
+import { ChatInput } from '../../components/editor/ChatInput';
+import { SchemaTree } from '../../components/editor/SchemaTree';
+import { ResultsGrid } from '../../components/editor/ResultsGrid';
+import { PerformanceModal } from '../../components/performance/PerformanceModal';
+import type { Conversation, QueryLog, TableSchema, QueryResult, PerformanceAnalysis } from '../../types';
 
 // Mock Data
 const mockConversations: Conversation[] = [
