@@ -91,7 +91,7 @@ export function LoginPage() {
                 <input
                   type="email"
                   placeholder="you@example.com"
-                  defaultValue="quochuy04.ar@gmail.com"
+                  defaultValue="quochuy@gmail.com"
                   className={cn(
                     'w-full rounded-lg border pl-10 pr-4 py-3 text-sm transition-all',
                     'bg-background-light dark:bg-background-dark',
