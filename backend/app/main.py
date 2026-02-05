@@ -4,6 +4,7 @@ import logging
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.sessions import SessionMiddleware
 
 from backend.app.api.v1.api import api_router
 from backend.app.core.config import settings
@@ -34,7 +35,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include API router
+app.add_middleware(SessionMiddleware, secret_key=settings.SECRET_KEY)
+
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
 

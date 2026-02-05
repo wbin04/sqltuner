@@ -24,7 +24,7 @@ async def init_db():
                     "role": UserRole.ADMIN
                 },
                 {
-                    "email": "quochuy04.ar@gmail.com",
+                    "email": "quochuy@gmail.com",
                     "password": "quochuy123",
                     "role": UserRole.USER
                 }

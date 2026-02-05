@@ -1,10 +1,16 @@
 from datetime import datetime, timedelta, timezone
 
+from authlib.integrations.starlette_client import OAuth
 from fastapi import (APIRouter, Depends, HTTPException, Request, Response,
                      status)
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.responses import RedirectResponse
 
 from backend.app.core.config import settings
+from backend.app.core.constants import (AUTH_PROVIDER_EMAIL,
+                                        AUTH_PROVIDER_GOOGLE,
+                                        GOOGLE_OAUTH_METADATA_URL,
+                                        GOOGLE_OAUTH_SCOPES)
 from backend.app.core.security import (create_access_token,
                                        create_refresh_token,
                                        decode_access_token, verify_password)
@@ -18,6 +24,17 @@ from backend.app.schemas.token import (LoginRequest, LoginResponse,
                                        UserResponse)
 
 router = APIRouter()
+
+oauth = OAuth()
+
+if settings.GOOGLE_CLIENT_ID and settings.GOOGLE_CLIENT_SECRET:
+    oauth.register(
+        name='google',
+        client_id=settings.GOOGLE_CLIENT_ID,
+        client_secret=settings.GOOGLE_CLIENT_SECRET,
+        server_metadata_url=GOOGLE_OAUTH_METADATA_URL,
+        client_kwargs={'scope': GOOGLE_OAUTH_SCOPES}
+    )
 
 
 async def get_current_user(
@@ -365,3 +382,144 @@ async def get_current_user_info(
         role=current_user.role.value,
         name=current_user.email.split('@')[0].title()
     )
+
+
+@router.get("/login/google")
+async def login_google(request: Request):
+    if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Google OAuth not configured"
+        )
+
+    redirect_uri = request.url_for('auth_google_callback')
+    return await oauth.google.authorize_redirect(request, redirect_uri)
+
+
+@router.get("/google/callback", name="auth_google_callback")
+async def auth_google_callback(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        token = await oauth.google.authorize_access_token(request)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"OAuth authorization failed: {str(e)}"
+        )
+
+    user_info = token.get('userinfo')
+    if not user_info:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Failed to get user info from Google"
+        )
+
+    email = user_info.get('email')
+    google_id = user_info.get('sub')
+    avatar_url = user_info.get('picture')
+
+    if not email or not google_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email or Google ID missing from user info"
+        )
+
+    user = await user_repository.get_by_email(db, email=email)
+
+    if not user:
+        user = await user_repository.create(
+            db,
+            obj_in={
+                "email": email,
+                "password": None,
+                "role": "user",
+                "auth_provider": AUTH_PROVIDER_GOOGLE,
+                "google_id": google_id,
+                "avatar_url": avatar_url,
+                "is_active": True
+            }
+        )
+    else:
+        if user.auth_provider == AUTH_PROVIDER_EMAIL:
+            await user_repository.update(
+                db,
+                db_obj=user,
+                obj_in={
+                    "auth_provider": AUTH_PROVIDER_GOOGLE,
+                    "google_id": google_id,
+                    "avatar_url": avatar_url
+                }
+            )
+        else:
+            await user_repository.update(
+                db,
+                db_obj=user,
+                obj_in={
+                    "google_id": google_id,
+                    "avatar_url": avatar_url
+                }
+            )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is inactive"
+        )
+
+    access_token_expires = timedelta(
+        minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
+    )
+    access_token = create_access_token(
+        data={"sub": user.email, "user_id": str(user.id)},
+        expires_delta=access_token_expires
+    )
+
+    refresh_token_expires = timedelta(
+        days=settings.REFRESH_TOKEN_EXPIRE_DAYS
+    )
+    refresh_token = create_refresh_token(
+        data={"sub": user.email, "user_id": str(user.id)},
+        expires_delta=refresh_token_expires
+    )
+
+    user_agent = request.headers.get("user-agent", "")
+    ip_address = request.client.host if request.client else None
+
+    await user_session_repository.create(
+        db,
+        obj_in={
+            "user_id": user.id,
+            "refresh_token": refresh_token,
+            "user_agent": user_agent,
+            "ip_address": ip_address,
+            "expires_at": datetime.now(timezone.utc) + refresh_token_expires,
+            "is_revoked": False
+        }
+    )
+
+    redirect_response = RedirectResponse(url=settings.FRONTEND_URL)
+
+    redirect_response.set_cookie(
+        key=settings.COOKIE_ACCESS_TOKEN_NAME,
+        value=access_token,
+        httponly=settings.COOKIE_HTTPONLY,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        path=settings.COOKIE_PATH
+    )
+
+    redirect_response.set_cookie(
+        key=settings.COOKIE_REFRESH_TOKEN_NAME,
+        value=refresh_token,
+        httponly=settings.COOKIE_HTTPONLY,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        path=settings.COOKIE_PATH
+    )
+
+    return redirect_response
