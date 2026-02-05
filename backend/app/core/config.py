@@ -19,6 +19,10 @@ class Settings(BaseSettings):
 
     BACKEND_CORS_ORIGINS: str = "http://localhost:5173"
 
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    FRONTEND_URL: str = "http://localhost:5173/workspaces"
+
     ENCRYPTION_KEY: str
 
     SECRET_KEY: str

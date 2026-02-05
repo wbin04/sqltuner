@@ -1,3 +1,5 @@
+# Flake8: noqa
+
 LLM_REQUEST_TIMEOUT = 300
 
 MAX_SQL_LENGTH = 10000
@@ -5,6 +7,12 @@ MAX_SQL_LENGTH = 10000
 SUPPORTED_DB_TYPES = ["postgresql", "mysql", "sqlite"]
 
 LOCALHOSTS = ['localhost', '127.0.0.1']
+
+AUTH_PROVIDER_EMAIL = 'email'
+AUTH_PROVIDER_GOOGLE = 'google'
+
+GOOGLE_OAUTH_METADATA_URL = 'https://accounts.google.com/.well-known/openid-configuration'
+GOOGLE_OAUTH_SCOPES = 'openid email profile'
 
 MOCK_DATA_RECURSION_MAX_DEPTH = 3
 MOCK_DATA_AUTO_PARENT_ROWS = 10

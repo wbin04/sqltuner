@@ -59,7 +59,7 @@ class User(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email = Column(String(255), nullable=False, unique=True, index=True)
-    password = Column(String(255), nullable=False)
+    password = Column(String(255), nullable=True)
     role = Column(
         SQLEnum(
             UserRole,
@@ -68,6 +68,9 @@ class User(Base):
                 e.value for e in x]),
         default=UserRole.USER)
     is_active = Column(Boolean, default=True, nullable=False)
+    auth_provider = Column(String(50), default='email', nullable=False)
+    google_id = Column(String(255), unique=True, nullable=True, index=True)
+    avatar_url = Column(String(500), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     db_connections = relationship(
