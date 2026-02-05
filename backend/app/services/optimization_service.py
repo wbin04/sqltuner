@@ -10,6 +10,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from backend.app.core.constants import LOCALHOSTS
 from backend.app.core.exceptions import NotFoundError, ValidationError
 from backend.app.core.security import decrypt_password
 from backend.app.models.models import (Conversation, DBConnection, DBType,
@@ -67,7 +68,7 @@ class OptimizationCache:
 class ConnectionStringBuilder:
     @staticmethod
     def resolve_docker_host(host: str) -> str:
-        if host in ["localhost", "127.0.0.1"]:
+        if host in LOCALHOSTS:
             return "host.docker.internal"
         return host
 

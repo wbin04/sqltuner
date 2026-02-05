@@ -24,6 +24,15 @@ class Settings(BaseSettings):
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+
+    # Cookie settings
+    COOKIE_SECURE: bool = False  # Set True in production with HTTPS
+    COOKIE_SAMESITE: str = "Lax"
+    COOKIE_HTTPONLY: bool = True
+    COOKIE_PATH: str = "/"
+    COOKIE_ACCESS_TOKEN_NAME: str = "access_token"
+    COOKIE_REFRESH_TOKEN_NAME: str = "refresh_token"
 
     ENABLE_DATABASE: bool = True
 

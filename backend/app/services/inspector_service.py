@@ -4,6 +4,7 @@ from uuid import UUID
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.core.constants import LOCALHOSTS
 from backend.app.core.exceptions import (DatabaseConnectionError,
                                          ValidationError)
 from backend.app.core.security import decrypt_password
@@ -117,7 +118,7 @@ class DatabaseInspectorService:
         password = decrypt_password(connection.db_password)
 
         resolved_host = connection.host
-        if connection.host in ['localhost', '127.0.0.1']:
+        if connection.host in LOCALHOSTS:
             resolved_host = 'host.docker.internal'
 
         if connection.db_type == DBType.POSTGRES:
