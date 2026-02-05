@@ -41,6 +41,11 @@ export interface SimulationTable {
   id: string;
   name: string;
   columns: SimulationColumn[];
+  foreign_keys?: Array<{
+    column: string;
+    ref_table: string;
+    ref_column: string;
+  }>;
   indexes: IndexDef[];
   sample_data: Record<string, any>[];
 }

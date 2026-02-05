@@ -477,6 +477,7 @@ export function SchemaEditor() {
                   <SampleDataEditor
                     key={selectedTable.id}
                     table={selectedTable}
+                    schema={schema}
                     isReadOnly={isReadOnly}
                     onUpdateTable={(updatedTable: SimulationTable) => {
                       setSchema(prev => ({
@@ -485,6 +486,9 @@ export function SchemaEditor() {
                           t.id === updatedTable.id ? updatedTable : t
                         ),
                       }));
+                    }}
+                    onUpdateSchema={(updatedSchema: SimulationSchema) => {
+                      setSchema(updatedSchema);
                     }}
                   />
                 )}

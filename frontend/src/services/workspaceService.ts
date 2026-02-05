@@ -106,4 +106,51 @@ export const workspaceService = {
     // TODO: Create dedicated endpoint for single table update
     await api.put(`${BASE_URL}/${id}/tables/${tableName}`, data);
   },
+
+  /**
+   * Generate mock data for simulation tables
+   */
+  async generateMockData(params: {
+    count: number;
+    columns: Array<{
+      name: string;
+      type: string;
+      is_pk?: boolean;
+      is_nullable?: boolean;
+    }>;
+  }): Promise<Record<string, any>[]> {
+    const response = await api.post<{ data: Record<string, any>[]; count: number }>(
+      '/simulation/generate-data',
+      params
+    );
+    return response.data.data;
+  },
+
+  /**
+   * Generate mock data with Foreign Key support
+   */
+  async generateMockDataWithFK(params: {
+    table_name: string;
+    count: number;
+    schema: any;
+  }): Promise<{
+    data: Record<string, any>[];
+    updated_schema: any;
+    tables_modified: string[];
+  }> {
+    const response = await api.post<{
+      data: Record<string, any>[];
+      count: number;
+      updated_schema: any;
+      tables_modified: string[];
+    }>(
+      '/simulation/generate-data-with-fk',
+      params
+    );
+    return {
+      data: response.data.data,
+      updated_schema: response.data.updated_schema,
+      tables_modified: response.data.tables_modified,
+    };
+  },
 };
