@@ -3,16 +3,18 @@
  * Edit database schema for both real databases and simulations
  * Similar to SimulationDesigner but works with any workspace type
  */
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Save, Loader2, AlertCircle, Network } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useWorkspace } from '../hooks/useWorkspace';
+import { useUnsavedChangesWarning } from '../hooks/useUnsavedChangesWarning';
 import { SimulationSchema, SimulationTable, BackendTable } from '../types/simulation';
 import { workspaceService } from '../services/workspaceService';
 import { DbType } from '../types/workspace';
 import { TablesSidebar, StructureEditor, SampleDataEditor } from '../components/simulation';
 import { SchemaDiagramModal } from '../components/editor/diagram/SchemaDiagramModal';
+import { UnsavedChangesModal } from '../components/common/UnsavedChangesModal';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'react-toastify';
 
@@ -32,6 +34,11 @@ export function SchemaEditor() {
   const [isDiagramModalOpen, setIsDiagramModalOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [showUnsavedModal, setShowUnsavedModal] = useState(false);
+  
+  // Store initial schema to compare for changes
+  const initialSchemaRef = useRef<string>('');
 
   // Load schema from workspace metadata
   useEffect(() => {
@@ -129,6 +136,10 @@ export function SchemaEditor() {
     console.log('Schema with generated IDs:', schemaWithIds);
     setSchema(schemaWithIds);
     
+    // Store initial schema for comparison
+    initialSchemaRef.current = JSON.stringify(schemaWithIds);
+    setHasUnsavedChanges(false);
+    
     // Select first table if available
     if (schemaWithIds.tables && schemaWithIds.tables.length > 0 && !selectedTableId) {
       setSelectedTableId(schemaWithIds.tables[0].id);
@@ -186,6 +197,36 @@ export function SchemaEditor() {
 
     loadTableData();
   }, [selectedTableId, workspace, workspaceId]);
+
+  // Track changes in schema
+  useEffect(() => {
+    if (!initialSchemaRef.current) return;
+    
+    const currentSchemaStr = JSON.stringify(schema);
+    const hasChanges = currentSchemaStr !== initialSchemaRef.current;
+    setHasUnsavedChanges(hasChanges);
+  }, [schema]);
+
+  // Warn before page reload/close - DISABLED to avoid native alert conflict with modal
+  // useEffect(() => {
+  //   const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+  //     if (hasUnsavedChanges && workspace?.db_type === DbType.SIMULATION) {
+  //       e.preventDefault();
+  //       e.returnValue = '';
+  //     }
+  //   };
+
+  //   window.addEventListener('beforeunload', handleBeforeUnload);
+  //   return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  // }, [hasUnsavedChanges, workspace]);
+
+  // Block navigation when there are unsaved changes
+  const { allowNavigation } = useUnsavedChangesWarning({
+    when: hasUnsavedChanges && workspace?.db_type === DbType.SIMULATION,
+    onNavigate: () => {
+      setShowUnsavedModal(true);
+    },
+  });
 
   const selectedTable = schema.tables.find(t => t.id === selectedTableId);
   const isReadOnly = workspace?.db_type !== DbType.SIMULATION;
@@ -270,6 +311,10 @@ export function SchemaEditor() {
 
       await workspaceService.updateSimulationSchema(workspaceId, payload);
       
+      // Update initial schema ref after successful save
+      initialSchemaRef.current = JSON.stringify(currentSchema);
+      setHasUnsavedChanges(false);
+      
       toast.success('Schema saved successfully!', {
         position: 'top-right',
         autoClose: 3000,
@@ -302,6 +347,7 @@ export function SchemaEditor() {
 
     setSchema(newSchema);
     setSelectedTableId(newTable.id);
+    setHasUnsavedChanges(true);
     toast.info(`Table "${tableName}" added. Add columns and save to persist.`);
   };
 
@@ -386,21 +432,24 @@ export function SchemaEditor() {
           {workspace?.db_type === DbType.SIMULATION && (
             <button
               onClick={() => handleSaveChanges()}
-              disabled={isSaving}
+              disabled={isSaving || !hasUnsavedChanges}
               className={cn(
-                'flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-white',
+                'flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-white relative',
                 'bg-primary dark:bg-primary-dark',
                 'hover:bg-primary-hover dark:hover:bg-primary-dark-hover',
                 'disabled:opacity-50 disabled:cursor-not-allowed',
                 'transition-colors'
               )}
             >
+              {hasUnsavedChanges && (
+                <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white dark:border-gray-900" />
+              )}
               {isSaving ? (
                 <Loader2 className="w-5 h-5 animate-spin" />
               ) : (
                 <Save className="w-5 h-5" />
               )}
-              {isSaving ? 'Saving...' : 'Save Changes'}
+              {isSaving ? 'Saving...' : hasUnsavedChanges ? 'Save Changes *' : 'Saved'}
             </button>
           )}
         </div>
@@ -701,6 +750,27 @@ export function SchemaEditor() {
 
           // Only update state after successful save
           setSchema(newSchema);
+        }}
+      />
+
+      {/* Unsaved Changes Modal */}
+      <UnsavedChangesModal
+        isOpen={showUnsavedModal}
+        isSaving={isSaving}
+        onSave={async () => {
+          await handleSaveChanges();
+          setShowUnsavedModal(false);
+          allowNavigation();
+        }}
+        onDiscard={() => {
+          setShowUnsavedModal(false);
+          setHasUnsavedChanges(false);
+          // Reset to initial schema
+          initialSchemaRef.current = JSON.stringify(schema);
+          allowNavigation();
+        }}
+        onCancel={() => {
+          setShowUnsavedModal(false);
         }}
       />
     </div>

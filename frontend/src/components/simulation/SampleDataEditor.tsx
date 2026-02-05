@@ -9,6 +9,8 @@ import { SimulationTable, SimulationSchema } from '../../types/simulation';
 import { workspaceService } from '../../services/workspaceService';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'react-toastify';
+import { JSONViewerModal } from '../editor/JSONViewerModal';
+import { SmartCell } from './SmartCell';
 
 interface SampleDataEditorProps {
   table: SimulationTable;
@@ -23,6 +25,7 @@ export function SampleDataEditor({ table, schema, isReadOnly = false, onUpdateTa
   const [showGeneratePopover, setShowGeneratePopover] = useState(false);
   const [rowCount, setRowCount] = useState(50);
   const [searchQuery, setSearchQuery] = useState('');
+  const [jsonViewerData, setJsonViewerData] = useState<{ data: any; column: string } | null>(null);
 
   const handleAddRow = () => {
     const newRow: Record<string, any> = {};
@@ -358,7 +361,7 @@ export function SampleDataEditor({ table, schema, isReadOnly = false, onUpdateTa
       )}
 
       {/* Data Grid */}
-      <div className="bg-surface-light dark:bg-surface-dark rounded-xl border border-border-DEFAULT dark:border-border-dark overflow-auto">
+      <div className="bg-surface-light dark:bg-surface-dark rounded-xl border border-border-DEFAULT dark:border-border-dark overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-surface-highlight-light dark:bg-surface-highlight-dark sticky top-0">
             <tr>
@@ -368,9 +371,9 @@ export function SampleDataEditor({ table, schema, isReadOnly = false, onUpdateTa
               {table.columns.map((column) => (
                 <th
                   key={column.id}
-                  className="px-4 py-3 text-left text-xs font-semibold text-text-muted-DEFAULT dark:text-text-muted-dark uppercase"
+                  className="px-4 py-3 text-left text-xs font-semibold text-text-muted-DEFAULT dark:text-text-muted-dark uppercase min-w-[150px] max-w-[300px]"
                 >
-                  <div>
+                  <div className="whitespace-nowrap overflow-hidden text-ellipsis">
                     {column.name}
                     <div className="text-xs font-normal text-text-muted-DEFAULT dark:text-text-muted-dark mt-0.5">
                       {column.type}
@@ -404,25 +407,21 @@ export function SampleDataEditor({ table, schema, isReadOnly = false, onUpdateTa
                     <td className="px-4 py-2 text-text-muted-DEFAULT dark:text-text-muted-dark">
                       {originalIndex + 1}
                     </td>
-                    {table.columns.map((column) => (
-                      <td key={column.id} className="px-4 py-2">
-                        <input
-                          type="text"
-                          value={getCellValue(row, column.name)}
-                          onChange={(e) => handleUpdateCell(originalIndex, column.name, e.target.value)}
-                          placeholder={column.is_nullable ? 'null' : ''}
-                          readOnly={isReadOnly}
-                          className={cn(
-                            'w-full px-3 py-1.5 rounded border font-mono text-sm',
-                            'bg-background-light dark:bg-background-dark',
-                            'border-border-DEFAULT dark:border-border-dark',
-                            'text-text-main-DEFAULT dark:text-text-main-dark',
-                            'placeholder:text-text-muted-DEFAULT dark:placeholder:text-text-muted-dark',
-                            'focus:outline-none focus:ring-2 focus:ring-primary/50'
-                          )}
-                        />
-                      </td>
-                    ))}
+                    {table.columns.map((column) => {
+                      const value = row[column.name];
+                      
+                      return (
+                        <td key={column.id} className="px-4 py-2 min-w-[150px] max-w-[300px] border-b border-border-DEFAULT dark:border-border-dark">
+                          <SmartCell
+                            value={value}
+                            type={column.type}
+                            onSave={(newValue) => handleUpdateCell(originalIndex, column.name, newValue)}
+                            onJsonClick={() => setJsonViewerData({ data: value, column: column.name })}
+                            isReadOnly={isReadOnly}
+                          />
+                        </td>
+                      );
+                    })}
                     <td className={cn("px-4 py-2 text-center", isReadOnly && "hidden")}>
                       <button
                         onClick={() => handleDeleteRow(originalIndex)}
@@ -455,6 +454,14 @@ export function SampleDataEditor({ table, schema, isReadOnly = false, onUpdateTa
         <Plus className="w-4 h-4" />
         Add Row
       </button>
+
+      {/* JSON Viewer Modal */}
+      <JSONViewerModal
+        isOpen={jsonViewerData !== null}
+        onClose={() => setJsonViewerData(null)}
+        jsonData={jsonViewerData?.data}
+        columnName={jsonViewerData?.column}
+      />
     </div>
   );
 }
