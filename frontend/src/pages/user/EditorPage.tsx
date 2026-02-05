@@ -7,16 +7,16 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Database, Loader2, AlertCircle, RefreshCw, ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
-import { cn } from '../lib/utils';
-import { useWorkspace } from '../hooks/useWorkspace';
-import { useEditorLogic } from '../hooks/useEditorLogic';
-import { SchemaViewer } from '../components/editor/SchemaViewer';
-import { SessionManager } from '../components/editor/SessionManager';
-import { ChatArea } from '../components/editor/ChatArea';
-import { OptimizationModal } from '../components/editor/OptimizationModal';
-import { JSONViewerModal } from '../components/editor/JSONViewerModal';
-import { DbType } from '../types/workspace';
-import { extractErrorMessage, getSQLErrorSuggestion } from '../utils/sqlErrorHelper';
+import { cn } from '../../lib/utils';
+import { useWorkspace } from '../../hooks/useWorkspace';
+import { useEditorLogic } from '../../hooks/useEditorLogic';
+import { SchemaViewer } from '../../components/editor/SchemaViewer';
+import { SessionManager } from '../../components/editor/SessionManager';
+import { ChatArea } from '../../components/editor/ChatArea';
+import { OptimizationModal } from '../../components/editor/OptimizationModal';
+import { JSONViewerModal } from '../../components/editor/JSONViewerModal';
+import { DbType } from '../../types/workspace';
+import { extractErrorMessage, getSQLErrorSuggestion } from '../../utils/sqlErrorHelper';
 
 export function EditorPage() {
   const { workspaceId } = useParams<{ workspaceId: string }>();

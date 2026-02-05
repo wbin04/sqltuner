@@ -6,7 +6,7 @@
 import { memo, useState, useEffect } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 import { Table, Key, Link, Trash2, Plus } from 'lucide-react';
-import { cn } from '../../../lib/utils';
+import { cn } from '../../lib/utils';
 
 interface Column {
   name: string;

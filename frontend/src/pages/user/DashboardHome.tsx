@@ -9,8 +9,8 @@ import {
   TrendingUp,
   Zap
 } from 'lucide-react';
-import { cn } from '../lib/utils';
-import type { Workspace } from '../types';
+import { cn } from '../../lib/utils';
+import type { Workspace } from '../../types';
 
 // Mock Data
 const mockWorkspaces: Workspace[] = [

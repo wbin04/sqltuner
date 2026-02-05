@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Database, Table, ChevronDown, ChevronRight, Key, Link, Network, Edit, RefreshCw } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { SchemaDiagramModal } from './diagram/SchemaDiagramModal';
+import { SchemaDiagramModal } from '../diagram/SchemaDiagramModal';
 import { workspaceService } from '../../services/workspaceService';
 
 interface Column {

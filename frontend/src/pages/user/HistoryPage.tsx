@@ -4,10 +4,10 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Search, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
-import { historyService } from '../services/historyService';
-import { HistoryTable } from '../components/history/HistoryTable';
-import { HistoryDetailDrawer } from '../components/history/HistoryDetailDrawer';
-import type { HistoryLog, HistoryFilter, ActivityType } from '../types/history';
+import { historyService } from '../../services/historyService';
+import { HistoryTable } from '../../components/history/HistoryTable';
+import { HistoryDetailDrawer } from '../../components/history/HistoryDetailDrawer';
+import type { HistoryLog, HistoryFilter, ActivityType } from '../../types/history';
 
 export function HistoryPage() {
   const [selectedLogId, setSelectedLogId] = useState<string | null>(null);
@@ -33,7 +33,7 @@ export function HistoryPage() {
     queryKey: ['workspaces'],
     queryFn: async () => {
       // Import workspaceService here to avoid circular deps
-      const { workspaceService } = await import('../services/workspaceService');
+      const { workspaceService } = await import('../../services/workspaceService');
       return workspaceService.getAll();
     },
   });

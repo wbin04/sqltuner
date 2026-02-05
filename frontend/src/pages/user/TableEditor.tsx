@@ -6,15 +6,15 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Save, Loader2, AlertCircle, Network } from 'lucide-react';
-import { cn } from '../lib/utils';
-import { useWorkspace } from '../hooks/useWorkspace';
-import { useUnsavedChangesWarning } from '../hooks/useUnsavedChangesWarning';
-import { SimulationSchema, SimulationTable, BackendTable } from '../types/simulation';
-import { workspaceService } from '../services/workspaceService';
-import { DbType } from '../types/workspace';
-import { TablesSidebar, StructureEditor, SampleDataEditor } from '../components/simulation';
-import { SchemaDiagramModal } from '../components/editor/diagram/SchemaDiagramModal';
-import { UnsavedChangesModal } from '../components/common/UnsavedChangesModal';
+import { cn } from '../../lib/utils';
+import { useWorkspace } from '../../hooks/useWorkspace';
+import { useUnsavedChangesWarning } from '../../hooks/useUnsavedChangesWarning';
+import { SimulationSchema, SimulationTable, BackendTable } from '../../types/simulation';
+import { workspaceService } from '../../services/workspaceService';
+import { DbType } from '../../types/workspace';
+import { TablesSidebar, StructureEditor, SampleDataEditor } from '../../components/simulation';
+import { SchemaDiagramModal } from '../../components/diagram/SchemaDiagramModal';
+import { UnsavedChangesModal } from '../../components/common/UnsavedChangesModal';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'react-toastify';
 
