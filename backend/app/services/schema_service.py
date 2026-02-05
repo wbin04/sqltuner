@@ -7,6 +7,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.core.constants import LOCALHOSTS
 from backend.app.core.exceptions import (AuthenticationError, NotFoundError,
                                          ValidationError)
 from backend.app.core.security import decrypt_password
@@ -21,7 +22,7 @@ class SchemaService:
 
     @staticmethod
     def _resolve_docker_host(host: str) -> str:
-        if host in ['localhost', '127.0.0.1']:
+        if host in LOCALHOSTS:
             return 'host.docker.internal'
         return host
 

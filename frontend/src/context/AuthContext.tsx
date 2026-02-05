@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import { isAxiosError } from 'axios';
+import axiosInstance from '../lib/axios';
 import { User, LoginResponse, AuthContextType } from '../types/auth';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -16,31 +17,26 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [isLoading, setIsLoading] = useState(true);
   const navigate = useNavigate();
 
-  // Check for existing token on mount
+  // Check for existing session on mount (cookie-based)
   useEffect(() => {
     const checkAuth = async () => {
-      const token = localStorage.getItem('access_token');
-      const storedUser = localStorage.getItem('user');
-
-      if (token && storedUser) {
-        try {
-          // Verify token is still valid by fetching user info
-          const response = await axios.get(`${API_URL}/auth/me`, {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          });
-          
-          setUser(response.data);
-        } catch (error) {
-          // Token is invalid, clear storage
-          localStorage.removeItem('access_token');
-          localStorage.removeItem('user');
-          setUser(null);
-        }
+      // Don't check auth if already on login page
+      if (window.location.pathname === '/login') {
+        setIsLoading(false);
+        setUser(null);
+        return;
       }
-      
-      setIsLoading(false);
+
+      try {
+        // Try to fetch user info - cookies are automatically sent
+        const response = await axiosInstance.get(`${API_URL}/auth/me`);
+        setUser(response.data);
+      } catch (error) {
+        // No valid session, user is not authenticated
+        setUser(null);
+      } finally {
+        setIsLoading(false);
+      }
     };
 
     checkAuth();
@@ -50,16 +46,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       setIsLoading(true);
       
-      const response = await axios.post<LoginResponse>(
+      const response = await axiosInstance.post<LoginResponse>(
         `${API_URL}/auth/login`,
         { email, password }
       );
 
-      const { access_token, user: userData } = response.data;
+      const { user: userData } = response.data;
 
-      // Store token and user data
-      localStorage.setItem('access_token', access_token);
-      localStorage.setItem('user', JSON.stringify(userData));
+      // Cookies are automatically set by the server
+      // Just update the user state
       setUser(userData);
 
       // Redirect based on role
@@ -69,7 +64,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         navigate('/workspaces');
       }
     } catch (error) {
-      if (axios.isAxiosError(error)) {
+      if (isAxiosError(error)) {
         throw new Error(error.response?.data?.detail || 'Login failed');
       }
       throw new Error('An unexpected error occurred');
@@ -78,13 +73,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   };
 
-  const logout = () => {
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('user');
-    localStorage.removeItem('userRole');
-    localStorage.removeItem('isAuthenticated');
-    setUser(null);
-    navigate('/login');
+  const logout = async () => {
+    try {
+      // Call logout endpoint to revoke session
+      await axiosInstance.post(`${API_URL}/auth/logout`);
+    } catch (error) {
+      console.error('Logout error:', error);
+    } finally {
+      // Clear user state regardless
+      setUser(null);
+      navigate('/login');
+    }
   };
 
   const value: AuthContextType = {

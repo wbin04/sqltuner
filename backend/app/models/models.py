@@ -1,7 +1,7 @@
 import enum
 import uuid
 
-from sqlalchemy import TIMESTAMP, Column
+from sqlalchemy import TIMESTAMP, Boolean, Column
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy import Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -14,6 +14,33 @@ from backend.app.db.base import Base
 class UserRole(str, enum.Enum):
     ADMIN = "admin"
     USER = "user"
+
+
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+
+    session_id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4
+    )
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    refresh_token = Column(String(500),
+                           nullable=False,
+                           index=True,
+                           unique=True)
+    user_agent = Column(String(500), nullable=True)
+    ip_address = Column(String(50), nullable=True)
+    expires_at = Column(TIMESTAMP(timezone=True), nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    is_revoked = Column(Boolean, default=False, nullable=False)
+
+    user = relationship("User", back_populates="sessions")
 
 
 class DBType(str, enum.Enum):
@@ -40,10 +67,15 @@ class User(Base):
             values_callable=lambda x: [
                 e.value for e in x]),
         default=UserRole.USER)
+    is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     db_connections = relationship(
         "DBConnection",
+        back_populates="user",
+        cascade="all, delete-orphan")
+    sessions = relationship(
+        "UserSession",
         back_populates="user",
         cascade="all, delete-orphan")
 
