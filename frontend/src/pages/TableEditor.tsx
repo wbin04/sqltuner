@@ -512,13 +512,34 @@ export function SchemaEditor() {
         onEditTable={handleEditTable}
         onSave={async (updatedSchema) => {
           // Transform back to internal schema format
-          const tableNameToIdMap = new Map(schema.tables.map(t => [t.name, t.id]));
+          // First pass: Create table ID map including both existing and new tables
+          const tableNameToIdMap = new Map<string, string>();
+          const tableIdToColumnsMap = new Map<string, Map<string, string>>();
+          
+          // Map existing tables
+          schema.tables.forEach(t => {
+            tableNameToIdMap.set(t.name, t.id);
+            const colMap = new Map(t.columns.map(c => [c.name, c.id]));
+            tableIdToColumnsMap.set(t.id, colMap);
+          });
+          
+          // Generate IDs for new tables
+          updatedSchema.tables.forEach(t => {
+            if (!tableNameToIdMap.has(t.name)) {
+              const newTableId = uuidv4();
+              tableNameToIdMap.set(t.name, newTableId);
+              // For new tables, we'll populate column IDs in the second pass
+              tableIdToColumnsMap.set(newTableId, new Map());
+            }
+          });
           
           // Process existing tables and new tables
           const processedTables: SimulationTable[] = [];
           
           for (const updatedTable of updatedSchema.tables) {
             const existingTable = schema.tables.find(t => t.name === updatedTable.name);
+            const tableId = tableNameToIdMap.get(updatedTable.name)!;
+            const columnIdMap = tableIdToColumnsMap.get(tableId)!;
             
             if (existingTable) {
               // Update existing table
@@ -549,14 +570,55 @@ export function SchemaEditor() {
               // Handle new columns added from diagram
               const newColumns = updatedTable.columns
                 .filter(col => !existingTable.columns.some(c => c.name === col.name))
-                .map(col => ({
-                  id: uuidv4(),
-                  name: col.name,
-                  type: col.type,
-                  is_pk: col.is_pk || false,
-                  is_nullable: col.is_nullable !== false, // default true
-                  fk_target: null,
-                }));
+                .map(col => {
+                  const colId = uuidv4();
+                  columnIdMap.set(col.name, colId);
+                  
+                  // Check if this new column has a foreign key
+                  const fkDef = updatedTable.foreign_keys?.find(fk => fk.column === col.name);
+                  let fk_target = null;
+                  
+                  if (fkDef) {
+                    const refTableId = tableNameToIdMap.get(fkDef.ref_table);
+                    let refColId: string | undefined;
+                    
+                    // Try to get ref column ID from existing table
+                    const refTable = schema.tables.find(t => t.id === refTableId);
+                    if (refTable) {
+                      refColId = refTable.columns.find(c => c.name === fkDef.ref_column)?.id;
+                    }
+                    
+                    // If ref table is also new, we need to get the column ID from the updated schema
+                    if (!refColId && refTableId) {
+                      const refUpdatedTable = updatedSchema.tables.find(t => t.name === fkDef.ref_table);
+                      if (refUpdatedTable) {
+                        // We'll need to generate the ID for the ref column if it doesn't exist yet
+                        const refTableColMap = tableIdToColumnsMap.get(refTableId);
+                        if (refTableColMap) {
+                          refColId = refTableColMap.get(fkDef.ref_column);
+                          if (!refColId) {
+                            // Generate ID for the referenced column
+                            refColId = uuidv4();
+                            refTableColMap.set(fkDef.ref_column, refColId);
+                          }
+                        }
+                      }
+                    }
+                    
+                    if (refTableId && refColId) {
+                      fk_target = { table_id: refTableId, column_id: refColId };
+                    }
+                  }
+                  
+                  return {
+                    id: colId,
+                    name: col.name,
+                    type: col.type,
+                    is_pk: col.is_pk || false,
+                    is_nullable: col.is_nullable !== false,
+                    fk_target,
+                  };
+                });
 
               // Handle removed columns
               const remainingColumns = columnsWithFKs.filter(col => 
@@ -569,17 +631,56 @@ export function SchemaEditor() {
               });
             } else {
               // New table created from diagram
-              processedTables.push({
-                id: uuidv4(),
-                name: updatedTable.name,
-                columns: updatedTable.columns.map(col => ({
-                  id: uuidv4(),
+              const newTableColumns = updatedTable.columns.map(col => {
+                const colId = uuidv4();
+                columnIdMap.set(col.name, colId);
+                
+                // Check if this column has a foreign key
+                const fkDef = updatedTable.foreign_keys?.find(fk => fk.column === col.name);
+                let fk_target = null;
+                
+                if (fkDef) {
+                  const refTableId = tableNameToIdMap.get(fkDef.ref_table);
+                  let refColId: string | undefined;
+                  
+                  // Try to get ref column ID from existing table
+                  const refTable = schema.tables.find(t => t.id === refTableId);
+                  if (refTable) {
+                    refColId = refTable.columns.find(c => c.name === fkDef.ref_column)?.id;
+                  }
+                  
+                  // If ref table is also new, get/generate the column ID
+                  if (!refColId && refTableId) {
+                    const refTableColMap = tableIdToColumnsMap.get(refTableId);
+                    if (refTableColMap) {
+                      refColId = refTableColMap.get(fkDef.ref_column);
+                      if (!refColId) {
+                        // Generate ID for the referenced column
+                        refColId = uuidv4();
+                        refTableColMap.set(fkDef.ref_column, refColId);
+                      }
+                    }
+                  }
+                  
+                  if (refTableId && refColId) {
+                    fk_target = { table_id: refTableId, column_id: refColId };
+                  }
+                }
+                
+                return {
+                  id: colId,
                   name: col.name,
                   type: col.type,
                   is_pk: col.is_pk || false,
                   is_nullable: col.is_nullable !== false,
-                  fk_target: null,
-                })),
+                  fk_target,
+                };
+              });
+              
+              processedTables.push({
+                id: tableId,
+                name: updatedTable.name,
+                columns: newTableColumns,
                 indexes: (updatedTable as any).indexes || [],
                 sample_data: (updatedTable as any).sample_data || [],
               });
