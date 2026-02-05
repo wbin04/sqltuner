@@ -1,6 +1,8 @@
 import { Table2, Download } from 'lucide-react';
+import { useState } from 'react';
 import { cn } from '../../lib/utils';
 import type { QueryResult } from '../../types';
+import { JSONViewerModal } from './JSONViewerModal';
 
 interface ResultsGridProps {
   result: QueryResult | null;
@@ -8,6 +10,8 @@ interface ResultsGridProps {
 }
 
 export function ResultsGrid({ result, loading = false }: ResultsGridProps) {
+  const [jsonViewerData, setJsonViewerData] = useState<{ data: any; column: string } | null>(null);
+
   if (loading) {
     return (
       <div className="h-full flex items-center justify-center">
@@ -40,10 +44,16 @@ export function ResultsGrid({ result, loading = false }: ResultsGridProps) {
         result.columns.map(col => {
           const value = row[col];
           if (value === null || value === undefined) return '';
-          if (typeof value === 'string' && value.includes(',')) {
-            return `"${value.replace(/"/g, '""')}"`;
+          
+          // Handle objects (JSON/JSONB)
+          const stringValue = typeof value === 'object' 
+            ? JSON.stringify(value)
+            : String(value);
+          
+          if (stringValue.includes(',') || stringValue.includes('"') || stringValue.includes('\n')) {
+            return `"${stringValue.replace(/"/g, '""')}"`;
           }
-          return value;
+          return stringValue;
         }).join(',')
       )
     ].join('\n');
@@ -60,7 +70,7 @@ export function ResultsGrid({ result, loading = false }: ResultsGridProps) {
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="px-4 py-3 bg-surface-light dark:bg-midnight-900 border-b border-border-DEFAULT dark:border-midnight-800 flex items-center justify-between">
+      <div className="px-4 py-3 bg-surface-light dark:bg-midnight-900 border-b border-border-DEFAULT dark:border-midnight-800 flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-3">
           <span className="text-sm font-medium text-text-main-DEFAULT dark:text-text-main-dark">
             {result.rowCount} {result.rowCount === 1 ? 'row' : 'rows'}
@@ -80,25 +90,27 @@ export function ResultsGrid({ result, loading = false }: ResultsGridProps) {
         </button>
       </div>
 
-      {/* Table */}
-      <div className="flex-1 overflow-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-surface-light dark:bg-midnight-900 sticky top-0 z-10">
-            <tr>
-              <th className="px-4 py-2 text-left text-xs font-medium text-text-muted-DEFAULT dark:text-text-muted-dark uppercase tracking-wider border-b border-border-DEFAULT dark:border-midnight-800 w-12">
-                #
-              </th>
-              {result.columns.map((col, idx) => (
-                <th
-                  key={idx}
-                  className="px-4 py-2 text-left text-xs font-medium text-text-muted-DEFAULT dark:text-text-muted-dark uppercase tracking-wider border-b border-border-DEFAULT dark:border-midnight-800"
-                >
-                  {col}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border-DEFAULT dark:divide-midnight-800">
+      {/* Table - Scrollable container */}
+      <div className="flex-1 overflow-x-auto">
+        <div className="inline-block min-w-full">
+          <div className="overflow-y-auto" style={{ maxHeight: 'calc(100vh - 250px)' }}>
+            <table className="min-w-full text-sm">
+              <thead className="bg-surface-light dark:bg-midnight-900 sticky top-0 z-10">
+                <tr>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-text-muted-DEFAULT dark:text-text-muted-dark uppercase tracking-wider border-b border-border-DEFAULT dark:border-midnight-800 w-12">
+                    #
+                  </th>
+                  {result.columns.map((col, idx) => (
+                    <th
+                      key={idx}
+                      className="px-4 py-2 text-left text-xs font-medium text-text-muted-DEFAULT dark:text-text-muted-dark uppercase tracking-wider border-b border-border-DEFAULT dark:border-midnight-800"
+                    >
+                      {col}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border-DEFAULT dark:divide-midnight-800">
             {result.rows.map((row, rowIdx) => (
               <tr
                 key={rowIdx}
@@ -110,25 +122,56 @@ export function ResultsGrid({ result, loading = false }: ResultsGridProps) {
                 {result.columns.map((col, colIdx) => {
                   const value = row[col];
                   const isNull = value === null || value === undefined;
+                  
+                  // Check if value is an object/array (JSON data)
+                  const isObject = !isNull && typeof value === 'object';
+                  const displayValue = isNull 
+                    ? 'NULL' 
+                    : isObject 
+                      ? JSON.stringify(value) // Single line for display
+                      : String(value);
+                  
+                  const tooltipValue = isNull 
+                    ? 'NULL' 
+                    : isObject 
+                      ? 'Click to view JSON'
+                      : String(value);
 
                   return (
                     <td
                       key={colIdx}
                       className={cn(
-                        'px-4 py-2 font-mono text-xs max-w-md truncate',
-                        isNull ? 'text-text-muted-DEFAULT dark:text-text-muted-dark italic' : 'text-text-main-DEFAULT dark:text-text-main-dark'
+                        'px-4 py-2 font-mono text-xs',
+                        'max-w-xs truncate', // Fixed max width with truncate
+                        isNull ? 'text-text-muted-DEFAULT dark:text-text-muted-dark italic' : 'text-text-main-DEFAULT dark:text-text-main-dark',
+                        isObject && 'cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:text-blue-600 dark:hover:text-blue-400'
                       )}
-                      title={isNull ? 'NULL' : String(value)}
+                      title={tooltipValue}
+                      onClick={() => {
+                        if (isObject) {
+                          setJsonViewerData({ data: value, column: col });
+                        }
+                      }}
                     >
-                      {isNull ? 'NULL' : String(value)}
+                      {displayValue}
                     </td>
                   );
                 })}
               </tr>
             ))}
-          </tbody>
-        </table>
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
+
+      {/* JSON Viewer Modal */}
+      <JSONViewerModal
+        isOpen={jsonViewerData !== null}
+        onClose={() => setJsonViewerData(null)}
+        jsonData={jsonViewerData?.data}
+        columnName={jsonViewerData?.column}
+      />
     </div>
   );
 }
