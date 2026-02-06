@@ -218,3 +218,10 @@ class PerformanceAnalysis(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     query_log = relationship("QueryLog", back_populates="performance_analysis")
+
+
+class AppConfig(Base):
+    __tablename__ = "app_config"
+
+    key = Column(String(255), primary_key=True)
+    value = Column(Text, nullable=True)

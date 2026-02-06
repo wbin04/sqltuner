@@ -3,23 +3,13 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from backend.app.core.config import settings
-from backend.app.db.base import Base
-
-# from backend.app.models.models import (
-#     User,
-#     DBConnection,
-#     Conversation,
-#     QueryLog,
-#     Feedback,
-#     PerformanceAnalysis,
-# )
+from app.core.config import settings
+from app.db.base import Base
 
 config = context.config
 
 database_url = settings.DATABASE_URL or settings.SQLALCHEMY_DATABASE_URL
 if database_url:
-    # Replace asyncpg with psycopg2 for Alembic
     sync_url = database_url.replace("postgresql+asyncpg://", "postgresql://")
     config.set_main_option("sqlalchemy.url", sync_url)
 

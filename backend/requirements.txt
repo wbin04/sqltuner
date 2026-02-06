@@ -19,3 +19,5 @@ itsdangerous==2.1.2
 sqlparse==0.4.4
 sqlglot==23.0.0
 faker==24.0.0
+pydantic-2.12.5
+pydantic-core-2.41.5
