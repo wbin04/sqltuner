@@ -15,7 +15,7 @@ Khi chuyển từ Postgres local sang Supabase, bạn gặp lỗi khi run query:
 
 ## Giải pháp đã fix
 
-### 1. SSL Support cho Supabase ✅
+### 1. SSL Support cho Supabase
 
 Code đã được cập nhật để tự động thêm `?sslmode=require` cho:
 - Connections có host chứa "supabase"
@@ -63,7 +63,7 @@ Thêm logging để debug:
 
 4. **Test connection** bằng cách sync schema
 
-5. **Run query** - Should work now! ✅
+5. **Run query** - Should work now!
 
 ### Option 2: Test Connection First
 
@@ -110,7 +110,7 @@ Nếu thấy error:
 **Solution**: Delete connection and recreate it
 
 ### Issue 2: "SSL required"
-**Solution**: ✅ Fixed! Code tự động thêm `?sslmode=require`
+**Solution**: Fixed! Code tự động thêm `?sslmode=require`
 
 ### Issue 3: "Connection timeout"
 **Solution**: 
@@ -156,11 +156,11 @@ Frontend → Backend → Supabase Postgres (execute with SSL) ← Now works!
 
 ## Notes
 
-- ✅ SIMULATION mode vẫn hoạt động bình thường
-- ✅ Có thể mix SIMULATION và real connections
-- ✅ SSL được tự động thêm cho cloud providers
-- ✅ Password encryption được handle gracefully
-- ✅ Localhost connections vẫn work như cũ
+- SIMULATION mode vẫn hoạt động bình thường
+- Có thể mix SIMULATION và real connections
+- SSL được tự động thêm cho cloud providers
+- Password encryption được handle gracefully
+- Localhost connections vẫn work như cũ
 
 ## Troubleshooting Commands
 
