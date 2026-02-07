@@ -106,7 +106,7 @@ gcloud run deploy $SERVICE_NAME `
     --platform managed `
     --region $REGION `
     --allow-unauthenticated `
-    --memory 512Mi `
+    --memory 2Gi `
     --cpu 1 `
     --port 8080 `
     --set-env-vars="$envVarsString"

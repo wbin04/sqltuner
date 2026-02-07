@@ -222,11 +222,28 @@ class TableSchemaBuilder:
         conn: Connection, table_name: str, columns: List[Dict[str, Any]]
     ) -> None:
         if not table_name or not columns:
+            logger.warning(
+                f"[SANDBOX] Skipping table creation: "
+                f"table_name={table_name}, "
+                f"columns_count={len(columns) if columns else 0}"
+            )
             return
 
         logger.info(
             f"[SANDBOX] Creating '{table_name}' with {len(columns)} cols"
         )
+
+        for idx, col in enumerate(columns):
+            if not isinstance(col, dict):
+                raise ValidationError(
+                    f"Column {idx} in table '{table_name}' is not a "
+                    f"dict: {type(col)}"
+                )
+            if 'name' not in col:
+                raise ValidationError(
+                    f"Column {idx} in table '{table_name}' missing "
+                    f"'name' field"
+                )
 
         col_defs, primary_keys = TableSchemaBuilder._build_column_definitions(
             columns
@@ -338,8 +355,10 @@ class DataSeeder:
             f'"{c}"' for c in columns_list
         )
         vals_str = ", ".join(values_list)
+        # Use INSERT OR IGNORE to skip duplicate rows
         insert_stmt = (
-            f'INSERT INTO "{table_name}" ({cols_str}) VALUES ({vals_str});'
+            f'INSERT OR IGNORE INTO "{table_name}" '
+            f'({cols_str}) VALUES ({vals_str});'
         )
 
         conn.execute(text(insert_stmt))
@@ -366,6 +385,16 @@ class SimulationExecutor:
         sql_query: str,
         sample_data: Optional[Dict[str, List[Dict]]] = None,
     ) -> Dict[str, Any]:
+        logger.info(
+            f"[SANDBOX] Starting execution with query: "
+            f"{sql_query[:100]}..."
+        )
+        logger.debug(f"[SANDBOX] meta_schema type: {type(meta_schema)}")
+        if isinstance(meta_schema, dict):
+            logger.debug(
+                f"[SANDBOX] meta_schema keys: {list(meta_schema.keys())}"
+            )
+
         engine = create_engine(
             "sqlite:///:memory:",
             connect_args={"check_same_thread": False},
@@ -378,6 +407,9 @@ class SimulationExecutor:
                 logger.info(
                     f"[SANDBOX] Creating {len(tables)} tables in sandbox"
                 )
+
+                if not tables:
+                    logger.warning("[SANDBOX] No tables found in meta_schema")
 
                 # Create tables
                 for table in tables:

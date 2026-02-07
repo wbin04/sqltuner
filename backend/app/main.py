@@ -7,6 +7,7 @@ from app.core.exceptions import (AuthenticationError, DatabaseConnectionError,
                                  ExecutionError, LLMServiceError,
                                  NotFoundError, PermissionDeniedError,
                                  ValidationError)
+from app.db.session import AsyncSessionLocal
 from app.schemas.sql import HealthResponse
 from app.services.llm_service import llm_service
 from fastapi import FastAPI, Request
@@ -131,10 +132,24 @@ async def execution_error_handler(
 
 @app.on_event("startup")
 async def startup_event():
-    """Run model warm-up on startup to avoid cold start delays"""
     logger.info("Running startup tasks...")
+
+    try:
+        if settings.ENABLE_DATABASE and AsyncSessionLocal:
+            async with AsyncSessionLocal() as db:
+                await llm_service.fetch_and_update_url_from_db(db)
+                logger.info("[STARTUP] LLM URL loaded from database")
+        else:
+            logger.info(
+                "[STARTUP] Database disabled, using default LLM URL"
+            )
+    except Exception as e:
+        logger.warning(
+            f"[STARTUP] Could not load LLM URL from database: {e}"
+        )
+
     asyncio.create_task(llm_service.warmup_models())
-    logger.info("Startup tasks initiated")
+    logger.info("Startup tasks completed")
 
 
 @app.get("/health", response_model=HealthResponse)

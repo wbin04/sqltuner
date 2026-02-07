@@ -5,6 +5,8 @@ import traceback
 
 from app.api.v1.endpoints.auth import get_current_user
 from app.core.config import settings
+from app.core.constants import SQL_CONNECTION_TIMEOUT, SQL_EXECUTION_TIMEOUT
+from app.core.exceptions import ExecutionError, ValidationError
 from app.core.security import decrypt_password
 from app.db.session import get_db
 from app.models.models import DBType, User
@@ -77,13 +79,41 @@ def run_sandbox_execution(
     )
     logger.info(f"[SANDBOX] SQL: {request.sql}")
 
+    # Validate meta_schema exists
     if not connection.meta_schema:
+        logger.error(
+            f"[SANDBOX ERROR] connection.meta_schema is None or empty for "
+            f"connection {connection.id}"
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="SIMULATION connection requires meta_schema."
-            "Please sync schema first.")
+            detail="SIMULATION connection requires meta_schema. "
+            "Please sync schema first."
+        )
 
-    tables_count = len(connection.meta_schema.get('tables', []))
+    # Validate meta_schema structure
+    if not isinstance(connection.meta_schema, dict):
+        logger.error(
+            f"[SANDBOX ERROR] meta_schema is not a dict: "
+            f"{type(connection.meta_schema)}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid meta_schema format. Expected dictionary."
+        )
+
+    tables = connection.meta_schema.get('tables', [])
+    if not isinstance(tables, list):
+        logger.error(
+            f"[SANDBOX ERROR] meta_schema.tables is not a list: "
+            f"{type(tables)}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid meta_schema.tables format. Expected list."
+        )
+
+    tables_count = len(tables)
     logger.info(f"[SANDBOX] Tables in meta_schema: {tables_count}")
 
     try:
@@ -116,12 +146,30 @@ def run_sandbox_execution(
             truncated=truncated,
             max_rows=settings.SANDBOX_MAX_ROWS
         )
+    except ValidationError as e:
+        error_msg = f"Validation error: {str(e)}"
+        logger.error(f"[SANDBOX ERROR] {error_msg}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error_msg
+        )
+    except ExecutionError as e:
+        error_msg = f"Execution error: {str(e)}"
+        logger.error(f"[SANDBOX ERROR] {error_msg}")
+        logger.error(f"[SANDBOX ERROR] Traceback: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error_msg
+        )
     except Exception as e:
         error_detail = (
             f"Sandbox execution error: {str(e)}\n"
-            f"{traceback.format_exc()}"
+            f"Type: {type(e).__name__}"
         )
         logger.error(f"[SANDBOX ERROR] {error_detail}")
+        logger.error(
+            f"[SANDBOX ERROR] Full traceback:\n{traceback.format_exc()}"
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=error_detail
@@ -161,10 +209,26 @@ async def execute_sql(
             f"[LIVE] Creating engine for {connection.db_type.value} database: "
             f"{connection.host}:{connection.port}/{connection.db_name}"
         )
+
+        connect_args = {}
+        if connection.db_type.value == "postgresql":
+            timeout_ms = SQL_EXECUTION_TIMEOUT * 1000
+            connect_args = {
+                "connect_timeout": SQL_CONNECTION_TIMEOUT,
+                "options": f"-c statement_timeout={timeout_ms}"
+            }
+        elif connection.db_type.value == "mysql":
+            connect_args = {
+                "connect_timeout": SQL_CONNECTION_TIMEOUT,
+            }
+
         engine = create_engine(
             conn_string,
             pool_pre_ping=True,
-            pool_recycle=3600)
+            pool_recycle=3600,
+            connect_args=connect_args,
+            pool_timeout=SQL_CONNECTION_TIMEOUT
+        )
     except Exception as e:
         logger.error(
             f"[LIVE ERROR] Failed to create database connection: {str(e)}\n"
@@ -183,6 +247,15 @@ async def execute_sql(
         logger.info("[LIVE] Running query on real database...")
 
         with engine.connect() as conn:
+            if connection.db_type.value == "mysql":
+                timeout_sec = SQL_EXECUTION_TIMEOUT
+                conn.execute(
+                    text(
+                        "SET SESSION max_execution_time = "
+                        f"{timeout_sec * 1000}"
+                    )
+                )
+
             query_start = time.time()
             result = simulation_executor.execute_in_real_db(
                 conn, request.sql)
@@ -224,12 +297,31 @@ async def execute_sql(
     except Exception as e:
         if engine:
             engine.dispose()
-        error_detail = (
-            f"SQL execution error on {connection.db_type.value} database: "
-            f"{str(e)}"
-        )
-        logger.error(
-            f"[LIVE ERROR] {error_detail}\n{traceback.format_exc()}"
+
+        error_str = str(e).lower()
+        error_type = type(e).__name__
+
+        if "timeout" in error_str or "time" in error_str:
+            error_detail = (
+                f"Query execution timeout on {connection.db_type.value} "
+                f"database. Limit: {SQL_EXECUTION_TIMEOUT}s. "
+                f"Error: {str(e)}"
+            )
+            logger.error(
+                f"[LIVE ERROR - TIMEOUT] {error_detail}\n"
+                f"{traceback.format_exc()}"
+            )
+        else:
+            error_detail = (
+                f"SQL execution error on {connection.db_type.value} "
+                f"database ({error_type}): {str(e)}"
+            )
+            logger.error(
+                f"[LIVE ERROR] {error_detail}\n{traceback.format_exc()}"
+            )
+
+        logger.info(
+            "[LIVE] Falling back to sandbox execution due to error"
         )
         return run_sandbox_execution(connection, request)
 
@@ -475,3 +567,26 @@ async def explain_sql_text(request: SQLExplainRequest):
     except Exception as e:
         raise HTTPException(status_code=500,
                             detail=f"Explanation failed: {str(e)}")
+
+
+@router.post("/refresh-llm-url")
+async def refresh_llm_url(
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Refresh LLM base URL from database.
+    Useful when ngrok URL changes.
+    """
+    try:
+        await llm_service.fetch_and_update_url_from_db(db)
+        return {
+            "success": True,
+            "message": "LLM URL refreshed successfully",
+            "current_url": llm_service.base_url
+        }
+    except Exception as e:
+        logger.error(f"Failed to refresh LLM URL: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to refresh LLM URL: {str(e)}"
+        )
