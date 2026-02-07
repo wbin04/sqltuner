@@ -3,10 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { isAxiosError } from 'axios';
 import axiosInstance from '../lib/axios';
 import { User, LoginResponse, AuthContextType } from '../types/auth';
+import { API_URL } from '../config';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 interface AuthProviderProps {
   children: ReactNode;

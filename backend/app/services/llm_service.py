@@ -7,14 +7,13 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 import sqlglot
+from app.core.config import settings
+from app.core.constants import LLM_REQUEST_TIMEOUT
+from app.core.exceptions import LLMServiceError
+from app.core.prompts import (SQL_OPTIMIZATION_SYSTEM_PROMPT,
+                              get_sql_explanation_prompt,
+                              get_sql_optimization_prompt)
 from sqlglot import exp
-
-from backend.app.core.config import settings
-from backend.app.core.constants import LLM_REQUEST_TIMEOUT
-from backend.app.core.exceptions import LLMServiceError
-from backend.app.core.prompts import (SQL_OPTIMIZATION_SYSTEM_PROMPT,
-                                      get_sql_explanation_prompt,
-                                      get_sql_optimization_prompt)
 
 logger = logging.getLogger(__name__)
 

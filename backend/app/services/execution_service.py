@@ -4,10 +4,9 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import sqlparse
+from app.core.exceptions import ExecutionError, ValidationError
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection
-
-from backend.app.core.exceptions import ExecutionError, ValidationError
 
 logger = logging.getLogger(__name__)
 

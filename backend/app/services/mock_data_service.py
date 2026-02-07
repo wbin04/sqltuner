@@ -4,29 +4,24 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
+from app.core.constants import (MOCK_DATA_AGE_MAX, MOCK_DATA_AGE_MIN,
+                                MOCK_DATA_AUTO_PARENT_ROWS,
+                                MOCK_DATA_BIGINT_MAX, MOCK_DATA_BINARY_LENGTH,
+                                MOCK_DATA_DEFAULT_LOCALE,
+                                MOCK_DATA_DESCRIPTION_MAX_CHARS,
+                                MOCK_DATA_FLOAT_MAX, MOCK_DATA_FLOAT_MIN,
+                                MOCK_DATA_INT_MAX, MOCK_DATA_INT_MIN,
+                                MOCK_DATA_MONEY_MAX, MOCK_DATA_PRICE_MAX,
+                                MOCK_DATA_PRICE_MIN,
+                                MOCK_DATA_RECURSION_MAX_DEPTH,
+                                MOCK_DATA_SERIAL_MIN, MOCK_DATA_SMALLINT_MAX,
+                                MOCK_DATA_TEXT_LONG_SENTENCES,
+                                MOCK_DATA_TEXT_SHORT_SENTENCES,
+                                MOCK_DATA_TINYINT_MAX, MOCK_DATA_TITLE_WORDS,
+                                MOCK_DATA_VARCHAR_ABSOLUTE_MAX,
+                                MOCK_DATA_VARCHAR_DEFAULT_MAX,
+                                MOCK_DATA_VARCHAR_SHORT_THRESHOLD)
 from faker import Faker
-
-from backend.app.core.constants import (MOCK_DATA_AGE_MAX, MOCK_DATA_AGE_MIN,
-                                        MOCK_DATA_AUTO_PARENT_ROWS,
-                                        MOCK_DATA_BIGINT_MAX,
-                                        MOCK_DATA_BINARY_LENGTH,
-                                        MOCK_DATA_DEFAULT_LOCALE,
-                                        MOCK_DATA_DESCRIPTION_MAX_CHARS,
-                                        MOCK_DATA_FLOAT_MAX,
-                                        MOCK_DATA_FLOAT_MIN, MOCK_DATA_INT_MAX,
-                                        MOCK_DATA_INT_MIN, MOCK_DATA_MONEY_MAX,
-                                        MOCK_DATA_PRICE_MAX,
-                                        MOCK_DATA_PRICE_MIN,
-                                        MOCK_DATA_RECURSION_MAX_DEPTH,
-                                        MOCK_DATA_SERIAL_MIN,
-                                        MOCK_DATA_SMALLINT_MAX,
-                                        MOCK_DATA_TEXT_LONG_SENTENCES,
-                                        MOCK_DATA_TEXT_SHORT_SENTENCES,
-                                        MOCK_DATA_TINYINT_MAX,
-                                        MOCK_DATA_TITLE_WORDS,
-                                        MOCK_DATA_VARCHAR_ABSOLUTE_MAX,
-                                        MOCK_DATA_VARCHAR_DEFAULT_MAX,
-                                        MOCK_DATA_VARCHAR_SHORT_THRESHOLD)
 
 logger = logging.getLogger(__name__)
 

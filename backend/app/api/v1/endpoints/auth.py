@@ -1,27 +1,21 @@
 from datetime import datetime, timedelta, timezone
 
+from app.core.config import settings
+from app.core.constants import (AUTH_PROVIDER_EMAIL, AUTH_PROVIDER_GOOGLE,
+                                GOOGLE_OAUTH_METADATA_URL, GOOGLE_OAUTH_SCOPES)
+from app.core.security import (create_access_token, create_refresh_token,
+                               decode_access_token, verify_password)
+from app.db.session import get_db
+from app.models.models import User
+from app.repositories.user_repository import user_repository
+from app.repositories.user_session_repository import user_session_repository
+from app.schemas.token import (LoginRequest, LoginResponse, LogoutResponse,
+                               RefreshResponse, UserResponse)
 from authlib.integrations.starlette_client import OAuth
 from fastapi import (APIRouter, Depends, HTTPException, Request, Response,
                      status)
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import RedirectResponse
-
-from backend.app.core.config import settings
-from backend.app.core.constants import (AUTH_PROVIDER_EMAIL,
-                                        AUTH_PROVIDER_GOOGLE,
-                                        GOOGLE_OAUTH_METADATA_URL,
-                                        GOOGLE_OAUTH_SCOPES)
-from backend.app.core.security import (create_access_token,
-                                       create_refresh_token,
-                                       decode_access_token, verify_password)
-from backend.app.db.session import get_db
-from backend.app.models.models import User
-from backend.app.repositories.user_repository import user_repository
-from backend.app.repositories.user_session_repository import \
-    user_session_repository
-from backend.app.schemas.token import (LoginRequest, LoginResponse,
-                                       LogoutResponse, RefreshResponse,
-                                       UserResponse)
 
 router = APIRouter()
 

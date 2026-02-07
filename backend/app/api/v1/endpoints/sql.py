@@ -3,26 +3,23 @@ import logging
 import time
 import traceback
 
+from app.api.v1.endpoints.auth import get_current_user
+from app.core.config import settings
+from app.core.security import decrypt_password
+from app.db.session import get_db
+from app.models.models import DBType, User
+from app.repositories.connection_repository import connection_repository
+from app.schemas.sql import (SQLExecuteRequest, SQLExecuteResponse,
+                             SQLExplainPlanRequest, SQLExplainPlanResponse,
+                             SQLExplainRequest, SQLExplainResponse,
+                             SQLOptimizeRequest, SQLOptimizeResponse)
+from app.services.execution_service import simulation_executor
+from app.services.llm_service import llm_service
+from app.services.optimization_service import (ConnectionStringBuilder,
+                                               optimization_service)
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from backend.app.api.v1.endpoints.auth import get_current_user
-from backend.app.core.config import settings
-from backend.app.core.security import decrypt_password
-from backend.app.db.session import get_db
-from backend.app.models.models import DBType, User
-from backend.app.repositories.connection_repository import \
-    connection_repository
-from backend.app.schemas.sql import (SQLExecuteRequest, SQLExecuteResponse,
-                                     SQLExplainPlanRequest,
-                                     SQLExplainPlanResponse, SQLExplainRequest,
-                                     SQLExplainResponse, SQLOptimizeRequest,
-                                     SQLOptimizeResponse)
-from backend.app.services.execution_service import simulation_executor
-from backend.app.services.llm_service import llm_service
-from backend.app.services.optimization_service import (ConnectionStringBuilder,
-                                                       optimization_service)
 
 logger = logging.getLogger(__name__)
 

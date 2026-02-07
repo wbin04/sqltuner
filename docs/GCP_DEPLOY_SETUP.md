@@ -21,8 +21,8 @@ Tài liệu này hướng dẫn setup và deploy dự án **SQLTuner** lên **Go
 # Đăng nhập GCP
 gcloud auth login
 
-# Thiết lập project ID (thay YOUR_PROJECT_ID bằng project ID thực)
-gcloud config set project YOUR_PROJECT_ID
+# Thiết lập project ID (thay sqltuner bằng project ID thực)
+gcloud config set project sqltuner
 
 # Kích hoạt các API cần thiết
 gcloud services enable run.googleapis.com
@@ -72,7 +72,7 @@ GOOGLE_CLIENT_SECRET=your_google_client_secret
 cd backend
 
 # Build và push image
-gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/sqltuner-backend:latest .
+gcloud builds submit --tag gcr.io/sqltuner/sqltuner-backend:latest .
 ```
 
 ### 3. Tạo Secrets trong GCP
@@ -91,7 +91,7 @@ gcloud secrets create encryption-key --data-file=-
 
 ```bash
 gcloud run deploy sqltuner-backend \
-  --image gcr.io/YOUR_PROJECT_ID/sqltuner-backend:latest \
+  --image gcr.io/sqltuner/sqltuner-backend:latest \
   --platform managed \
   --region asia-southeast1 \
   --allow-unauthenticated \
@@ -135,19 +135,19 @@ cd frontend
 # Build với API URL
 docker build \
   --build-arg VITE_API_BASE_URL=$BACKEND_URL \
-  -t gcr.io/YOUR_PROJECT_ID/sqltuner-frontend:latest \
+  -t gcr.io/sqltuner/sqltuner-frontend:latest \
   -f Dockerfile.prod \
   .
 
 # Push lên Google Container Registry
-docker push gcr.io/YOUR_PROJECT_ID/sqltuner-frontend:latest
+docker push gcr.io/sqltuner/sqltuner-frontend:latest
 ```
 
 ### 3. Deploy Frontend lên Cloud Run
 
 ```bash
 gcloud run deploy sqltuner-frontend \
-  --image gcr.io/YOUR_PROJECT_ID/sqltuner-frontend:latest \
+  --image gcr.io/sqltuner/sqltuner-frontend:latest \
   --platform managed \
   --region asia-southeast1 \
   --allow-unauthenticated \
@@ -299,8 +299,8 @@ gcloud run services delete sqltuner-backend --region asia-southeast1
 gcloud run services delete sqltuner-frontend --region asia-southeast1
 
 # Xóa images
-gcloud container images delete gcr.io/YOUR_PROJECT_ID/sqltuner-backend:latest
-gcloud container images delete gcr.io/YOUR_PROJECT_ID/sqltuner-frontend:latest
+gcloud container images delete gcr.io/sqltuner/sqltuner-backend:latest
+gcloud container images delete gcr.io/sqltuner/sqltuner-frontend:latest
 
 # Xóa secrets
 gcloud secrets delete database-url

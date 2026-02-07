@@ -1,14 +1,13 @@
 import enum
 import uuid
 
+from app.db.base import Base
 from sqlalchemy import TIMESTAMP, Boolean, Column
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy import Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-
-from backend.app.db.base import Base
 
 
 class UserRole(str, enum.Enum):

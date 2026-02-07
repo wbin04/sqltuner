@@ -6,6 +6,7 @@ import { Link } from 'react-router-dom';
 import { Mail, Lock, Eye, EyeOff, Zap, Loader2, AlertCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useAuth } from '../context/AuthContext';
+import { API_URL } from '../config';
 
 // Validation Schema
 const loginSchema = z.object({
@@ -207,8 +208,7 @@ export function LoginPage() {
             <button
               type="button"
               onClick={() => {
-                const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-                window.location.href = `${apiUrl}/auth/login/google`;
+                window.location.href = `${API_URL}/auth/login/google`;
               }}
               className={cn(
                 'w-full mt-4 rounded-lg py-3 px-4 font-medium transition-all',

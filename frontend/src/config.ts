@@ -1,0 +1,2 @@
+// Production API configuration
+export const API_URL = import.meta.env.VITE_API_URL || 'https://sqltuner-backend-834344415984.asia-southeast1.run.app/api/v1';

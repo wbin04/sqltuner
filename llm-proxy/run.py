@@ -40,7 +40,8 @@ def init_tunnel():
     try:
         ngrok.set_auth_token(NGROK_AUTH_TOKEN)
 
-        tunnel = ngrok.connect(11434, bind_tls=True)
+        # tunnel = ngrok.connect(11434, bind_tls=True)
+        tunnel = ngrok.connect(11434, bind_tls=True, host_header="rewrite")
         public_url = tunnel.public_url
         
         print(f"\n{'='*50}")

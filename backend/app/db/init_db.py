@@ -1,11 +1,10 @@
 import asyncio
 import sys
 
+from app.core.security import get_password_hash
+from app.db.session import AsyncSessionLocal
+from app.models.models import User, UserRole
 from sqlalchemy import select
-
-from backend.app.core.security import get_password_hash
-from backend.app.db.session import AsyncSessionLocal
-from backend.app.models.models import User, UserRole
 
 
 async def init_db():

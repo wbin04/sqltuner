@@ -24,14 +24,14 @@ alembic upgrade head || echo "Migration failed or not configured yet"
 cd /app
 
 echo "Seeding initial database data..."
-python -m backend.app.db.init_db || echo "Database seeding failed or already completed"
+python -m app.db.init_db || echo "Database seeding failed or already completed"
 
 echo "Starting FastAPI application..."
 # Check if DEV_MODE is enabled
 if [ "${DEV_MODE}" = "true" ]; then
   echo "Running in development mode with auto-reload..."
-  exec uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
+  exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 else
   echo "Running in production mode..."
-  exec uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
+  exec uvicorn app.main:app --host 0.0.0.0 --port 8000
 fi

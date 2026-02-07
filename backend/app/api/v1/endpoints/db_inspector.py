@@ -1,9 +1,8 @@
+from app.core.config import settings
+from app.db.session import get_db
+from app.schemas.sql import DatabaseSchemaResponse
+from app.services.inspector_service import inspector_service
 from fastapi import APIRouter, Depends, HTTPException
-
-from backend.app.core.config import settings
-from backend.app.db.session import get_db
-from backend.app.schemas.sql import DatabaseSchemaResponse
-from backend.app.services.inspector_service import inspector_service
 
 router = APIRouter()
 

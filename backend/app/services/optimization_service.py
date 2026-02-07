@@ -6,16 +6,15 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 from uuid import UUID
 
+from app.core.constants import LOCALHOSTS
+from app.core.exceptions import NotFoundError, ValidationError
+from app.core.security import decrypt_password
+from app.models.models import (Conversation, DBConnection, DBType,
+                               PerformanceAnalysis, QueryLog)
+from app.services.llm_service import llm_service
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-
-from backend.app.core.constants import LOCALHOSTS
-from backend.app.core.exceptions import NotFoundError, ValidationError
-from backend.app.core.security import decrypt_password
-from backend.app.models.models import (Conversation, DBConnection, DBType,
-                                       PerformanceAnalysis, QueryLog)
-from backend.app.services.llm_service import llm_service
 
 logger = logging.getLogger(__name__)
 

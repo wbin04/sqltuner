@@ -1,7 +1,7 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
+import { API_URL } from '../config';
 
-// Get API URL from environment variable
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// API URL from config
 
 // Track if we're already redirecting to prevent infinite loops
 let isRedirecting = false;

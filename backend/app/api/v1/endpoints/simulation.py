@@ -1,10 +1,9 @@
 import logging
 from typing import Any, Dict, List
 
+from app.services.mock_data_service import MockDataService
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
-
-from backend.app.services.mock_data_service import MockDataService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)

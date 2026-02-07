@@ -1,12 +1,11 @@
 from typing import List, Optional
 from uuid import UUID
 
+from app.models.models import ChatRole, QueryLog
+from app.repositories.base import BaseRepository
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from backend.app.models.models import ChatRole, QueryLog
-from backend.app.repositories.base import BaseRepository
 
 
 class QueryLogCreate(BaseModel):

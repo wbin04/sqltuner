@@ -1,20 +1,18 @@
 import asyncio
 import logging
 
+from app.api.v1.api import api_router
+from app.core.config import settings
+from app.core.exceptions import (AuthenticationError, DatabaseConnectionError,
+                                 ExecutionError, LLMServiceError,
+                                 NotFoundError, PermissionDeniedError,
+                                 ValidationError)
+from app.schemas.sql import HealthResponse
+from app.services.llm_service import llm_service
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
-
-from backend.app.api.v1.api import api_router
-from backend.app.core.config import settings
-from backend.app.core.exceptions import (AuthenticationError,
-                                         DatabaseConnectionError,
-                                         ExecutionError, LLMServiceError,
-                                         NotFoundError, PermissionDeniedError,
-                                         ValidationError)
-from backend.app.schemas.sql import HealthResponse
-from backend.app.services.llm_service import llm_service
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +21,20 @@ app = FastAPI(
     title=settings.PROJECT_NAME,
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
     description="SQLTuner - AI-powered SQL optimization using Local LLM",
-    version="1.0.0"
+    version="1.0.0",
+    redirect_slashes=False
 )
+
+
+@app.middleware("http")
+async def force_https_redirect(request: Request, call_next):
+    response = await call_next(request)
+    if response.status_code in [301, 302, 303, 307, 308]:
+        location = response.headers.get("location")
+        if location and location.startswith("http://"):
+            response.headers["location"] = location.replace("http://",
+                                                            "https://", 1)
+    return response
 
 # Configure CORS
 app.add_middleware(

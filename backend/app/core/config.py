@@ -1,5 +1,7 @@
-from typing import Optional
+import re
+from typing import List, Optional, Union
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -17,7 +19,15 @@ class Settings(BaseSettings):
     MODEL_NAME: str = "qwen2.5:3b"
     MODEL_CHAT_NAME: str = "qwen2.5:3b"
 
-    BACKEND_CORS_ORIGINS: str = "http://localhost:5173"
+    BACKEND_CORS_ORIGINS: Union[str, List[str]] = "http://localhost:5173"
+
+    @field_validator('BACKEND_CORS_ORIGINS', mode='before')
+    @classmethod
+    def parse_cors_origins(cls, v):
+        if isinstance(v, str):
+            return [origin.strip()
+                    for origin in v.split(",") if origin.strip()]
+        return v
 
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
@@ -50,8 +60,12 @@ class Settings(BaseSettings):
         db_url = self.DATABASE_URL
         if db_url and db_url.strip():
             if db_url.startswith('postgresql://'):
-                return db_url.replace(
-                    'postgresql://', 'postgresql+asyncpg://', 1)
+                db_url = db_url.replace(
+                    'postgresql://', 'postgresql+asyncpg://', 1
+                )
+                db_url = re.sub(r'[?&]sslmode=[^&]*', '', db_url)
+                db_url = re.sub(r'[?&]$', '', db_url)
+                return db_url
             return db_url
         return (
             f"postgresql+asyncpg://{self.POSTGRES_USER}"
