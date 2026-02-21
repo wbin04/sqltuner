@@ -77,8 +77,8 @@ foreach ($key in $envVarsHash.Keys) {
 }
 $envVarsString = $envVarsArray -join ","
 
-Write-Host "`n[1/4] Building Docker image..." -ForegroundColor Yellow
-docker build -t ${SERVICE_NAME}:latest -f Dockerfile.prod .
+Write-Host "`n[1/4] Building Docker image (no cache)..." -ForegroundColor Yellow
+docker build --no-cache -t ${SERVICE_NAME}:latest -f Dockerfile.prod .
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "`nBuild failed!" -ForegroundColor Red

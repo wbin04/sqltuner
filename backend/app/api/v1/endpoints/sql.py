@@ -73,11 +73,12 @@ def run_sandbox_execution(
     connection,
     request: SQLExecuteRequest
 ):
-    logger.info(
+    logger.warning(f"[DEBUG] ENTERED run_sandbox_execution for connection {connection.id}")
+    logger.warning(
         f"[SANDBOX] Using SQLite sandbox for SIMULATION connection "
         f"{connection.id}"
     )
-    logger.info(f"[SANDBOX] SQL: {request.sql}")
+    logger.warning(f"[SANDBOX] SQL: {request.sql}")
 
     # Validate meta_schema exists
     if not connection.meta_schema:
@@ -182,11 +183,18 @@ async def execute_sql(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    connection = await connection_repository.get_by_user_and_id(
-        db=db,
-        user_id=current_user.id,
-        connection_id=request.connection_id
-    )
+    logger.info(f"[DEBUG] execute_sql called - connection_id: {request.connection_id}, user: {current_user.email}")
+    
+    try:
+        connection = await connection_repository.get_by_user_and_id(
+            db=db,
+            user_id=current_user.id,
+            connection_id=request.connection_id
+        )
+        logger.info(f"[DEBUG] Connection fetched: {connection.id if connection else 'None'}")
+    except Exception as e:
+        logger.error(f"[DEBUG] Error fetching connection: {str(e)}")
+        raise
 
     if not connection:
         raise HTTPException(
@@ -194,8 +202,19 @@ async def execute_sql(
             detail="Connection not found"
         )
 
+    try:
+        db_type_str = str(connection.db_type) if connection.db_type else "None"
+        db_type_value = connection.db_type.value if connection.db_type else "N/A"
+        logger.info(f"[DEBUG] Connection {connection.id} has db_type: {db_type_str} (value: {db_type_value})")
+    except Exception as e:
+        logger.error(f"[DEBUG] Error accessing db_type: {str(e)}, db_type raw: {connection.db_type}")
+        raise
+
     if connection.db_type == DBType.SIMULATION:
+        logger.info(f"[DEBUG] Entering sandbox execution for connection {connection.id}")
         return run_sandbox_execution(connection, request)
+    
+    logger.info(f"[DEBUG] Not SIMULATION, proceeding to live execution")
 
     logger.info(
         f"[LIVE] Executing query on real database: "
@@ -203,6 +222,7 @@ async def execute_sql(
     )
     logger.info(f"[LIVE] SQL: {request.sql[:200]}...")
 
+    engine = None
     try:
         conn_string = build_sync_connection_string(connection)
         logger.info(
@@ -229,18 +249,24 @@ async def execute_sql(
             connect_args=connect_args,
             pool_timeout=SQL_CONNECTION_TIMEOUT
         )
+        
+        # Test connection immediately to fail fast
+        logger.info("[LIVE] Testing database connection...")
+        with engine.connect() as test_conn:
+            test_conn.execute(text("SELECT 1"))
+        logger.info("[LIVE] Connection test successful")
+        
     except Exception as e:
-        logger.error(
-            f"[LIVE ERROR] Failed to create database connection: {str(e)}\n"
-            f"{traceback.format_exc()}"
+        logger.warning(
+            f"[LIVE] Cannot connect to {connection.db_type.value} database "
+            f"at {connection.host}:{connection.port} - "
+            f"Error: {str(e)}"
         )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=(
-                f"Failed to connect to {connection.db_type.value} database: "
-                f"{str(e)}. Please check connection credentials and "
-                f"network access."
-            ))
+        logger.warning(
+            "[LIVE] Falling back to sandbox execution due to "
+            "connection failure"
+        )
+        return run_sandbox_execution(connection, request)
 
     try:
         start_time = time.time()
@@ -355,14 +381,35 @@ async def explain_sql_plan(
 
     try:
         conn_string = build_sync_connection_string(connection)
+
+        connect_args = {}
+        if connection.db_type.value == "postgresql":
+            connect_args = {"connect_timeout": SQL_CONNECTION_TIMEOUT}
+        elif connection.db_type.value == "mysql":
+            connect_args = {"connect_timeout": SQL_CONNECTION_TIMEOUT}
+
         engine = create_engine(
             conn_string,
             pool_pre_ping=True,
-            pool_recycle=3600)
+            pool_recycle=3600,
+            connect_args=connect_args,
+            pool_timeout=SQL_CONNECTION_TIMEOUT)
+        
+        # Test connection immediately
+        logger.info("[EXPLAIN] Testing database connection...")
+        with engine.connect() as test_conn:
+            test_conn.execute(text("SELECT 1"))
+        logger.info("[EXPLAIN] Connection test successful")
+        
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create database connection: {str(e)}"
+            detail=(
+                f"Failed to connect to {connection.db_type.value} database "
+                f"at {connection.host}:{connection.port}. "
+                f"Error: {str(e)}. "
+                f"EXPLAIN requires a real database connection."
+            )
         )
 
     try:
@@ -472,10 +519,25 @@ async def optimize_sql(
             "[OPTIMIZE] Running EXPLAIN on optimized query to compare costs")
         try:
             conn_string = build_sync_connection_string(connection)
+
+            connect_args = {}
+            if connection.db_type.value == "postgresql":
+                connect_args = {"connect_timeout": SQL_CONNECTION_TIMEOUT}
+            elif connection.db_type.value == "mysql":
+                connect_args = {"connect_timeout": SQL_CONNECTION_TIMEOUT}
+
             engine = create_engine(
                 conn_string,
                 pool_pre_ping=True,
-                pool_recycle=3600)
+                pool_recycle=3600,
+                connect_args=connect_args,
+                pool_timeout=SQL_CONNECTION_TIMEOUT)
+            
+            # Test connection immediately
+            logger.info("[OPTIMIZE] Testing database connection...")
+            with engine.connect() as test_conn:
+                test_conn.execute(text("SELECT 1"))
+            logger.info("[OPTIMIZE] Connection test successful")
 
             with engine.connect() as conn:
                 if connection.db_type == DBType.POSTGRES:

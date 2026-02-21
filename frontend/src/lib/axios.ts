@@ -9,7 +9,7 @@ let isRedirecting = false;
 // Create axios instance
 const axiosInstance = axios.create({
   baseURL: API_URL,
-  timeout: 120000, // 120 seconds for LLM requests
+  timeout: 360000, // 360 seconds (6 minutes) - allows backend SQL execution timeout of 300s + buffer
   withCredentials: true, // Send cookies with requests
   headers: {
     'Content-Type': 'application/json',
