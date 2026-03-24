@@ -9,6 +9,10 @@ class ChatCompletionRequest(BaseModel):
     conversation_id: Optional[UUID] = Field(
         None, description="Conversation ID (optional for new conversations)")
     message: str = Field(..., description="User message", max_length=5000)
+    clarification_answers: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Answers from clarification step: [{q: str, answer: str}]"
+    )
 
 
 class ChatCompletionResponse(BaseModel):
@@ -16,6 +20,8 @@ class ChatCompletionResponse(BaseModel):
     role: str
     content: str
     sql_generated: Optional[str] = None
+    is_schema_design: Optional[bool] = False
+    schema_generated: Optional[Dict[str, Any]] = None
     detected_sql: Optional[str] = Field(
         None,
         description="Extracted SQL from user message for action buttons"
@@ -73,6 +79,9 @@ class SQLOptimizeResponse(BaseModel):
     optimized_sql: str
     explanation: str
     index_recommendation: Optional[str] = None
+    rewrite_type: Optional[str] = None
+    changes_made: Optional[List[str]] = None
+    bottlenecks: Optional[List[str]] = None
     stats_comparison: Optional[Dict[str, Any]] = None
     query_log_id: Optional[UUID] = None
 

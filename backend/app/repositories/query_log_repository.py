@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from app.models.models import ChatRole, QueryLog
@@ -14,11 +14,13 @@ class QueryLogCreate(BaseModel):
     action_type: str = 'chat'
     content: str
     sql_generated: Optional[str] = None
+    schema_generated: Optional[Dict[str, Any]] = None
 
 
 class QueryLogUpdate(BaseModel):
     content: Optional[str] = None
     sql_generated: Optional[str] = None
+    schema_generated: Optional[Dict[str, Any]] = None
 
 
 class QueryLogRepository(

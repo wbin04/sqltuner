@@ -153,4 +153,40 @@ export const workspaceService = {
       tables_modified: response.data.tables_modified,
     };
   },
+
+  async checkSchemaClarification(description: string): Promise<{
+    needs_clarification: boolean;
+    questions: Array<{
+      question: string;
+      why: string;
+      options: string[];
+    }>;
+  }> {
+    const response = await api.post('/schema-generator/check-clarification', {
+      description,
+    });
+    return response.data;
+  },
+
+  async generateSchemaFromPrompt(params: {
+    description: string;
+    clarifications?: Array<{ question: string; answer: string }>;
+  }): Promise<{
+    system_name: string;
+    schema_def: any;
+    mermaid_erd: string;
+    relationships: any[];
+    design_notes: string[];
+    table_count: number;
+    table_summaries: Array<{
+      name: string;
+      purpose: string;
+      design_rationale: string;
+      column_count: number;
+      index_count: number;
+    }>;
+  }> {
+    const response = await api.post('/schema-generator/generate', params);
+    return response.data;
+  },
 };

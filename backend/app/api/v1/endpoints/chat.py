@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import time
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -7,7 +8,10 @@ from uuid import UUID
 
 from app.api.v1.endpoints.auth import get_current_user
 from app.core.prompts import (CHAT_GENERAL_SYSTEM_PROMPT,
-                              get_chat_sql_system_prompt)
+                              CHAT_SCHEMA_DESIGN_SYSTEM_PROMPT,
+                              get_chat_schema_design_prompt,
+                              get_chat_sql_system_prompt,
+                              get_schema_clarification_prompt)
 from app.db.session import get_db
 from app.models.models import ChatRole, User
 from app.repositories.connection_repository import connection_repository
@@ -21,6 +25,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 router = APIRouter()
 
 logger = logging.getLogger(__name__)
+
+SCHEMA_DESIGN_MIN_WORDS_FOR_DIRECT_GENERATE = 12
 
 
 @lru_cache(maxsize=128)
@@ -103,6 +109,108 @@ def format_schema_for_prompt(
     return "\n".join(schema_lines)
 
 
+def _is_schema_design_intent(message: str) -> bool:
+    message_lower = message.lower()
+    design_keywords = [
+        "tạo database", "tạo cơ sở dữ liệu", "thiết kế database",
+        "thiết kế cơ sở dữ liệu", "tạo bảng cho", "tạo schema",
+        "xây dựng database", "xây dựng cơ sở dữ liệu", "thiết kế bảng",
+        "cần database", "cần cơ sở dữ liệu", "muốn tạo database",
+        "muốn tạo cơ sở dữ liệu", "hệ thống quản lý", "muốn thiết kế",
+        "create a database", "design a database", "design database",
+        "create database schema", "design schema for", "database for",
+        "schema for", "build a database", "create tables for",
+        "data model for", "erd for", "i need a database",
+        "i want to create a database", "create a schema", "design a schema",
+    ]
+    return any(keyword in message_lower for keyword in design_keywords)
+
+
+def _extract_first_json_object(text: str) -> str:
+    """Extract the first complete JSON object and ignore trailing content."""
+    start = text.find("{")
+    if start == -1:
+        raise ValueError("No JSON object found")
+
+    depth = 0
+    in_string = False
+    is_escaped = False
+
+    for i in range(start, len(text)):
+        ch = text[i]
+
+        if in_string:
+            if is_escaped:
+                is_escaped = False
+                continue
+            if ch == "\\":
+                is_escaped = True
+                continue
+            if ch == '"':
+                in_string = False
+            continue
+
+        if ch == '"':
+            in_string = True
+            continue
+
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+
+    raise ValueError("Unclosed JSON object")
+
+
+async def _check_schema_clarification_inline(message: str) -> dict:
+    word_count = len(message.split())
+    specific_keywords = [
+        "quản lý", "bán hàng", "đặt hàng", "khách hàng", "sản phẩm",
+        "nhân viên", "kho hàng", "thanh toán", "thành viên", "đăng ký",
+        "nhà cung cấp", "danh mục", "đơn hàng", "hoá đơn", "tồn kho",
+        "manage", "store", "order", "customer", "product",
+        "employee", "inventory", "payment", "member", "register",
+        "library", "hospital", "school", "restaurant", "hotel",
+        "supplier", "category", "invoice", "booking", "reservation",
+    ]
+    has_specific = any(
+        kw in message.lower() for kw in specific_keywords
+    )
+
+    if (
+        word_count >= SCHEMA_DESIGN_MIN_WORDS_FOR_DIRECT_GENERATE
+        and has_specific
+    ):
+        logger.info(
+            "[CHAT] Clarification skipped: %d words, specific=%s",
+            word_count, has_specific,
+        )
+        return {"needs_clarification": False, "questions": []}
+
+    try:
+        context_prompt = get_schema_clarification_prompt(message)
+        raw = await llm_service.chat(
+            prompt=context_prompt,
+            system_prompt=None,
+            temperature=0.1,
+            max_tokens=200,
+        )
+        clean = re.sub(r"```(?:json)?\s*|```", "", raw).strip()
+        json_str = _extract_first_json_object(clean)
+        result = json.loads(json_str)
+        logger.info(
+            "[CHAT] Clarification result: needs=%s, q=%d",
+            result.get("needs_clarification"),
+            len(result.get("questions", [])),
+        )
+        return result
+    except Exception as e:
+        logger.warning("[CHAT] Clarification check failed: %s", e)
+        return {"needs_clarification": False, "questions": []}
+
+
 @router.post("/completion", response_model=ChatCompletionResponse)
 async def chat_completion(
     request: ChatCompletionRequest,
@@ -175,10 +283,19 @@ async def chat_completion(
 
     dialect = connection.db_type.value if connection.db_type else "postgres"
 
-    is_sql_query = llm_service._is_sql_query(request.message)
+    is_schema_design = (
+        _is_schema_design_intent(request.message)
+        or bool(request.clarification_answers)
+    )
+    is_sql_query = (
+        llm_service._is_sql_query(request.message) and not is_schema_design
+    )
     extracted_sql = None
 
-    if is_sql_query:
+    if is_schema_design:
+        system_prompt = CHAT_SCHEMA_DESIGN_SYSTEM_PROMPT
+        logger.info("[CHAT] Schema design intent detected")
+    elif is_sql_query:
         extracted_sql = llm_service._extract_sql_from_message(request.message)
 
         sql_system_prompt = get_chat_sql_system_prompt(dialect)
@@ -207,20 +324,89 @@ async def chat_completion(
         )
         logger.info("[CHAT] Using general chat system prompt")
 
-    prompt_size = len(system_prompt) + len(request.message)
-    print(f"[DEBUG-CHAT] Total prompt size: {prompt_size:,} bytes")
+    schema_prompt = request.message
+    if is_schema_design:
+        has_answers = bool(request.clarification_answers)
+
+        if not has_answers:
+            clarification_check = await _check_schema_clarification_inline(
+                request.message
+            )
+            if (
+                clarification_check.get("needs_clarification")
+                and clarification_check.get("questions")
+            ):
+                questions = clarification_check["questions"]
+                clarification_content = (
+                    "Before designing the schema, I have a few questions:\n\n"
+                    + "\n".join(
+                        f"{index + 1}. {q.get('q', '')}"
+                        + (
+                            f"\n   Options: {', '.join(q.get('options', []))}"
+                            if q.get("options")
+                            else ""
+                        )
+                        for index, q in enumerate(questions)
+                    )
+                    + "\n\nPlease answer these questions and I'll generate the schema."
+                )
+
+                await query_log_repository.create(
+                    db,
+                    obj_in={
+                        "conversation_id": conversation_id,
+                        "role": ChatRole.USER,
+                        "content": request.message,
+                        "created_at": datetime.now(timezone.utc)
+                    }
+                )
+
+                await query_log_repository.create(
+                    db,
+                    obj_in={
+                        "conversation_id": conversation_id,
+                        "role": ChatRole.ASSISTANT,
+                        "content": clarification_content,
+                        "schema_generated": None,
+                        "created_at": datetime.now(timezone.utc)
+                    }
+                )
+
+                return ChatCompletionResponse(
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=clarification_content,
+                    is_schema_design=False,
+                    schema_generated=None,
+                )
+
+        schema_prompt = get_chat_schema_design_prompt(
+            user_description=request.message,
+            clarification_answers=request.clarification_answers,
+        )
+        logger.info(
+            "[CHAT] Schema design - generating with prompt len=%s",
+            len(schema_prompt),
+        )
+
+    prompt_size = len(system_prompt) + len(schema_prompt)
     logger.info(f"[CHAT] Total prompt: {prompt_size:,} bytes")
 
     try:
         llm_start = time.time()
-        llm_response = await llm_service.chat(
-            prompt=request.message,
-            system_prompt=system_prompt,
-            temperature=0.3,
-            max_tokens=256
-        )
+        if is_schema_design:
+            llm_response = await llm_service.chat_schema_design(
+                prompt=schema_prompt,
+                system_prompt=system_prompt,
+            )
+        else:
+            llm_response = await llm_service.chat(
+                prompt=request.message,
+                system_prompt=system_prompt,
+                temperature=0.3,
+                max_tokens=256,
+            )
         llm_duration = time.time() - llm_start
-        print(f"[DEBUG-CHAT] LLM took: {llm_duration:.2f}s")
         logger.info(f"[CHAT] LLM took: {llm_duration:.2f}s")
     except Exception as e:
         raise HTTPException(
@@ -229,7 +415,46 @@ async def chat_completion(
         )
 
     sql_generated = None
-    if "```sql" in llm_response:
+    schema_generated = None
+    llm_response_for_content = llm_response
+    if is_schema_design:
+        try:
+            clean = re.sub(r"```(?:json)?\s*|```", "", llm_response).strip()
+            json_str = _extract_first_json_object(clean)
+            schema_generated = json.loads(json_str)
+
+            tables = schema_generated.get("tables", [])
+            has_columns = all(
+                isinstance(table.get("columns"), list)
+                and len(table.get("columns", [])) > 0
+                for table in tables
+            ) if tables else False
+
+            if not has_columns:
+                logger.warning("[CHAT] Schema missing columns in some tables")
+
+            logger.info(
+                "[CHAT] Schema generated: %s tables, has_columns=%s",
+                len(tables),
+                has_columns,
+            )
+
+            table_names = ", ".join(
+                table.get("name", "")
+                for table in tables[:6]
+                if table.get("name")
+            )
+            llm_response_for_content = (
+                f"I've designed a {schema_generated.get('system_name', 'database')} "
+                f"schema with {len(tables)} tables"
+                + (f": {table_names}. " if table_names else ". ")
+                + "Review the schema below and click Apply to Sandbox to use it."
+            )
+        except Exception as e:
+            logger.warning(f"[CHAT] Failed to parse schema JSON: {e}")
+            schema_generated = None
+            llm_response_for_content = llm_response
+    elif "```sql" in llm_response:
         try:
             sql_start = llm_response.index("```sql") + 6
             sql_end = llm_response.index("```", sql_start)
@@ -254,8 +479,11 @@ async def chat_completion(
         obj_in={
             "conversation_id": conversation_id,
             "role": ChatRole.ASSISTANT,
-            "content": llm_response,
+            "content": llm_response_for_content,
             "sql_generated": sql_generated,
+            "schema_generated": (
+                schema_generated if isinstance(schema_generated, dict) else None
+            ),
             "created_at": datetime.now(timezone.utc)
         }
     )
@@ -263,8 +491,10 @@ async def chat_completion(
     response_data = {
         "conversation_id": conversation_id,
         "role": "assistant",
-        "content": llm_response,
-        "sql_generated": sql_generated
+        "content": llm_response_for_content,
+        "sql_generated": sql_generated,
+        "is_schema_design": is_schema_design,
+        "schema_generated": schema_generated,
     }
 
     if detected_sql:
@@ -344,6 +574,8 @@ async def get_conversation_messages(
             "role": msg.role.value,
             "content": msg.content,
             "sql_generated": msg.sql_generated,
+            "schema_generated": msg.schema_generated,
+            "is_schema_design": bool(msg.schema_generated),
             "created_at": msg.created_at.isoformat(),
         }
         for msg in messages

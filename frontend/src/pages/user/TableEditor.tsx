@@ -5,7 +5,7 @@
  */
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save, Loader2, AlertCircle, Network } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, AlertCircle, Network, Sparkles } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useWorkspace } from '../../hooks/useWorkspace';
 import { useUnsavedChangesWarning } from '../../hooks/useUnsavedChangesWarning';
@@ -13,6 +13,7 @@ import { SimulationSchema, SimulationTable, BackendTable } from '../../types/sim
 import { workspaceService } from '../../services/workspaceService';
 import { DbType } from '../../types/workspace';
 import { TablesSidebar, StructureEditor, SampleDataEditor } from '../../components/simulation';
+import { GenerateSchemaModal, type GenerateResult } from '../../components/simulation/GenerateSchemaModal';
 import { SchemaDiagramModal } from '../../components/diagram/SchemaDiagramModal';
 import { UnsavedChangesModal } from '../../components/common/UnsavedChangesModal';
 import { v4 as uuidv4 } from 'uuid';
@@ -32,6 +33,7 @@ export function SchemaEditor() {
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('structure');
   const [isDiagramModalOpen, setIsDiagramModalOpen] = useState(false);
+  const [isGenerateModalOpen, setIsGenerateModalOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -49,8 +51,6 @@ export function SchemaEditor() {
       'tables' in workspace.meta_schema
         ? (workspace.meta_schema as any)
         : { tables: [] };
-    
-    console.log('Raw schema from backend:', loadedSchema);
     
     // Generate IDs for all tables and columns, restore FK relationships
     const backendTables = (loadedSchema.tables || []) as BackendTable[];
@@ -133,7 +133,6 @@ export function SchemaEditor() {
       })
     };
     
-    console.log('Schema with generated IDs:', schemaWithIds);
     setSchema(schemaWithIds);
     
     // Store initial schema for comparison
@@ -351,6 +350,76 @@ export function SchemaEditor() {
     toast.info(`Table "${tableName}" added. Add columns and save to persist.`);
   };
 
+  const handleApplyGeneratedSchema = (result: GenerateResult) => {
+    const backendTables = result.schema_def?.tables || [];
+    const tableIdMap = new Map<string, string>();
+    const columnIdMap = new Map<string, Map<string, string>>();
+
+    const tablesWithIds = backendTables.map((table) => {
+      const tableId = uuidv4();
+      tableIdMap.set(table.name, tableId);
+
+      const colMap = new Map<string, string>();
+      const columns = table.columns.map((col) => {
+        const colId = uuidv4();
+        colMap.set(col.name, colId);
+        return {
+          id: colId,
+          name: col.name,
+          type: col.type,
+          is_pk: col.is_pk,
+          is_nullable: col.is_nullable,
+          default: col.default,
+        };
+      });
+      columnIdMap.set(table.name, colMap);
+
+      const indexes = (table.indexes || []).map((idx) => ({
+        id: uuidv4(),
+        name: idx.name,
+        columns: (idx.column_names || [])
+          .map((colName) => colMap.get(colName))
+          .filter((id): id is string => !!id),
+        unique: idx.unique || false,
+      }));
+
+      return {
+        id: tableId,
+        name: table.name,
+        columns,
+        indexes,
+        foreign_keys: table.foreign_keys || [],
+        sample_data: [],
+      };
+    });
+
+    const newSchema: SimulationSchema = {
+      is_simulation: true,
+      tables: tablesWithIds.map((table) => ({
+        ...table,
+        columns: table.columns.map((col) => {
+          const fkDef = table.foreign_keys.find((fk) => fk.column === col.name);
+          if (fkDef) {
+            const refTableId = tableIdMap.get(fkDef.ref_table);
+            const refColId = columnIdMap.get(fkDef.ref_table)?.get(fkDef.ref_column);
+            if (refTableId && refColId) {
+              return { ...col, fk_target: { table_id: refTableId, column_id: refColId } };
+            }
+          }
+          return col;
+        }),
+      })),
+    };
+
+    setSchema(newSchema);
+    setHasUnsavedChanges(true);
+    setIsGenerateModalOpen(false);
+
+    if (newSchema.tables.length > 0) {
+      setSelectedTableId(newSchema.tables[0].id);
+    }
+  };
+
   const handleEditTable = (tableName: string) => {
     const table = schema.tables.find(t => t.name === tableName);
     if (table) {
@@ -416,6 +485,18 @@ export function SchemaEditor() {
         </div>
 
         <div className="flex items-center gap-3">
+          {workspace?.db_type === DbType.SIMULATION && (
+            <button
+              onClick={() => setIsGenerateModalOpen(true)}
+              className={cn(
+                'flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-white',
+                'bg-purple-600 hover:bg-purple-700 transition-colors'
+              )}
+            >
+              <Sparkles className="w-4 h-4" />
+              Generate with AI
+            </button>
+          )}
           <button
             onClick={() => setIsDiagramModalOpen(true)}
             className={cn(
@@ -555,6 +636,12 @@ export function SchemaEditor() {
       </div>
 
       
+      <GenerateSchemaModal
+        isOpen={isGenerateModalOpen}
+        onClose={() => setIsGenerateModalOpen(false)}
+        onApply={handleApplyGeneratedSchema}
+      />
+
       {/* Diagram Modal */}
       <SchemaDiagramModal
         isOpen={isDiagramModalOpen}

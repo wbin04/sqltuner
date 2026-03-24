@@ -12,6 +12,7 @@ from app.core.security import decrypt_password
 from app.models.models import (Conversation, DBConnection, DBType,
                                PerformanceAnalysis, QueryLog)
 from app.services.llm_service import llm_service
+from app.services.sql_analyzer import SqlIssue, sql_analyzer
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -265,30 +266,70 @@ class ExplainPlanAnalyzer:
         explain_plan: Dict[str, Any]
     ) -> list[str]:
         bottlenecks = []
-        plan = explain_plan.get("plan", [{}])[0].get(
-            "Plan", {}
-        )
+        plan = explain_plan.get("plan", [{}])[0].get("Plan", {})
 
         def traverse_plan(node: Dict[str, Any]) -> None:
             node_type = node.get("Node Type", "")
-            relation_name = node.get("Relation Name", "")
+            relation_name = node.get("Relation Name", "unknown")
+            total_cost = node.get("Total Cost", 0)
+            actual_rows = node.get("Actual Rows", 0)
+            plan_rows = node.get("Plan Rows", 1)
+            actual_loops = node.get("Actual Loops", 1)
+            filter_expr = node.get("Filter", "")
+            rows_removed = node.get("Rows Removed by Filter", 0)
+            sort_key = node.get("Sort Key", [])
+            sort_method = node.get("Sort Method", "")
+            hash_batches = node.get("Hash Batches", 1)
 
             if "Seq Scan" in node_type:
+                msg = f"Sequential Scan on '{relation_name}' (no index used)"
+                if filter_expr:
+                    msg += f" - filter: {filter_expr}"
+                bottlenecks.append(msg)
+
+            if "Seq Scan" in node_type and rows_removed > 500:
                 bottlenecks.append(
-                    f"Sequential Scan on '{relation_name}' (no index used)"
+                    f"High row rejection on '{relation_name}': "
+                    f"{rows_removed} rows scanned but filtered out "
+                    "-> add index on filter column"
                 )
 
-            if "Hash Join" in node_type and node.get("Total Cost", 0) > 1000:
+            if plan_rows > 0:
+                ratio = actual_rows / plan_rows
+                if ratio > 10 or (ratio < 0.1 and actual_rows > 0):
+                    bottlenecks.append(
+                        f"Poor row estimate on '{relation_name}': "
+                        f"planner expected {plan_rows}, got {actual_rows} "
+                        "-> run ANALYZE to refresh statistics"
+                    )
+
+            if "Nested Loop" in node_type and actual_loops > 100:
                 bottlenecks.append(
-                    f"High-cost Hash Join (cost: {node.get('Total Cost')})"
+                    f"Expensive Nested Loop ({actual_loops} loops, "
+                    f"cost={total_cost:.0f}) "
+                    "-> consider rewriting with explicit JOIN type or CTE"
                 )
 
-            if "Nested Loop" in node_type and node.get(
-                "Actual Loops", 1
-            ) > 1000:
+            if "Hash" in node_type and hash_batches > 1:
                 bottlenecks.append(
-                    f"Expensive Nested Loop (loops: "
-                    f"{node.get('Actual Loops')})"
+                    f"Hash Join spilled to disk ({hash_batches} batches) "
+                    "-> increase work_mem or add better indexes"
+                )
+
+            if "Sort" in node_type and "external" in sort_method.lower():
+                bottlenecks.append(
+                    f"Sort spilled to disk on {sort_key} "
+                    "-> increase work_mem or add index on ORDER BY columns"
+                )
+
+            if (
+                "Sort" in node_type
+                and sort_key
+                and "external" not in sort_method.lower()
+            ):
+                bottlenecks.append(
+                    f"In-memory Sort on {sort_key} "
+                    "-> consider adding index to avoid sort entirely"
                 )
 
             for child in node.get("Plans", []):
@@ -414,14 +455,26 @@ class OptimizationService:
             original_cost = None
             bottlenecks = []
 
+        # Step 3.5: Static SQL analysis (no DB required)
+        static_issues = sql_analyzer.detect(sql_query)
+        if static_issues:
+            logger.info(
+                f"[OPTIMIZE] Static analysis found {len(static_issues)} issue(s): "
+                + ", ".join(i.type for i in static_issues)
+            )
+
         # Step 4: Get or compute LLM optimization
         llm_result = await self._get_optimization(
-            connection, sql_query, connection_id
+            connection, sql_query, connection_id, static_issues
         )
 
         # Step 5: Build response
         response = self._build_response(
-            llm_result, original_cost, bottlenecks, sql_query
+            llm_result,
+            original_cost,
+            bottlenecks,
+            sql_query,
+            static_issues,
         )
 
         # Step 6: Save to database if query log exists
@@ -458,7 +511,11 @@ class OptimizationService:
         return connection
 
     async def _get_optimization(
-        self, connection: DBConnection, sql_query: str, connection_id: UUID
+        self,
+        connection: DBConnection,
+        sql_query: str,
+        connection_id: UUID,
+        static_issues: Optional[list[SqlIssue]] = None,
     ) -> Dict[str, Any]:
         cached_result = self._cache.get(sql_query, connection_id)
 
@@ -476,7 +533,9 @@ class OptimizationService:
 
         try:
             llm_result = await llm_service.optimize_sql(
-                sql_query=sql_query, db_schema=db_schema_json
+                sql_query=sql_query,
+                db_schema=db_schema_json,
+                static_issues=static_issues or [],
             )
             self._cache.put(sql_query, connection_id, llm_result)
             logger.info(
@@ -489,7 +548,9 @@ class OptimizationService:
             return {
                 "optimized_sql": sql_query,
                 "index_suggestion": None,
-                "explanation": f"Generation failed. Error: {str(e)}",
+                "rewrite_type": "none",
+                "changes_made": [],
+                "explanation": f"Optimization failed. Error: {str(e)}",
             }
 
     def _build_response(
@@ -498,14 +559,20 @@ class OptimizationService:
         original_cost: Optional[float],
         bottlenecks: list[str],
         sql_query: str,
+        static_issues: Optional[list[SqlIssue]] = None,
     ) -> Dict[str, Any]:
-        optimized_sql = self._ensure_string(
-            llm_result.get("optimized_sql", sql_query)
-        )
+        optimized_sql = self._ensure_string(llm_result.get("optimized_sql", sql_query))
         index_recommendation = llm_result.get("index_suggestion")
-        explanation = self._ensure_string(
-            llm_result.get("explanation", "No explanation provided")
-        )
+        explanation = self._ensure_string(llm_result.get("explanation", "No explanation provided"))
+        rewrite_type = llm_result.get("rewrite_type", "none")
+        changes_made = llm_result.get("changes_made", [])
+
+        all_bottlenecks = list(bottlenecks)
+        if static_issues:
+            for issue in static_issues:
+                all_bottlenecks.append(
+                    f"[{issue.severity.upper()}] {issue.message}"
+                )
 
         if index_recommendation:
             index_recommendation = self._ensure_string(index_recommendation)
@@ -514,12 +581,14 @@ class OptimizationService:
 
         return {
             "original_cost": original_cost,
-            "bottlenecks": bottlenecks,
+            "bottlenecks": all_bottlenecks,
             "optimized_sql": optimized_sql.strip(),
             "index_recommendation": (
                 index_recommendation.strip() if index_recommendation else None
             ),
             "explanation": explanation.strip(),
+            "rewrite_type": rewrite_type,
+            "changes_made": changes_made,
         }
 
     @staticmethod

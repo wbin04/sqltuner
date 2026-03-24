@@ -27,6 +27,10 @@ export function useEditorLogic({ connectionId }: UseEditorLogicProps) {
   const [isOptimizationModalOpen, setIsOptimizationModalOpen] = useState(false);
   const [optimisticMessages, setOptimisticMessages] = useState<ChatMessage[]>([]);
   const [appliedOptimizationMessages, setAppliedOptimizationMessages] = useState<ChatMessage[]>([]);
+  const [pendingClarification, setPendingClarification] = useState<{
+    questions: Array<{ q: string; options?: string[] }>;
+    originalMessage: string;
+  } | null>(null);
 
   // Fetch conversations
   const { data: conversations = [], isLoading: isLoadingConversations } = useQuery({
@@ -45,20 +49,54 @@ export function useEditorLogic({ connectionId }: UseEditorLogicProps) {
   // Combine fetched messages with optimistic messages and applied optimization messages
   const messages = [...fetchedMessages, ...appliedOptimizationMessages, ...optimisticMessages];
 
+  const parseClarificationQuestions = (content: string): Array<{ q: string; options?: string[] }> => {
+    const lines = content.split('\n');
+    const questions: Array<{ q: string; options?: string[] }> = [];
+
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index].trim();
+      const qMatch = line.match(/^\d+\.\s+(.+)$/);
+      if (!qMatch) {
+        continue;
+      }
+
+      const item: { q: string; options?: string[] } = { q: qMatch[1] };
+      const nextLine = (lines[index + 1] || '').trim();
+      if (nextLine.startsWith('Options:')) {
+        item.options = nextLine
+          .replace(/^Options:\s*/, '')
+          .split(',')
+          .map((option) => option.trim())
+          .filter(Boolean);
+      }
+
+      questions.push(item);
+    }
+
+    return questions;
+  };
+
   // Send message mutation
   const sendMessageMutation = useMutation({
-    mutationFn: (message: string) =>
+    mutationFn: (payload: {
+      message: string;
+      clarification_answers?: Array<{ q: string; answer: string }>;
+    }) =>
       chatService.sendMessage({
         connection_id: connectionId,
         conversation_id: activeConversationId || undefined,
-        message,
+        message: payload.message,
+        clarification_answers: payload.clarification_answers,
       }),
-    onMutate: async (message: string) => {
+    onMutate: async (payload: {
+      message: string;
+      clarification_answers?: Array<{ q: string; answer: string }>;
+    }) => {
       // Add optimistic user message
       const userMessage: ChatMessage = {
         id: `temp-user-${Date.now()}`,
         role: 'user',
-        content: message,
+        content: payload.message,
         created_at: new Date().toISOString(),
       };
 
@@ -84,6 +122,16 @@ export function useEditorLogic({ connectionId }: UseEditorLogicProps) {
       // Invalidate queries to refresh data
       queryClient.invalidateQueries({ queryKey: ['conversations', connectionId] });
       queryClient.invalidateQueries({ queryKey: ['messages', response.conversation_id] });
+
+      if (response.content.includes('Before designing the schema, I have a few questions:')) {
+        const questions = parseClarificationQuestions(response.content);
+        if (questions.length > 0) {
+          setPendingClarification({
+            questions,
+            originalMessage: response.content,
+          });
+        }
+      }
     },
     onError: () => {
       // Clear optimistic messages on error
@@ -142,9 +190,49 @@ export function useEditorLogic({ connectionId }: UseEditorLogicProps) {
   // Handlers
   const handleSendMessage = useCallback(
     async (message: string) => {
-      await sendMessageMutation.mutateAsync(message);
+      const lastAssistantMsg = [...fetchedMessages]
+        .reverse()
+        .find((msg) => msg.role === 'assistant');
+
+      const isClarificationReply =
+        Boolean(lastAssistantMsg)
+        && (lastAssistantMsg?.content || '').includes('Before designing the schema, I have a few questions:')
+        && Boolean(pendingClarification);
+
+      if (isClarificationReply && pendingClarification) {
+        await sendMessageMutation.mutateAsync({
+          message,
+          clarification_answers: pendingClarification.questions.map((question) => ({
+            q: question.q,
+            answer: message,
+          })),
+        });
+        setPendingClarification(null);
+        return;
+      }
+
+      await sendMessageMutation.mutateAsync({ message });
     },
-    [sendMessageMutation]
+    [fetchedMessages, pendingClarification, sendMessageMutation]
+  );
+
+  const handleSubmitClarification = useCallback(
+    async (answers: Array<{ q: string; answer: string }>) => {
+      if (!pendingClarification) return;
+
+      const answerSummary = answers
+        .filter(a => a.answer && a.answer !== 'No preference')
+        .map(a => `${a.q}: ${a.answer}`)
+        .join('; ');
+
+      await sendMessageMutation.mutateAsync({
+        message: answerSummary || 'Generate schema with default settings',
+        clarification_answers: answers,
+      });
+
+      setPendingClarification(null);
+    },
+    [pendingClarification, sendMessageMutation]
   );
 
   const handleExecute = useCallback(
@@ -234,6 +322,7 @@ export function useEditorLogic({ connectionId }: UseEditorLogicProps) {
 
     // Handlers
     handleSendMessage,
+    handleSubmitClarification,
     handleExecute,
     handleOptimize,
     handleExplain,
@@ -241,5 +330,8 @@ export function useEditorLogic({ connectionId }: UseEditorLogicProps) {
     handleSelectConversation,
     handleCloseOptimizationModal,
     handleApplyOptimization,
+
+    // Clarification
+    pendingClarification,
   };
 }

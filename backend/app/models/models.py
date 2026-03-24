@@ -178,6 +178,7 @@ class QueryLog(Base):
         default='chat')
     content = Column(Text, nullable=False)
     sql_generated = Column(Text)
+    schema_generated = Column(JSONB, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     conversation = relationship("Conversation", back_populates="query_logs")

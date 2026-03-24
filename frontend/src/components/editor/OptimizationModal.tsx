@@ -4,7 +4,12 @@
  */
 import { X } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { OptimizationAnalysis } from '../../types/optimization';
+import {
+  OptimizationAnalysis,
+  REWRITE_TYPE_COLORS,
+  REWRITE_TYPE_LABELS,
+  RewriteType,
+} from '../../types/optimization';
 
 interface OptimizationModalProps {
   isOpen: boolean;
@@ -119,8 +124,66 @@ export function OptimizationModal({
           </button>
         </div>
 
+        <div className="px-6 py-4 border-b border-gray-200 dark:border-border-dark bg-surface-highlight-DEFAULT/20 dark:bg-surface-highlight-dark/20">
+          {analysis.explanation && (
+            <p className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark mb-3">
+              {analysis.explanation}
+            </p>
+          )}
+
+          {analysis.rewrite_type && analysis.rewrite_type !== 'none' && (
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                Optimization type:
+              </span>
+              <span
+                className={cn(
+                  'px-2 py-0.5 rounded-full text-xs font-semibold',
+                  REWRITE_TYPE_COLORS[analysis.rewrite_type as RewriteType] ?? 'bg-gray-100 text-gray-600'
+                )}
+              >
+                {REWRITE_TYPE_LABELS[analysis.rewrite_type as RewriteType] ?? analysis.rewrite_type}
+              </span>
+            </div>
+          )}
+
+          {analysis.changes_made && analysis.changes_made.length > 0 && (
+            <div className="mb-4 last:mb-0">
+              <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                Changes applied:
+              </p>
+              <ul className="list-disc list-inside space-y-1">
+                {analysis.changes_made.map((change, idx) => (
+                  <li key={idx} className="text-sm text-gray-600 dark:text-gray-400">
+                    {change}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {analysis.bottlenecks && analysis.bottlenecks.length > 0 && (
+            <div>
+              <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                Issues detected:
+              </p>
+              <ul className="space-y-1 max-h-28 overflow-auto pr-1">
+                {analysis.bottlenecks.map((bottleneck, idx) => (
+                  <li
+                    key={idx}
+                    className="flex items-start gap-2 text-sm text-amber-700 dark:text-amber-400"
+                  >
+                    <span className="mt-0.5">⚠</span>
+                    <span>{bottleneck}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+
         {/* DiffEditor - Core Component */}
-        <div className="flex-1 overflow-hidden" style={{ minHeight: '400px' }}>
+        <div className="flex-1 overflow-hidden" style={{ minHeight: '360px' }}>
           {!hasDifferences ? (
             <div className="flex items-center justify-center h-full p-8">
               <div className="text-center max-w-md">
@@ -253,13 +316,6 @@ export function OptimizationModal({
 
         {/* Compact Footer */}
         <div className="border-t border-gray-200 dark:border-border-dark bg-surface-highlight-DEFAULT/30 dark:bg-surface-highlight-dark/30 px-6 py-4">
-          {/* Optional AI Reasoning */}
-          {analysis.explanation && (
-            <p className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark italic mb-4 line-clamp-2">
-              💡 {analysis.explanation}
-            </p>
-          )}
-
           {/* Action Buttons */}
           <div className="flex items-center justify-end gap-3">
             <button

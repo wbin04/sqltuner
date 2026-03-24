@@ -496,6 +496,8 @@ async def optimize_sql(
         bottlenecks = analysis.get("bottlenecks", [])
         optimized_sql = analysis.get("optimized_sql")
         index_recommendation = analysis.get("index_recommendation")
+        rewrite_type = analysis.get("rewrite_type")
+        changes_made = analysis.get("changes_made", [])
         explanation = analysis.get("explanation")
         query_log_id = analysis.get("query_log_id")
 
@@ -598,16 +600,14 @@ async def optimize_sql(
             logger.warning(
                 f"[OPTIMIZE] Could not calculate cost comparison: {str(e)}")
 
-    if bottlenecks:
-        bottleneck_text = "\n\nDetected Performance Bottlenecks:\n" + \
-            "\n".join(f"• {b}" for b in bottlenecks)
-        explanation = explanation + bottleneck_text
-
     return SQLOptimizeResponse(
         original_sql=request.sql_query,
         optimized_sql=optimized_sql,
         explanation=explanation,
         index_recommendation=index_recommendation,
+        rewrite_type=rewrite_type,
+        changes_made=changes_made,
+        bottlenecks=bottlenecks,
         stats_comparison=stats_comparison,
         query_log_id=query_log_id
     )
