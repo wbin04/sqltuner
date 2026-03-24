@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import logging
 
 from app.core.config import settings
 from app.core.constants import (AUTH_PROVIDER_EMAIL, AUTH_PROVIDER_GOOGLE,
@@ -386,7 +387,21 @@ async def login_google(request: Request):
             detail="Google OAuth not configured"
         )
 
-    redirect_uri = request.url_for('auth_google_callback')
+    # Always use BACKEND_URL in production for correct HTTPS redirect
+    if settings.BACKEND_URL:
+        redirect_uri = f"{settings.BACKEND_URL}/api/v1/auth/google/callback"
+    else:
+        # For local development
+        redirect_uri = str(request.url_for('auth_google_callback'))
+
+    # Force HTTPS in production (Cloud Run always uses HTTPS)
+    # if redirect_uri.startswith("http://"):
+    #     redirect_uri = redirect_uri.replace("http://", "https://", 1)
+    #     logging.warning(f"Forced HTTPS for redirect_uri: {redirect_uri}")
+
+    logging.info(f"Google OAuth redirect_uri: {redirect_uri}")
+    logging.info(f"BACKEND_URL setting: {settings.BACKEND_URL}")
+
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
 
@@ -396,9 +411,12 @@ async def auth_google_callback(
     response: Response,
     db: AsyncSession = Depends(get_db)
 ):
+    logging.info(f"Google callback received. URL: {request.url}")
+
     try:
         token = await oauth.google.authorize_access_token(request)
     except Exception as e:
+        logging.error(f"OAuth authorization failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"OAuth authorization failed: {str(e)}"

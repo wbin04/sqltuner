@@ -170,8 +170,7 @@ class ExplainPlanAnalyzer:
                 connect_args=connect_args,
                 pool_timeout=SQL_CONNECTION_TIMEOUT
             )
-            
-            # Test connection immediately
+
             logger.info("[OPTIMIZE] Testing database connection...")
             with engine.connect() as test_conn:
                 test_conn.execute(text("SELECT 1"))

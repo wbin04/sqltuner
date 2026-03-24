@@ -1,3 +1,5 @@
+import logging
+
 from typing import Any, Dict, List
 from uuid import UUID
 
@@ -10,6 +12,8 @@ from app.schemas.schema_def import (ColumnDef, ForeignKeyDef, IndexDef,
                                     SchemaDef, TableDef)
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 
 class DatabaseInspectorService:
@@ -144,13 +148,12 @@ class DatabaseInspectorService:
                 connect_args=connect_args,
                 pool_timeout=SQL_CONNECTION_TIMEOUT
             )
-            
-            # Test connection immediately to fail fast
+
             logger.info("[SCHEMA] Testing database connection...")
             with engine.connect() as test_conn:
                 test_conn.execute(text("SELECT 1"))
             logger.info("[SCHEMA] Connection test successful")
-            
+
             inspector = inspect(engine)
 
             tables = []

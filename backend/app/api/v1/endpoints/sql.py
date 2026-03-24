@@ -184,7 +184,7 @@ async def execute_sql(
     db: AsyncSession = Depends(get_db)
 ):
     logger.info(f"[DEBUG] execute_sql called - connection_id: {request.connection_id}, user: {current_user.email}")
-    
+
     try:
         connection = await connection_repository.get_by_user_and_id(
             db=db,
@@ -213,8 +213,8 @@ async def execute_sql(
     if connection.db_type == DBType.SIMULATION:
         logger.info(f"[DEBUG] Entering sandbox execution for connection {connection.id}")
         return run_sandbox_execution(connection, request)
-    
-    logger.info(f"[DEBUG] Not SIMULATION, proceeding to live execution")
+
+    logger.info("[DEBUG] Not SIMULATION, proceeding to live execution")
 
     logger.info(
         f"[LIVE] Executing query on real database: "
@@ -249,13 +249,12 @@ async def execute_sql(
             connect_args=connect_args,
             pool_timeout=SQL_CONNECTION_TIMEOUT
         )
-        
-        # Test connection immediately to fail fast
+
         logger.info("[LIVE] Testing database connection...")
         with engine.connect() as test_conn:
             test_conn.execute(text("SELECT 1"))
         logger.info("[LIVE] Connection test successful")
-        
+
     except Exception as e:
         logger.warning(
             f"[LIVE] Cannot connect to {connection.db_type.value} database "
@@ -394,13 +393,12 @@ async def explain_sql_plan(
             pool_recycle=3600,
             connect_args=connect_args,
             pool_timeout=SQL_CONNECTION_TIMEOUT)
-        
-        # Test connection immediately
+
         logger.info("[EXPLAIN] Testing database connection...")
         with engine.connect() as test_conn:
             test_conn.execute(text("SELECT 1"))
         logger.info("[EXPLAIN] Connection test successful")
-        
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -532,8 +530,7 @@ async def optimize_sql(
                 pool_recycle=3600,
                 connect_args=connect_args,
                 pool_timeout=SQL_CONNECTION_TIMEOUT)
-            
-            # Test connection immediately
+
             logger.info("[OPTIMIZE] Testing database connection...")
             with engine.connect() as test_conn:
                 test_conn.execute(text("SELECT 1"))

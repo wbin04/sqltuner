@@ -30,12 +30,23 @@ app = FastAPI(
 @app.middleware("http")
 async def force_https_redirect(request: Request, call_next):
     response = await call_next(request)
-    if response.status_code in [301, 302, 303, 307, 308]:
+    # Only force HTTPS in production
+    if settings.ENVIRONMENT == "production" and response.status_code in [301, 302, 303, 307, 308]:
         location = response.headers.get("location")
         if location and location.startswith("http://"):
             response.headers["location"] = location.replace("http://",
                                                             "https://", 1)
     return response
+
+# SessionMiddleware must be added BEFORE CORSMiddleware
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.SECRET_KEY,
+    session_cookie="session",  # Explicit session cookie name
+    max_age=3600,  # 1 hour
+    same_site="lax",  # Allow same-site for local dev
+    https_only=False  # Allow HTTP for local dev
+)
 
 # Configure CORS
 app.add_middleware(
@@ -45,8 +56,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-app.add_middleware(SessionMiddleware, secret_key=settings.SECRET_KEY)
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
 

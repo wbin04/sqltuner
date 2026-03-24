@@ -53,6 +53,15 @@ class Settings(BaseSettings):
     SANDBOX_MAX_ROWS: int = 10000
     RESULT_MAX_ROWS: int = 100
 
+    # Cloud Tasks Configuration
+    ENVIRONMENT: str = "local"  # "local" hoặc "production"
+    GCP_PROJECT_ID: Optional[str] = None
+    GCP_LOCATION: str = "asia-southeast1"
+    CLOUD_TASKS_QUEUE: str = "sqltuner-queue"
+    BACKEND_URL: Optional[str] = None  # URL của Cloud Run service
+    # Service account để invoke Cloud Run
+    SERVICE_ACCOUNT_EMAIL: Optional[str] = None
+
     @property
     def SQLALCHEMY_DATABASE_URL(self) -> str:
         if not self.ENABLE_DATABASE:

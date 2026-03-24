@@ -8,14 +8,10 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 import httpx
 import sqlglot
 from app.core.config import settings
-from app.core.constants import (
-    APP_CONFIG_KEY_LLM_URL,
-    LLM_HTTP_CONNECT_TIMEOUT,
-    LLM_HTTP_POOL_TIMEOUT,
-    LLM_HTTP_WRITE_TIMEOUT,
-    LLM_REQUEST_TIMEOUT,
-    LLM_URL_CACHE_TTL,
-)
+from app.core.constants import (APP_CONFIG_KEY_LLM_URL,
+                                LLM_HTTP_CONNECT_TIMEOUT,
+                                LLM_HTTP_POOL_TIMEOUT, LLM_HTTP_WRITE_TIMEOUT,
+                                LLM_REQUEST_TIMEOUT, LLM_URL_CACHE_TTL)
 from app.core.exceptions import LLMServiceError
 from app.core.prompts import (SQL_OPTIMIZATION_SYSTEM_PROMPT,
                               get_sql_explanation_prompt,
