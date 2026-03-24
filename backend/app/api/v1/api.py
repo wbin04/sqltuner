@@ -1,8 +1,6 @@
+from app.api.v1.endpoints import (auth, chat, connections, db_inspector,
+                                  history, simulation, sql, tasks)
 from fastapi import APIRouter
-
-from backend.app.api.v1.endpoints import (auth, chat, connections,
-                                          db_inspector, history, simulation,
-                                          sql)
 
 api_router = APIRouter()
 
@@ -46,4 +44,10 @@ api_router.include_router(
     simulation.router,
     prefix="/simulation",
     tags=["simulation"]
+)
+
+api_router.include_router(
+    tasks.router,
+    prefix="",
+    tags=["tasks"]
 )

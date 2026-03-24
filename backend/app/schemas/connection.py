@@ -2,9 +2,8 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 from uuid import UUID
 
+from app.models.models import ChatRole, DBType, UserRole
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
-
-from backend.app.models.models import ChatRole, DBType, UserRole
 
 
 class UserBase(BaseModel):

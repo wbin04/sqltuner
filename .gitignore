@@ -16,6 +16,10 @@ node_modules/
 
 # dotenv environment variables file
 .env
+.env.prod
+.env.local
+.env.*.local
+*.env
 
 # VS Code
 .vscode/*

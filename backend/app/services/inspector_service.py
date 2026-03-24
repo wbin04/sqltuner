@@ -1,18 +1,19 @@
+import logging
+
 from typing import Any, Dict, List
 from uuid import UUID
 
+from app.core.constants import LOCALHOSTS, SQL_CONNECTION_TIMEOUT
+from app.core.exceptions import DatabaseConnectionError, ValidationError
+from app.core.security import decrypt_password
+from app.models.models import DBType
+from app.repositories.connection_repository import connection_repository
+from app.schemas.schema_def import (ColumnDef, ForeignKeyDef, IndexDef,
+                                    SchemaDef, TableDef)
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.core.constants import LOCALHOSTS
-from backend.app.core.exceptions import (DatabaseConnectionError,
-                                         ValidationError)
-from backend.app.core.security import decrypt_password
-from backend.app.models.models import DBType
-from backend.app.repositories.connection_repository import \
-    connection_repository
-from backend.app.schemas.schema_def import (ColumnDef, ForeignKeyDef, IndexDef,
-                                            SchemaDef, TableDef)
+logger = logging.getLogger(__name__)
 
 
 class DatabaseInspectorService:
@@ -136,7 +137,23 @@ class DatabaseInspectorService:
                 f"Unsupported database type: {connection.db_type}")
 
         try:
-            engine = create_engine(db_url)
+            connect_args = {}
+            if connection.db_type.value == "postgresql":
+                connect_args = {"connect_timeout": SQL_CONNECTION_TIMEOUT}
+            elif connection.db_type.value == "mysql":
+                connect_args = {"connect_timeout": SQL_CONNECTION_TIMEOUT}
+
+            engine = create_engine(
+                db_url,
+                connect_args=connect_args,
+                pool_timeout=SQL_CONNECTION_TIMEOUT
+            )
+
+            logger.info("[SCHEMA] Testing database connection...")
+            with engine.connect() as test_conn:
+                test_conn.execute(text("SELECT 1"))
+            logger.info("[SCHEMA] Connection test successful")
+
             inspector = inspect(engine)
 
             tables = []

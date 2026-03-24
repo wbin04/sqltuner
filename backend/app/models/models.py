@@ -1,14 +1,13 @@
 import enum
 import uuid
 
+from app.db.base import Base
 from sqlalchemy import TIMESTAMP, Boolean, Column
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy import Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-
-from backend.app.db.base import Base
 
 
 class UserRole(str, enum.Enum):
@@ -47,6 +46,19 @@ class DBType(str, enum.Enum):
     POSTGRES = "postgres"
     MYSQL = "mysql"
     SIMULATION = "simulation"
+
+
+class TaskStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
+    SUCCESS = "SUCCESS"
+    FAILED = "FAILED"
+
+
+class TaskType(str, enum.Enum):
+    LLM_OPTIMIZE = "llm_optimize"
+    SQLITE_SANDBOX = "sqlite_sandbox"
+    SCHEMA_SYNC = "schema_sync"
 
 
 class ChatRole(str, enum.Enum):
@@ -218,3 +230,54 @@ class PerformanceAnalysis(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     query_log = relationship("QueryLog", back_populates="performance_analysis")
+
+
+class AppConfig(Base):
+    __tablename__ = "app_config"
+
+    key = Column(String(255), primary_key=True)
+    value = Column(Text, nullable=True)
+
+
+class BackgroundTask(Base):
+    """
+    Model để tracking các background task thông qua Google Cloud Tasks.
+    Lưu trữ trạng thái, payload, và kết quả của task.
+    """
+    __tablename__ = "background_tasks"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    task_type = Column(
+        SQLEnum(
+            TaskType,
+            name="task_type",
+            values_callable=lambda x: [e.value for e in x]
+        ),
+        nullable=False
+    )
+    status = Column(
+        SQLEnum(
+            TaskStatus,
+            name="task_status",
+            values_callable=lambda x: [e.value for e in x]
+        ),
+        default=TaskStatus.PENDING,
+        nullable=False
+    )
+    payload = Column(JSONB, nullable=False, server_default="{}")
+    result = Column(JSONB, nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at = Column(
+        TIMESTAMP(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now()
+    )
+
+    user = relationship("User")

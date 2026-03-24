@@ -6,16 +6,15 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 from uuid import UUID
 
+from app.core.constants import LOCALHOSTS, SQL_CONNECTION_TIMEOUT
+from app.core.exceptions import NotFoundError, ValidationError
+from app.core.security import decrypt_password
+from app.models.models import (Conversation, DBConnection, DBType,
+                               PerformanceAnalysis, QueryLog)
+from app.services.llm_service import llm_service
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-
-from backend.app.core.constants import LOCALHOSTS
-from backend.app.core.exceptions import NotFoundError, ValidationError
-from backend.app.core.security import decrypt_password
-from backend.app.models.models import (Conversation, DBConnection, DBType,
-                                       PerformanceAnalysis, QueryLog)
-from backend.app.services.llm_service import llm_service
 
 logger = logging.getLogger(__name__)
 
@@ -157,9 +156,25 @@ class ExplainPlanAnalyzer:
             conn_string = ConnectionStringBuilder.build(
                 connection
             )
+
+            connect_args = {}
+            if connection.db_type.value == "postgresql":
+                connect_args = {"connect_timeout": SQL_CONNECTION_TIMEOUT}
+            elif connection.db_type.value == "mysql":
+                connect_args = {"connect_timeout": SQL_CONNECTION_TIMEOUT}
+
             engine = create_engine(
-                conn_string, pool_pre_ping=True, pool_recycle=3600
+                conn_string,
+                pool_pre_ping=True,
+                pool_recycle=3600,
+                connect_args=connect_args,
+                pool_timeout=SQL_CONNECTION_TIMEOUT
             )
+
+            logger.info("[OPTIMIZE] Testing database connection...")
+            with engine.connect() as test_conn:
+                test_conn.execute(text("SELECT 1"))
+            logger.info("[OPTIMIZE] Connection test successful")
 
             with engine.connect() as conn:
                 if connection.db_type == DBType.POSTGRES:

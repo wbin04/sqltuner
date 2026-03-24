@@ -1,0 +1,80 @@
+steps:
+  # Build Backend
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/sqltuner-backend:${_SHORT_SHA}'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/sqltuner-backend:latest'
+      - '-f'
+      - 'backend/Dockerfile.prod'
+      - './backend'
+    id: 'build-backend'
+
+  # Build Frontend
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '--no-cache'
+      - '--build-arg'
+      - 'VITE_API_URL=${_BACKEND_URL}/api/v1'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/sqltuner-frontend:${_SHORT_SHA}'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/sqltuner-frontend:latest'
+      - '-f'
+      - 'frontend/Dockerfile.prod'
+      - './frontend'
+    id: 'build-frontend'
+
+  # Deploy Backend
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'sqltuner-backend'
+      - '--image'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/sqltuner-backend:${_SHORT_SHA}'
+      - '--region'
+      - '${_REGION}'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--quiet'
+    id: 'deploy-backend'
+    waitFor: ['build-backend']
+
+  # Deploy Frontend
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'sqltuner-frontend'
+      - '--image'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/sqltuner-frontend:${_SHORT_SHA}'
+      - '--region'
+      - '${_REGION}'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--quiet'
+    id: 'deploy-frontend'
+    waitFor: ['build-frontend']
+
+images:
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/sqltuner-backend:${_SHORT_SHA}'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/sqltuner-backend:latest'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/sqltuner-frontend:${_SHORT_SHA}'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/sqltuner-frontend:latest'
+
+substitutions:
+  _REGION: 'asia-southeast1'
+  _REPOSITORY: 'sqltuner'
+  _BACKEND_URL: 'https://sqltuner-backend-834344415984.asia-southeast1.run.app'
+  _SHORT_SHA: 'latest'
+
+options:
+  machineType: 'N1_HIGHCPU_8'

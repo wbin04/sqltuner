@@ -3,18 +3,23 @@ import logging
 import re
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import httpx
 import sqlglot
+from app.core.config import settings
+from app.core.constants import (APP_CONFIG_KEY_LLM_URL,
+                                LLM_HTTP_CONNECT_TIMEOUT,
+                                LLM_HTTP_POOL_TIMEOUT, LLM_HTTP_WRITE_TIMEOUT,
+                                LLM_REQUEST_TIMEOUT, LLM_URL_CACHE_TTL)
+from app.core.exceptions import LLMServiceError
+from app.core.prompts import (SQL_OPTIMIZATION_SYSTEM_PROMPT,
+                              get_sql_explanation_prompt,
+                              get_sql_optimization_prompt)
 from sqlglot import exp
 
-from backend.app.core.config import settings
-from backend.app.core.constants import LLM_REQUEST_TIMEOUT
-from backend.app.core.exceptions import LLMServiceError
-from backend.app.core.prompts import (SQL_OPTIMIZATION_SYSTEM_PROMPT,
-                                      get_sql_explanation_prompt,
-                                      get_sql_optimization_prompt)
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -57,13 +62,48 @@ class LLMService:
         self.coder_model: str = settings.MODEL_NAME
         self.chat_model: str = settings.MODEL_CHAT_NAME
         self.timeout: int = LLM_REQUEST_TIMEOUT
+        self._url_cache: Optional[str] = None
+        self._cache_timestamp: float = 0
+        self._cache_ttl: int = LLM_URL_CACHE_TTL
+
+    def update_base_url(self, new_url: str) -> None:
+        if new_url and new_url.strip():
+            self.base_url = new_url.strip().rstrip('/')
+            self._url_cache = self.base_url
+            self._cache_timestamp = time.time()
+            logger.info(f"[LLM] Base URL updated to: {self.base_url}")
+
+    async def fetch_and_update_url_from_db(
+        self, db: "AsyncSession"
+    ) -> None:
+        try:
+            from app.repositories.config_repository import config_repository
+
+            llm_url = await config_repository.get_config(
+                db, APP_CONFIG_KEY_LLM_URL
+            )
+            if llm_url and llm_url.strip():
+                self.update_base_url(llm_url)
+                logger.info(
+                    f"[LLM] Loaded URL from database: {llm_url}"
+                )
+            else:
+                logger.info(
+                    f"[LLM] No URL in database, using default: "
+                    f"{settings.OLLAMA_BASE_URL}"
+                )
+        except Exception as e:
+            logger.warning(
+                f"[LLM] Failed to fetch URL from database: {e}, "
+                f"using default"
+            )
 
     def _create_timeout_config(self) -> httpx.Timeout:
         return httpx.Timeout(
-            connect=10.0,
+            connect=LLM_HTTP_CONNECT_TIMEOUT,
             read=float(self.timeout),
-            write=30.0,
-            pool=10.0
+            write=LLM_HTTP_WRITE_TIMEOUT,
+            pool=LLM_HTTP_POOL_TIMEOUT
         )
 
     def _build_api_url(self, endpoint: str = "generate") -> str:

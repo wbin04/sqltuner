@@ -5,6 +5,20 @@ from llama_cpp import Llama
 import os
 import json
 import time
+import atexit
+import signal
+from dotenv import load_dotenv
+from pyngrok import ngrok
+from supabase import create_client, Client
+
+load_dotenv()
+
+SUPABASE_URL = os.getenv('SUPABASE_URL')
+SUPABASE_SERVICE_ROLE_KEY = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+NGROK_AUTH_TOKEN = os.getenv('NGROK_AUTH_TOKEN')
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+tunnel = None
 
 app = Flask(__name__)
 
@@ -18,6 +32,54 @@ llm = Llama(
     verbose=False
 )
 print("Mô hình đã tải xong!")
+
+
+def init_tunnel():
+    """Khởi tạo Ngrok tunnel và cập nhật URL vào Supabase"""
+    global tunnel
+    try:
+        ngrok.set_auth_token(NGROK_AUTH_TOKEN)
+
+        # tunnel = ngrok.connect(11434, bind_tls=True)
+        tunnel = ngrok.connect(11434, bind_tls=True, host_header="rewrite")
+        public_url = tunnel.public_url
+        
+        print(f"\n{'='*50}")
+        print(f"Ngrok Tunnel đã khởi động!")
+        print(f"Public URL: {public_url}")
+        print(f"{'='*50}\n")
+
+        supabase.table('app_config').update(
+            {'value': public_url}
+        ).eq('key', 'llm_url').execute()
+        
+        print("Đã cập nhật URL vào Supabase")
+        
+    except Exception as e:
+        print(f"Lỗi khi khởi tạo tunnel: {e}")
+
+
+def cleanup():
+    global tunnel
+    try:
+        print("\nĐang dọn dẹp...")
+        
+        # Xóa URL trong Supabase
+        supabase.table('app_config').update(
+            {'value': ''}
+        ).eq('key', 'llm_url').execute()
+        
+        print("Đã xóa URL trong Supabase")
+        
+        # Đóng tunnel
+        if tunnel:
+            ngrok.disconnect(tunnel.public_url)
+            print("Đã đóng Ngrok tunnel")
+        
+        ngrok.kill()
+        
+    except Exception as e:
+        print(f"Lỗi khi dọn dẹp: {e}")
 
 
 def format_chat_prompt(messages):
@@ -53,11 +115,11 @@ def format_generate_prompt(prompt_text, system_text=None):
 def generate():
     data = request.json
     prompt = data.get('prompt', '')
-    system = data.get('system', None)  # Backend sends 'system' not 'system_prompt'
+    system = data.get('system', None)
     model = data.get('model', 'qwen2.5:3b')
     stream = data.get('stream', False)
     options = data.get('options', {})
-    format_type = data.get('format', None)  # Check if JSON mode requested
+    format_type = data.get('format', None)
 
     temperature = options.get('temperature', 0.7)
     max_tokens = options.get('num_predict', 512)
@@ -237,13 +299,25 @@ def index():
 
 if __name__ == "__main__":
     print("\n" + "="*50)
-    print("🚀 Ollama-compatible server starting...")
-    print("📍 Server URL: http://localhost:11434")
-    print("📚 Available endpoints:")
+    print("Ollama-compatible server starting...")
+    print("Server URL: http://localhost:11434")
+    print("Available endpoints:")
     print("   - POST /api/generate")
     print("   - POST /api/chat")
     print("   - GET  /api/tags")
     print("   - POST /api/show")
     print("="*50 + "\n")
+
+    init_tunnel()
+
+    atexit.register(cleanup)
+    signal.signal(signal.SIGINT, lambda sig, frame: (cleanup(), exit(0)))
+    signal.signal(signal.SIGTERM, lambda sig, frame: (cleanup(), exit(0)))
     
-    app.run(host='0.0.0.0', port=11434, debug=False)
+    try:
+        app.run(host='0.0.0.0', port=11434, debug=False)
+    except KeyboardInterrupt:
+        print("\nServer đang tắt...")
+        cleanup()
+    finally:
+        cleanup()

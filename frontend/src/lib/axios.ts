@@ -1,7 +1,7 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
+import { API_URL } from '../config';
 
-// Get API URL from environment variable
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// API URL from config
 
 // Track if we're already redirecting to prevent infinite loops
 let isRedirecting = false;
@@ -9,7 +9,7 @@ let isRedirecting = false;
 // Create axios instance
 const axiosInstance = axios.create({
   baseURL: API_URL,
-  timeout: 120000, // 120 seconds for LLM requests
+  timeout: 360000, // 360 seconds (6 minutes) - allows backend SQL execution timeout of 300s + buffer
   withCredentials: true, // Send cookies with requests
   headers: {
     'Content-Type': 'application/json',

@@ -5,22 +5,18 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from uuid import UUID
 
+from app.api.v1.endpoints.auth import get_current_user
+from app.core.prompts import (CHAT_GENERAL_SYSTEM_PROMPT,
+                              get_chat_sql_system_prompt)
+from app.db.session import get_db
+from app.models.models import ChatRole, User
+from app.repositories.connection_repository import connection_repository
+from app.repositories.conversation_repository import conversation_repository
+from app.repositories.query_log_repository import query_log_repository
+from app.schemas.sql import ChatCompletionRequest, ChatCompletionResponse
+from app.services.llm_service import llm_service
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from backend.app.api.v1.endpoints.auth import get_current_user
-from backend.app.core.prompts import (CHAT_GENERAL_SYSTEM_PROMPT,
-                                      get_chat_sql_system_prompt)
-from backend.app.db.session import get_db
-from backend.app.models.models import ChatRole, User
-from backend.app.repositories.connection_repository import \
-    connection_repository
-from backend.app.repositories.conversation_repository import \
-    conversation_repository
-from backend.app.repositories.query_log_repository import query_log_repository
-from backend.app.schemas.sql import (ChatCompletionRequest,
-                                     ChatCompletionResponse)
-from backend.app.services.llm_service import llm_service
 
 router = APIRouter()
 

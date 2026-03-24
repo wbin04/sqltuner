@@ -12,7 +12,7 @@ export const workspaceService = {
    * Fetch all workspaces for the current user
    */
   async getAll(): Promise<Workspace[]> {
-    const response = await api.get<Workspace[]>(BASE_URL);
+    const response = await api.get<Workspace[]>(`${BASE_URL}/`);
     return response.data;
   },
 
@@ -28,7 +28,7 @@ export const workspaceService = {
    * Create a new workspace (real or simulation)
    */
   async create(payload: CreateWorkspacePayload): Promise<Workspace> {
-    const response = await api.post<Workspace>(BASE_URL, payload);
+    const response = await api.post<Workspace>(`${BASE_URL}/`, payload);
     return response.data;
   },
 

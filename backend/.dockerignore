@@ -1,0 +1,53 @@
+# Prevent sensitive files from being copied into Docker image
+.env*
+*.env
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+.pytest_cache
+.coverage
+htmlcov
+
+# Virtual environments
+.venv
+venv
+ENV
+env
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Testing
+tests/
+test_*.py
+*_test.py
+pytest.ini
+
+# Documentation
+*.md
+docs/
+
+# Alembic (keep only necessary files)
+alembic/versions/__pycache__
+
+# Logs
+*.log
+logs/

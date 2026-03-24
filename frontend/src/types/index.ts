@@ -121,3 +121,12 @@ export interface QueryResult {
   rowCount: number;
   executionTime?: number;
 }
+
+// ============ Re-export all type modules ============
+export * from './api';
+export * from './auth';
+export * from './history';
+export * from './optimization';
+export * from './simulation';
+export * from './workspace';
+export * from './task';

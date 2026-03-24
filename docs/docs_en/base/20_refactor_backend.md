@@ -39,7 +39,7 @@ Create a generic class `BaseRepository[ModelType, CreateSchemaType, UpdateSchema
 ## 3. Implement Concrete Repositories
 **File:** `backend/app/repositories/connection_repository.py`
 - Inherit from `BaseRepository`.
-- Model: `DBConnection` (from `backend.app.models.models`).
+- Model: `DBConnection` (from `app.models.models`).
 
 ## 4. Centralize Prompts (NEW)
 **File:** `backend/app/core/prompts.py`
@@ -55,7 +55,7 @@ Create a generic class `BaseRepository[ModelType, CreateSchemaType, UpdateSchema
 
 ## 5. Refactor Services
 **Target:** `backend/app/services/llm_service.py`
-- **Import Prompts:** Import the constants from `backend.app.core.prompts`.
+- **Import Prompts:** Import the constants from `app.core.prompts`.
 - **Remove Hardcoded Strings:** Replace the hardcoded strings with the imported constants.
 
 **Target:** `backend/app/services/connection_service.py`
@@ -67,7 +67,7 @@ Create a generic class `BaseRepository[ModelType, CreateSchemaType, UpdateSchema
 - Call `connection_service` methods.
 
 # CODING STANDARDS
-- **Imports:** Use absolute imports (e.g., `from backend.app.core.prompts import SQL_OPTIMIZATION_SYSTEM_PROMPT`).
+- **Imports:** Use absolute imports (e.g., `from app.core.prompts import SQL_OPTIMIZATION_SYSTEM_PROMPT`).
 - **Clean Code:** Keep `llm_service.py` focused on *calling* the API and handling JSON parsing, not storing text.
 
 # OUTPUT DELIVERABLES

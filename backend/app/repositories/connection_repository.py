@@ -1,13 +1,11 @@
 from typing import List, Optional
 from uuid import UUID
 
+from app.models.models import DBConnection, DBType
+from app.repositories.base import BaseRepository
+from app.schemas.connection import DBConnectionCreate, DBConnectionUpdate
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from backend.app.models.models import DBConnection, DBType
-from backend.app.repositories.base import BaseRepository
-from backend.app.schemas.connection import (DBConnectionCreate,
-                                            DBConnectionUpdate)
 
 
 class ConnectionRepository(

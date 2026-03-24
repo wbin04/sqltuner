@@ -1,16 +1,12 @@
-from backend.app.schemas.connection import (ConversationCreate,
-                                            ConversationResponse,
-                                            DBConnectionCreate,
-                                            DBConnectionResponse,
-                                            DBConnectionUpdate,
-                                            DBConnectionWithSchema,
-                                            FeedbackCreate, FeedbackResponse,
-                                            PerformanceAnalysisCreate,
-                                            PerformanceAnalysisResponse,
-                                            QueryLogCreate, QueryLogResponse,
-                                            SchemaSyncRequest,
-                                            SchemaSyncResponse, UserCreate,
-                                            UserResponse)
+from app.schemas.connection import (ConversationCreate, ConversationResponse,
+                                    DBConnectionCreate, DBConnectionResponse,
+                                    DBConnectionUpdate, DBConnectionWithSchema,
+                                    FeedbackCreate, FeedbackResponse,
+                                    PerformanceAnalysisCreate,
+                                    PerformanceAnalysisResponse,
+                                    QueryLogCreate, QueryLogResponse,
+                                    SchemaSyncRequest, SchemaSyncResponse,
+                                    UserCreate, UserResponse)
 
 __all__ = [
     "UserCreate",
