@@ -15,13 +15,14 @@ interface QueryResult {
 
 interface UseEditorLogicProps {
   connectionId: string;
+  initialConversationId?: string;
 }
 
-export function useEditorLogic({ connectionId }: UseEditorLogicProps) {
+export function useEditorLogic({ connectionId, initialConversationId }: UseEditorLogicProps) {
   const queryClient = useQueryClient();
 
   // State
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(initialConversationId || null);
   const [queryResults, setQueryResults] = useState<Map<string, QueryResult>>(new Map());
   const [optimizationResult, setOptimizationResult] = useState<SQLOptimizeResponse | null>(null);
   const [isOptimizationModalOpen, setIsOptimizationModalOpen] = useState(false);
@@ -264,13 +265,36 @@ export function useEditorLogic({ connectionId }: UseEditorLogicProps) {
     setActiveConversationId(null);
     // Clear applied optimization messages when starting new chat
     setAppliedOptimizationMessages([]);
+    // URL will be updated by the effect in EditorPage
   }, []);
 
   const handleSelectConversation = useCallback((id: string) => {
     setActiveConversationId(id);
     // Clear applied optimization messages when switching conversations
     setAppliedOptimizationMessages([]);
+    // URL will be updated by the effect in EditorPage
   }, []);
+
+  const handleRenameConversation = useCallback(
+    async (conversationId: string, newTitle: string) => {
+      await chatService.renameConversation(conversationId, newTitle);
+      queryClient.invalidateQueries({ queryKey: ['conversations', connectionId] });
+    },
+    [connectionId, queryClient]
+  );
+
+  const handleDeleteConversation = useCallback(
+    async (conversationId: string) => {
+      await chatService.deleteConversation(conversationId);
+      queryClient.invalidateQueries({ queryKey: ['conversations', connectionId] });
+      // If the deleted conversation was active, reset to new chat
+      if (activeConversationId === conversationId) {
+        setActiveConversationId(null);
+        setAppliedOptimizationMessages([]);
+      }
+    },
+    [connectionId, queryClient, activeConversationId]
+  );
 
   const handleCloseOptimizationModal = useCallback(() => {
     setIsOptimizationModalOpen(false);
@@ -328,6 +352,8 @@ export function useEditorLogic({ connectionId }: UseEditorLogicProps) {
     handleExplain,
     handleNewChat,
     handleSelectConversation,
+    handleRenameConversation,
+    handleDeleteConversation,
     handleCloseOptimizationModal,
     handleApplyOptimization,
 

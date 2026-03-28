@@ -22,7 +22,7 @@ import { toast } from 'react-toastify';
 type TabType = 'structure' | 'data';
 
 export function SchemaEditor() {
-  const { workspaceId } = useParams<{ workspaceId: string }>();
+  const { workspaceId, conversationId } = useParams<{ workspaceId: string; conversationId?: string }>();
   const navigate = useNavigate();
   const { workspace, isLoading, isError } = useWorkspace(workspaceId!);
   
@@ -466,7 +466,7 @@ export function SchemaEditor() {
       )}>
         <div className="flex items-center gap-4">
           <button
-            onClick={() => navigate(`/editor/${workspaceId}`)}
+            onClick={() => navigate(conversationId ? `/editor/${workspaceId}/${conversationId}` : `/editor/${workspaceId}`)}
             className={cn(
               'p-2 rounded-lg transition-colors',
               'hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark'

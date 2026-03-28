@@ -52,6 +52,7 @@ export interface Conversation {
   id: string;
   title: string;
   created_at: string;
+  updated_at: string;
 }
 
 export interface ChatCompletionRequest {
@@ -149,5 +150,26 @@ export const chatService = {
       is_schema_design: msg.is_schema_design ?? false,
       created_at: msg.created_at,
     }));
+  },
+
+  /**
+   * Rename a conversation
+   */
+  async renameConversation(conversationId: string, title: string): Promise<{ id: string; title: string }> {
+    const response = await axios.patch<{ id: string; title: string }>(
+      `/chat/conversations/${conversationId}/rename`,
+      { title }
+    );
+    return response.data;
+  },
+
+  /**
+   * Delete a conversation
+   */
+  async deleteConversation(conversationId: string): Promise<{ success: boolean; id: string }> {
+    const response = await axios.delete<{ success: boolean; id: string }>(
+      `/chat/conversations/${conversationId}`
+    );
+    return response.data;
   },
 };

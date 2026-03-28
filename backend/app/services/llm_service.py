@@ -1,4 +1,5 @@
 import json
+import asyncio
 import logging
 import re
 import time
@@ -15,12 +16,17 @@ from app.core.constants import (APP_CONFIG_KEY_LLM_URL,
 from app.core.exceptions import LLMServiceError
 from app.core.prompts import (SCHEMA_CLARIFICATION_SYSTEM_PROMPT,
                               SCHEMA_GENERATION_SYSTEM_PROMPT,
+                              SCHEMA_PHASE1_SYSTEM_PROMPT,
+                              SCHEMA_PHASE2_SYSTEM_PROMPT,
                               SQL_OPTIMIZATION_SYSTEM_PROMPT,
                               get_schema_clarification_prompt,
                               get_schema_generation_prompt,
                               get_sql_explanation_prompt,
                               get_sql_optimization_prompt)
-from sqlglot import exp
+
+from app.repositories.config_repository import config_repository
+from sqlglot import exp as sqlglot_exp
+
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -139,6 +145,7 @@ class LLMService:
         max_tokens: int,
         read_timeout: float = 120.0,
         json_mode: bool = True,
+        num_ctx: int = 2048,
     ) -> str:
         url = self._build_api_url()
         payload_config = OllamaPayload(
@@ -146,7 +153,7 @@ class LLMService:
             prompt=prompt,
             system_prompt=system_prompt,
             temperature=0.1,
-            num_ctx=2048,
+            num_ctx=num_ctx,
             num_predict=max_tokens,
             json_mode=json_mode,
         )
@@ -170,11 +177,6 @@ class LLMService:
         description: str,
         clarification_context: str = "",
     ) -> dict:
-        from app.core.prompts import (
-            SCHEMA_PHASE1_SYSTEM_PROMPT,
-            SCHEMA_PHASE2_SYSTEM_PROMPT,
-        )
-
         # Phase 1: table structure
         phase1_prompt = (
             f"List the tables needed for this system: {description}"
@@ -206,72 +208,111 @@ class LLMService:
             logger.error("[SCHEMA-2P] Phase 1 failed: %s", e)
             raise ValueError(f"Schema structure generation failed: {e}")
 
-        # Phase 2: enrich columns per batch
-        BATCH_SIZE = 2
+        # Phase 2: enrich ALL tables in a single call
+        all_lines = []
+        for t in tables_raw:
+            fk_refs = t.get("has_fk_to", [])
+            fk_info = f", FK to: {', '.join(fk_refs)}" if fk_refs else ""
+            key_cols = t.get("key_columns", [])
+            cols_hint = (
+                f", include columns: {', '.join(key_cols)}" if key_cols else ""
+            )
+            all_lines.append(
+                f'Table "{t["name"]}": {t.get("purpose", "")}{fk_info}{cols_hint}'
+            )
+
+        phase2_prompt = (
+            f"System: {description}"
+            + (
+                f"\nUser requirements: {clarification_context.strip()}"
+                if clarification_context.strip()
+                else ""
+            )
+            + f"\n\nGenerate columns for ALL these tables:\n"
+            + "\n".join(all_lines)
+        )
+
+        logger.info(
+            "[SCHEMA-2P] Phase 2 — single call for %d tables: %s",
+            len(tables_raw),
+            [t.get("name") for t in tables_raw],
+        )
+
         enriched_tables: list[dict] = []
 
-        for batch_idx in range(0, len(tables_raw), BATCH_SIZE):
-            batch = tables_raw[batch_idx:batch_idx + BATCH_SIZE]
-
-            batch_lines = []
-            for t in batch:
-                fk_refs = t.get("has_fk_to", [])
-                fk_info = f", references: {', '.join(fk_refs)}" if fk_refs else ""
-                batch_lines.append(
-                    f'Table "{t["name"]}": {t.get("purpose", "")}{fk_info}'
-                )
-
-            phase2_prompt = (
-                f"System context: {description}\n\n"
-                f"Add columns to these tables:\n"
-                + "\n".join(batch_lines)
+        try:
+            phase2_raw = await self._call_ollama_with_timeout(
+                prompt=phase2_prompt,
+                system_prompt=SCHEMA_PHASE2_SYSTEM_PROMPT,
+                max_tokens=1300,      # đủ cho ~5-6 tables với 6-7 cols mỗi table
+                read_timeout=180.0,   # single call lớn hơn → timeout cao hơn
+                num_ctx=3072,         # đủ cho input + output
             )
+            clean2 = re.sub(r"```(?:json)?\s*|```", "", phase2_raw).strip()
+            parsed2 = json.loads(self._extract_json_object(clean2))
+            batch_result = parsed2.get("tables", [])
 
-            batch_num = batch_idx // BATCH_SIZE + 1
-            total_batches = (len(tables_raw) + BATCH_SIZE - 1) // BATCH_SIZE
+            if not batch_result:
+                raise ValueError("Phase 2 response missing 'tables' key or empty")
+
+            for table in batch_result:
+                if not isinstance(table, dict) or "name" not in table:
+                    raise ValueError("Invalid table object in response")
+                cols = table.get("columns", [])
+                if not isinstance(cols, list) or len(cols) < 3:
+                    raise ValueError(
+                        f"Table '{table.get('name')}' has only {len(cols)} columns"
+                    )
+
+            enriched_tables.extend(batch_result)
             logger.info(
-                "[SCHEMA-2P] Phase 2 batch %d/%d: %s",
-                batch_num, total_batches, [t["name"] for t in batch],
+                "[SCHEMA-2P] Phase 2 done: %d tables enriched",
+                len(enriched_tables),
             )
 
-            try:
-                phase2_raw = await self._call_ollama_with_timeout(
-                    prompt=phase2_prompt,
-                    system_prompt=SCHEMA_PHASE2_SYSTEM_PROMPT,
-                    max_tokens=700,
-                    read_timeout=180.0,
-                )
-                clean2 = re.sub(r"```(?:json)?\s*|```", "", phase2_raw).strip()
-                batch_result = json.loads(self._extract_json_array(clean2))
-
-                for table in batch_result:
-                    cols = table.get("columns", [])
-                    if not isinstance(cols, list) or len(cols) < 2:
-                        raise ValueError(
-                            f"Table '{table.get('name')}' has insufficient columns"
-                        )
-
-                enriched_tables.extend(batch_result)
-
-            except Exception as e:
-                logger.warning(
-                    "[SCHEMA-2P] Phase 2 batch %d failed: %s — fallback",
-                    batch_num, e,
-                )
-                for t in batch:
-                    enriched_tables.append({
-                        "name": t["name"],
-                        "purpose": t.get("purpose", ""),
-                        "design_rationale": t.get("purpose", ""),
-                        "columns": [
-                            {"name": "id", "type": "UUID", "is_pk": True,
-                             "is_nullable": False, "default": None},
-                            {"name": "created_at", "type": "TIMESTAMP", "is_pk": False,
-                             "is_nullable": False, "default": None},
-                        ],
-                        "foreign_keys": [],
-                        "indexes": [],
+        except Exception as e:
+            logger.warning(
+                "[SCHEMA-2P] Phase 2 failed: %s — using key_columns fallback for all tables",
+                e,
+            )
+            # Fallback: dùng key_columns từ Phase 1 với type inference
+            for t in tables_raw:
+                fallback_cols = [
+                    {"name": "id", "type": "UUID", "is_pk": True,
+                     "is_nullable": False, "default": None},
+                    {"name": "created_at", "type": "TIMESTAMP", "is_pk": False,
+                     "is_nullable": False, "default": None},
+                ]
+                for col_name in t.get("key_columns", []):
+                    if col_name.endswith("_id"):
+                        col_type = "UUID"
+                    elif any(k in col_name for k in ["price", "amount", "total", "cost", "salary", "fee"]):
+                        col_type = "DECIMAL(10,2)"
+                    elif any(k in col_name for k in ["count", "quantity", "age", "number", "stock"]):
+                        col_type = "INTEGER"
+                    elif any(k in col_name for k in ["is_", "has_", "active", "enabled", "available"]):
+                        col_type = "BOOLEAN"
+                    elif any(k in col_name for k in ["date", "time", "_at", "due", "expiry"]):
+                        col_type = "TIMESTAMP"
+                    elif any(k in col_name for k in ["description", "notes", "content", "text", "detail"]):
+                        col_type = "TEXT"
+                    else:
+                        col_type = "VARCHAR(255)"
+                    fallback_cols.append({
+                        "name": col_name,
+                        "type": col_type,
+                        "is_pk": False,
+                        "is_nullable": True,
+                        "default": None,
                     })
+                enriched_tables.append({
+                    "name": t["name"],
+                    "purpose": t.get("purpose", ""),
+                    "design_rationale": t.get("purpose", ""),
+                    "columns": fallback_cols,
+                    "foreign_keys": [],
+                    "indexes": [],
+                })
 
         # Merge: attach purpose/rationale from Phase 1
         phase1_map = {t["name"]: t for t in tables_raw}
@@ -318,7 +359,6 @@ class LLMService:
         self, db: "AsyncSession"
     ) -> None:
         try:
-            from app.repositories.config_repository import config_repository
 
             llm_url = await config_repository.get_config(
                 db, APP_CONFIG_KEY_LLM_URL
@@ -481,7 +521,7 @@ class LLMService:
         context_marker = "\n\nAdditional context:\n"
 
         if prompt.startswith(prefix):
-            body = prompt[len(prefix):]
+            body = prompt.removeprefix(prefix)
             if context_marker in body:
                 parts = body.split(context_marker, 1)
                 description = parts[0].strip()
@@ -496,30 +536,45 @@ class LLMService:
         return json.dumps(result, ensure_ascii=False)
 
     def _is_sql_query(self, message: str) -> bool:
-        try:
-            clean_message = re.sub(
-                r'```sql\s*|\s*```', '', message, flags=re.IGNORECASE
-            )
-            clean_message = clean_message.strip()
-
-            sqlglot.parse_one(clean_message)
-            logger.info("[INTENT] SQL detected via sqlglot parsing")
-            return True
-        except Exception:
-            pass
-
         sql_keywords = [
             'SELECT', 'INSERT', 'UPDATE', 'DELETE',
             'CREATE', 'ALTER', 'DROP', 'WITH',
-            'TRUNCATE', 'MERGE', 'GRANT', 'REVOKE'
+            'TRUNCATE', 'MERGE', 'GRANT', 'REVOKE',
         ]
-
         message_upper = message.upper()
+        has_keyword = any(
+            re.search(rf'\b{kw}\b', message_upper)
+            for kw in sql_keywords
+        )
+        if has_keyword:
+            logger.info("[INTENT] SQL detected via keyword")
+            return True
 
-        for keyword in sql_keywords:
-            if re.search(rf'\b{keyword}\b', message_upper):
-                logger.info(f"[INTENT] SQL detected via keyword: {keyword}")
+        try:
+            clean_message = re.sub(
+                r'```sql\s*|\s*```', '', message, flags=re.IGNORECASE
+            ).strip()
+
+            if len(clean_message.split()) < 3:
+                return False
+
+            parsed = sqlglot.parse_one(clean_message)
+
+            is_real_sql = isinstance(parsed, (
+                sqlglot_exp.Select,
+                sqlglot_exp.Insert,
+                sqlglot_exp.Update,
+                sqlglot_exp.Delete,
+                sqlglot_exp.Create,
+                sqlglot_exp.Drop,
+                sqlglot_exp.Alter,
+                sqlglot_exp.With,
+            ))
+            if is_real_sql:
+                logger.info("[INTENT] SQL detected via sqlglot statement parsing")
                 return True
+        except Exception:
+            pass
 
         logger.info("[INTENT] No SQL detected - treating as general chat")
         return False
@@ -567,7 +622,7 @@ class LLMService:
             parsed = sqlglot.parse_one(sql_query)
             table_names = {
                 table.name.lower()
-                for table in parsed.find_all(exp.Table)
+                for table in parsed.find_all(sqlglot_exp.Table)
                 if table.name
             }
             return list(table_names)
@@ -825,8 +880,8 @@ class LLMService:
             prompt=prompt,
             system_prompt=SCHEMA_CLARIFICATION_SYSTEM_PROMPT,
             temperature=0.2,
-            num_ctx=1024,
-            num_predict=256,
+            num_ctx=2048,
+            num_predict=512,
             json_mode=True,
         )
 
@@ -836,7 +891,7 @@ class LLMService:
         try:
             raw = await self._make_ollama_request(payload, url)
             clean = re.sub(r"```json|```", "", raw).strip()
-            result = json.loads(clean)
+            result = json.loads(self._extract_json_object(clean))
             logger.info(
                 "[SCHEMA-GEN] Clarification check: "
                 "needs_clarification=%s",

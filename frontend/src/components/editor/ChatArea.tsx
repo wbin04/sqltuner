@@ -8,6 +8,7 @@ import { cn } from '../../lib/utils';
 import { SchemaGeneratedData } from '../../services/chatService';
 import { SchemaBlock } from './SchemaBlock';
 import { ClarificationBlock } from './ClarificationBlock';
+import { format } from 'date-fns';
 
 const CLARIFICATION_MARKER = 'Before designing the schema, I have a few questions:';
 
@@ -165,7 +166,7 @@ export function ChatArea({
                   {/* Normal message — hidden when it's a clarification */}
                   {!isClarificationMessage && (
                     <div className={cn(
-                      'flex gap-4',
+                      'flex gap-2 items-end',
                       message.role === 'user' ? 'justify-end' : 'justify-start'
                     )}>
                       <div className={cn(
@@ -189,6 +190,11 @@ export function ChatArea({
                             {message.content}
                           </p>
                         )}
+                      </div>
+                      
+                      {/* Timestamp Column on the right */}
+                      <div className="text-[11px] text-text-muted-DEFAULT dark:text-text-muted-dark opacity-60 mb-2 whitespace-nowrap flex-shrink-0">
+                        {format(new Date(message.created_at), 'HH:mm')}
                       </div>
                     </div>
                   )}

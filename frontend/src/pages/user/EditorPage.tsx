@@ -23,7 +23,7 @@ import { extractErrorMessage, getSQLErrorSuggestion } from '../../utils/sqlError
 import { toast } from 'react-toastify';
 
 export function EditorPage() {
-  const { workspaceId } = useParams<{ workspaceId: string }>();
+  const { workspaceId, conversationId } = useParams<{ workspaceId: string; conversationId?: string }>();
   const navigate = useNavigate();
   const [autoSyncTriggered, setAutoSyncTriggered] = useState(false);
   const [activeResultSql, setActiveResultSql] = useState<string | null>(null);
@@ -42,7 +42,16 @@ export function EditorPage() {
   const { workspace, isLoading, isError, error, syncSchema, isSyncing } = useWorkspace(workspaceId);
 
   // Use editor logic hook
-  const editorLogic = useEditorLogic({ connectionId: workspaceId });
+  const editorLogic = useEditorLogic({ connectionId: workspaceId, initialConversationId: conversationId });
+
+  // Sync URL when active conversation changes
+  useEffect(() => {
+    if (editorLogic.activeConversationId && editorLogic.activeConversationId !== conversationId) {
+      navigate(`/editor/${workspaceId}/${editorLogic.activeConversationId}`, { replace: true });
+    } else if (!editorLogic.activeConversationId && conversationId) {
+      navigate(`/editor/${workspaceId}`, { replace: true });
+    }
+  }, [editorLogic.activeConversationId, conversationId, navigate, workspaceId]);
 
   // Handlers that integrate with editor logic
   const handleSendMessage = (content: string) => {
@@ -238,11 +247,13 @@ export function EditorPage() {
               id: c.id,
               title: c.title,
               created_at: c.created_at,
-              updated_at: c.created_at,
+              updated_at: c.updated_at ?? c.created_at,
             }))}
             activeConversationId={editorLogic.activeConversationId}
             onSelectConversation={editorLogic.handleSelectConversation}
             onNewChat={editorLogic.handleNewChat}
+            onRenameConversation={editorLogic.handleRenameConversation}
+            onDeleteConversation={editorLogic.handleDeleteConversation}
           />
         </aside>
 
@@ -495,7 +506,7 @@ export function EditorPage() {
           'bg-surface-light dark:bg-surface-dark',
           'border-l border-border-DEFAULT dark:border-border-dark'
         )} style={{ minWidth: '360px' }}>
-          <SchemaViewer schema={workspace.meta_schema} workspaceId={workspace.id} dbType={workspace.db_type} />
+          <SchemaViewer schema={workspace.meta_schema} workspaceId={workspace.id} conversationId={conversationId} dbType={workspace.db_type} />
         </aside>
       </div>
 
@@ -507,7 +518,7 @@ export function EditorPage() {
           original_cost: editorLogic.optimizationResult.stats_comparison?.old_cost || null,
           bottlenecks: [], // TODO: extract from explanation or add to backend response
           optimized_sql: editorLogic.optimizationResult.optimized_sql,
-          index_recommendation: editorLogic.optimizationResult.index_recommendation,
+          index_recommendation: editorLogic.optimizationResult.index_recommendation ?? undefined,
           explanation: editorLogic.optimizationResult.explanation,
           stats_comparison: editorLogic.optimizationResult.stats_comparison,
         } : null}

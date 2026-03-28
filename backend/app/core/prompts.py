@@ -219,17 +219,18 @@ Response (JSON):
 """
 
 
-CHAT_GENERAL_SYSTEM_PROMPT = """
-You are a helpful assistant for SQLTuner, a database optimization platform.
+CHAT_GENERAL_SYSTEM_PROMPT = """\
+You are a helpful SQL assistant for SQLTuner, a database optimization platform.
 
-Your role is to assist users with:
-- General questions about databases and SQL
-- Understanding database concepts
-- Clarifying how to use SQLTuner features
-- Providing guidance on best practices
+RESPONSE RULES:
+- For greetings (hello, hi, hey, xin chào...): reply briefly and friendly, 1-2 sentences max
+- For general questions about databases/SQL: explain clearly and concisely
+- For requests to generate SQL: wrap SQL in ```sql code blocks
+- For questions about performance: suggest using the Optimize or Explain buttons
+- Keep all responses under 100 words unless a detailed explanation is needed
+- Do NOT generate SQL unless explicitly asked
 
-Be concise, helpful, and friendly. If the user asks about specific SQL queries, 
-encourage them to share the query for detailed analysis.
+Your role: answer database questions, explain SQL concepts, guide users on SQLTuner features.
 """
 
 
@@ -276,100 +277,105 @@ REQUIRED OUTPUT FORMAT - copy this structure exactly:
 CHAT_SCHEMA_CLARIFICATION_PROMPT = """\
 CRITICAL: Output RAW JSON only. No markdown. No text outside JSON.
 
-You are a senior database architect reviewing a schema design request.
-The user has described a system they want to build. Your job is to identify
-if there are GENUINE design ambiguities that would significantly change the schema.
+You are a database architect. Read the user's system description carefully.
+Generate 2 questions to clarify the schema design requirements.
 
-WHAT TO NEVER ASK (these are always assumed):
-- Basic CRUD operations (create, read, update, delete)
-- What database engine to use
-- How many users — only affects indexing, not schema
-- Whether to use SQL
+QUESTION 1 — Which modules/entities to include (multi-select):
+Ask what major components the system needs.
+Generate 5-6 options that are SPECIFIC to the described system domain.
+Options must be short module names (2-4 words), directly relevant to the domain.
+Do NOT include generic options like "CRUD operations" or "Database management".
 
-WHAT TO ASK ABOUT (only if genuinely unclear from the description):
-- Relationships: "Can X belong to multiple Y?" → affects junction table
-- Business rules: "Is Z unique per user or globally?" → affects constraints
-- Missing key entities: "Do you need to track [specific entity]?" → affects table count
-- Hierarchy: "Do categories have subcategories?" → affects self-referencing table
-- Temporal: "Should history be kept after deletion?" → affects soft delete
-
-EVALUATION RULES:
-- If description mentions 3+ specific domain entities → needs_clarification: false
-- If description is under 8 words or mentions only 1 generic concept → ask 1-2 questions
-- Questions must be YES/NO or multiple choice — never open-ended
-- Max 2 questions. Each question must change the schema structure if answered differently.
+QUESTION 2 — One key business rule (yes/no):
+Ask the single most important structural decision for this domain.
+This question must change which tables are created if answered differently.
+Options: ["Yes", "No"] or ["Yes", "No", "Partially"]
 
 User's description: "{description}"
 
-Output JSON (choose one):
-If clear enough: {{"needs_clarification": false, "questions": []}}
-If ambiguous: {{"needs_clarification": true, "questions": [{{"q": "specific question about {description}", "options": ["concrete option A", "concrete option B", "Both", "Neither"]}}]}}
+If description already has 4+ clear entities → {{"needs_clarification": false, "questions": []}}
+
+If description is vague (1-2 entities or unclear scope) → generate 2 domain-specific questions:
+{{"needs_clarification": true, "questions": [
+  {{"q": "Which features or components should this system manage?",
+    "options": ["feature name 1", "feature name 2", "feature name 3", "feature name 4", "feature name 5"]}},
+  {{"q": "Specific yes/no business rule question for this domain?",
+    "options": ["Yes", "No", "Partially"]}}
+]}}
+
+IMPORTANT: Replace the placeholder values above with real domain-specific content:
+- Replace "feature name 1" through "feature name 5" with 5 actual feature/module names
+  relevant to: {description}
+  Use short, readable names like "Book catalog", "Member registration", "Loan tracking"
+  NOT all-caps codes like "BOOK_MANAGEMENT" or "MEMBER_REG"
+- Replace "Specific yes/no business rule question" with a real question about
+  a structural decision in: {description}
+  Example: "Should overdue penalties be tracked per loan?" not generic yes/no
 """
 
 
 SCHEMA_PHASE1_SYSTEM_PROMPT = """\
 CRITICAL: Output RAW JSON only. No markdown. No text outside JSON.
 
-You are a database architect. Your task is ONLY to list the tables needed.
-Do NOT add columns yet — columns will be added in a separate step.
+You are a database architect. List the tables needed for this system.
+Do NOT add full column definitions — only list key column hints.
 
 RULES:
-- List ALL tables including junction tables for many-to-many relationships
-- Max 8 tables total
-- "has_fk_to" lists table names this table has foreign keys pointing to
-- Keep purpose to one clear sentence
+- List ALL tables including junction tables for many-to-many
+- Max 6 tables total (keep it focused)
+- "has_fk_to": tables this table references via foreign key
+- "key_columns": list 4-6 important column names (NOT id/created_at) for this table
 
-OUTPUT FORMAT — exactly this structure:
+OUTPUT FORMAT:
 {
   "system_name": "CamelCaseName",
   "tables": [
     {
       "name": "snake_case_name",
-      "purpose": "one sentence describing what this table stores",
-      "has_fk_to": ["other_table_name"]
+      "purpose": "one sentence",
+      "has_fk_to": ["other_table"],
+      "key_columns": ["col_name_1", "col_name_2", "col_name_3", "col_name_4"]
     }
   ],
-  "design_notes": ["one key design decision worth noting"]
+  "design_notes": ["key design decision"]
 }
 """
 
 
 SCHEMA_PHASE2_SYSTEM_PROMPT = """\
-CRITICAL: Output a RAW JSON ARRAY only. Start with [ and end with ]. No markdown. No text outside JSON.
+CRITICAL: Output RAW JSON object only. No markdown. No text outside JSON.
+Format: {"tables": [ ...array of table objects... ]}
 
-You are adding columns to database tables. For EACH table given, provide appropriate columns.
+For EACH table in the prompt, generate domain-specific columns based on its name and purpose.
 
-MANDATORY columns for EVERY table (always include these first):
-- id: UUID, PRIMARY KEY, NOT NULL
-- created_at: TIMESTAMP, NOT NULL
+MANDATORY first 2 columns for every table:
+{"name": "id", "type": "UUID", "is_pk": true, "is_nullable": false, "default": null}
+{"name": "created_at", "type": "TIMESTAMP", "is_pk": false, "is_nullable": false, "default": null}
 
-COLUMN TYPE GUIDE:
-- Short text (names, titles, codes): VARCHAR(255)
-- Long text (descriptions, notes, content): TEXT
-- Whole numbers (counts, quantities, ages): INTEGER
-- Money / precise decimals: DECIMAL(10,2)
-- True/False flags: BOOLEAN
-- Dates with time: TIMESTAMP
-- Foreign keys (references to other tables): UUID
-- Unique identifiers: UUID
+Then add 4-6 columns a real engineer would add for that table's domain.
+Infer column names from the table name and purpose description.
 
-OUTPUT FORMAT — JSON array, one object per table:
-[
-  {
-    "name": "exact_table_name",
-    "columns": [
-      {"name": "id", "type": "UUID", "is_pk": true, "is_nullable": false, "default": null},
-      {"name": "created_at", "type": "TIMESTAMP", "is_pk": false, "is_nullable": false, "default": null},
-      {"name": "column_name", "type": "APPROPRIATE_TYPE", "is_pk": false, "is_nullable": true, "default": null}
-    ],
-    "foreign_keys": [
-      {"column": "ref_id", "ref_table": "referenced_table", "ref_column": "id", "on_delete": "CASCADE"}
-    ],
-    "indexes": [
-      {"name": "idx_tablename_colname", "column_names": ["col"], "unique": false}
-    ]
-  }
-]
+Column types:
+- Names, codes, status, short strings → VARCHAR(255)
+- Long descriptions, notes → TEXT
+- Counts, quantities → INTEGER
+- Prices, amounts → DECIMAL(10,2)
+- True/false flags → BOOLEAN
+- Date/time values → TIMESTAMP
+- References to other tables → UUID (name must end with _id)
+
+Output format:
+{"tables": [
+  {"name": "TABLE_NAME", "columns": [
+    {"name": "id", "type": "UUID", "is_pk": true, "is_nullable": false, "default": null},
+    {"name": "created_at", "type": "TIMESTAMP", "is_pk": false, "is_nullable": false, "default": null},
+    {"name": "INFERRED_COL", "type": "INFERRED_TYPE", "is_pk": false, "is_nullable": true, "default": null}
+  ], "foreign_keys": [
+    {"column": "FK_COL_id", "ref_table": "REF_TABLE", "ref_column": "id", "on_delete": "CASCADE"}
+  ], "indexes": [
+    {"name": "idx_TABLE_COL", "column_names": ["COL"], "unique": false}
+  ]}
+]}
 """
 
 
@@ -613,7 +619,7 @@ respond with:
 
 def get_schema_generation_prompt(
         user_description: str,
-        clarifications: list[dict] = None,
+        clarifications: list[dict] | None = None,
 ) -> str:
         clarification_section = ""
         if clarifications:
@@ -631,12 +637,13 @@ Response (JSON only):"""
 
 
 def get_schema_clarification_prompt(user_description: str) -> str:
-    return CHAT_SCHEMA_CLARIFICATION_PROMPT.replace("{description}", user_description)
+    safe_desc = user_description.replace('"', '\\"')
+    return CHAT_SCHEMA_CLARIFICATION_PROMPT.replace("{description}", safe_desc)
 
 
 def get_chat_schema_design_prompt(
     user_description: str,
-    clarification_answers: list[dict] = None,
+    clarification_answers: list[dict] | None = None,
 ) -> str:
     context = ""
     if clarification_answers:

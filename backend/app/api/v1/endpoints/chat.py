@@ -195,7 +195,7 @@ async def _check_schema_clarification_inline(message: str) -> dict:
             prompt=context_prompt,
             system_prompt=None,
             temperature=0.1,
-            max_tokens=200,
+            max_tokens=512,
         )
         clean = re.sub(r"```(?:json)?\s*|```", "", raw).strip()
         json_str = _extract_first_json_object(clean)
@@ -464,6 +464,11 @@ async def chat_completion(
 
     detected_sql = extracted_sql
 
+    try:
+        await db.rollback()
+    except Exception:
+        pass
+
     await query_log_repository.create(
         db,
         obj_in={
@@ -532,9 +537,93 @@ async def get_conversations(
             "id": str(conv.id),
             "title": conv.title,
             "created_at": conv.created_at.isoformat(),
+            "updated_at": conv.updated_at.isoformat() if hasattr(conv, 'updated_at') and conv.updated_at else conv.created_at.isoformat(),
         }
         for conv in conversations
     ]
+
+
+@router.patch("/conversations/{conversation_id}/rename")
+async def rename_conversation(
+    conversation_id: UUID,
+    body: dict,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    conversation = await conversation_repository.get(db, id=conversation_id)
+
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found"
+        )
+
+    connection = await connection_repository.get_by_user_and_id(
+        db=db,
+        user_id=current_user.id,
+        connection_id=conversation.connection_id
+    )
+
+    if not connection:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied"
+        )
+
+    new_title = body.get("title", "").strip()
+    if not new_title:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Title cannot be empty"
+        )
+
+    updated = await conversation_repository.update(
+        db,
+        db_obj=conversation,
+        obj_in={"title": new_title}
+    )
+
+    return {
+        "id": str(updated.id),
+        "title": updated.title,
+    }
+
+
+@router.delete("/conversations/{conversation_id}")
+async def delete_conversation(
+    conversation_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    conversation = await conversation_repository.get(db, id=conversation_id)
+
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found"
+        )
+
+    connection = await connection_repository.get_by_user_and_id(
+        db=db,
+        user_id=current_user.id,
+        connection_id=conversation.connection_id
+    )
+
+    if not connection:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied"
+        )
+
+    deleted = await conversation_repository.delete(db, id=conversation_id)
+
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete conversation"
+        )
+
+    return {"success": True, "id": str(conversation_id)}
 
 
 @router.get("/conversations/{conversation_id}/messages")
