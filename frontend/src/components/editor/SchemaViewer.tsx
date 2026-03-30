@@ -45,11 +45,12 @@ interface SchemaDef {
 interface SchemaViewerProps {
   schema: Record<string, any> | null | undefined;
   workspaceId?: string;
+  conversationId?: string | null;
   onSync?: () => void;
   dbType?: string;
 }
 
-export function SchemaViewer({ schema, workspaceId, onSync, dbType }: SchemaViewerProps) {
+export function SchemaViewer({ schema, workspaceId, conversationId, onSync, dbType }: SchemaViewerProps) {
   const navigate = useNavigate();
   const [expandedTables, setExpandedTables] = useState<Set<string>>(new Set());
   const [isDiagramModalOpen, setIsDiagramModalOpen] = useState(false);
@@ -129,7 +130,7 @@ export function SchemaViewer({ schema, workspaceId, onSync, dbType }: SchemaView
             
             {workspaceId && (
               <button
-                onClick={() => navigate(`/schema-editor/${workspaceId}`)}
+                onClick={() => navigate(conversationId ? `/schema-editor/${workspaceId}/${conversationId}` : `/schema-editor/${workspaceId}`)}
                 className={cn(
                   'group flex items-center gap-0 px-1 py-1.5 rounded-lg text-sm font-medium transition-all duration-300 ease-in-out',
                   'group-hover:px-2',
@@ -180,7 +181,7 @@ export function SchemaViewer({ schema, workspaceId, onSync, dbType }: SchemaView
             </p>
             {workspaceId && (
               <button
-                onClick={() => navigate(`/schema-editor/${workspaceId}`)}
+                onClick={() => navigate(conversationId ? `/schema-editor/${workspaceId}/${conversationId}` : `/schema-editor/${workspaceId}`)}
                 className={cn(
                   'px-4 py-2 rounded-lg font-medium transition-colors',
                   'bg-primary dark:bg-primary-dark hover:bg-primary-hover dark:hover:bg-primary-dark-hover text-white'

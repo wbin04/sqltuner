@@ -41,12 +41,16 @@ export interface SQLOptimizeResponse {
   original_sql: string;
   optimized_sql: string;
   explanation: string;
-  index_recommendation?: string;
+  index_recommendation?: string | null;
+  rewrite_type?: string | null;
+  changes_made?: string[];
+  bottlenecks?: string[];
   stats_comparison?: {
     old_cost: number;
     new_cost: number;
     improvement_percent: number;
   };
+  query_log_id?: string | null;
 }
 
 export const sqlService = {

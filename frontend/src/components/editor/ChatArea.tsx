@@ -5,12 +5,20 @@
 import { useState, useEffect, useRef } from 'react';
 import { Send, Sparkles, Play, LineChart, Loader2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { SchemaGeneratedData } from '../../services/chatService';
+import { SchemaBlock } from './SchemaBlock';
+import { ClarificationBlock } from './ClarificationBlock';
+import { format } from 'date-fns';
+
+const CLARIFICATION_MARKER = 'Before designing the schema, I have a few questions:';
 
 interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   sql_generated?: string;
+  schema_generated?: SchemaGeneratedData | null;
+  is_schema_design?: boolean;
   created_at: string;
 }
 
@@ -20,6 +28,13 @@ interface ChatAreaProps {
   onExecute: (sql: string) => void;
   onOptimize: (sql: string) => void;
   onExplain: (sql: string) => void;
+  onApplySchemaToSandbox?: (schema: SchemaGeneratedData) => void;
+  isSimulationWorkspace?: boolean;
+  pendingClarification?: {
+    questions: Array<{ q: string; options?: string[] }>;
+    originalMessage: string;
+  } | null;
+  onSubmitClarification?: (answers: Array<{ q: string; answer: string }>) => void;
   inputValue?: string;
   onUpdateInput?: (value: string) => void;
   isLoading?: boolean;
@@ -34,6 +49,10 @@ export function ChatArea({
   onExecute,
   onOptimize,
   onExplain,
+  onApplySchemaToSandbox,
+  isSimulationWorkspace = false,
+  pendingClarification,
+  onSubmitClarification,
   inputValue: externalInputValue,
   onUpdateInput,
   isLoading = false,
@@ -137,112 +156,155 @@ export function ChatArea({
         ) : (
           // Messages
           <div className="space-y-6 max-w-4xl mx-auto">
-            {messages.map((message) => (
-              <div key={message.id} className="space-y-3">
-                {/* Message Content */}
-                <div className={cn(
-                  'flex gap-4',
-                  message.role === 'user' ? 'justify-end' : 'justify-start'
-                )}>
-                  <div className={cn(
-                    'max-w-3xl rounded-xl px-4 py-3',
-                    message.role === 'user'
-                      ? 'bg-primary dark:bg-primary-dark text-white'
-                      : 'bg-surface-light dark:bg-surface-dark border border-border-DEFAULT dark:border-border-dark'
-                  )}>
-                    {/* Loading indicator for Processing message */}
-                    {message.content === 'Processing...' && message.role === 'assistant' ? (
-                      <div className="flex items-center gap-3">
-                        <Loader2 className="w-4 h-4 animate-spin text-primary dark:text-primary-dark" />
-                        <p className="text-sm text-text-main-DEFAULT dark:text-text-main-dark">
-                          Processing your request...
-                        </p>
-                      </div>
-                    ) : (
-                      <p className={cn(
-                        'text-sm whitespace-pre-wrap',
-                        message.role === 'assistant' && 'text-text-main-DEFAULT dark:text-text-main-dark'
+            {messages.map((message) => {
+              const isClarificationMessage =
+                message.role === 'assistant' &&
+                message.content.includes(CLARIFICATION_MARKER);
+
+              return (
+                <div key={message.id} className="space-y-3">
+                  {/* Normal message — hidden when it's a clarification */}
+                  {!isClarificationMessage && (
+                    <div className={cn(
+                      'flex gap-2 items-end',
+                      message.role === 'user' ? 'justify-end' : 'justify-start'
+                    )}>
+                      <div className={cn(
+                        'max-w-3xl rounded-xl px-4 py-3',
+                        message.role === 'user'
+                          ? 'bg-primary dark:bg-primary-dark text-white'
+                          : 'bg-surface-light dark:bg-surface-dark border border-border-DEFAULT dark:border-border-dark'
                       )}>
-                        {message.content}
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                {/* SQL Block with Action Bar */}
-                {message.sql_generated && (
-                  <div className={cn(
-                    'max-w-3xl rounded-xl overflow-hidden',
-                    'bg-surface-light dark:bg-surface-dark',
-                    'border border-border-DEFAULT dark:border-border-dark'
-                  )}>
-                    {/* SQL Code */}
-                    <pre className="p-4 overflow-x-auto">
-                      <code className="text-sm font-mono text-text-main-DEFAULT dark:text-text-main-dark">
-                        {message.sql_generated}
-                      </code>
-                    </pre>
-
-                    {/* Action Bar */}
-                    <div className="flex items-center gap-2 px-4 py-3 bg-surface-highlight-DEFAULT dark:bg-surface-highlight-dark border-t border-border-DEFAULT dark:border-border-dark">
-                      <button
-                        onClick={() => onExecute(message.sql_generated!)}
-                        disabled={isExecuting || isExplaining || isOptimizing}
-                        className={cn(
-                          'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
-                          'bg-green-600 dark:bg-green-600 text-white',
-                          'hover:bg-green-700 dark:hover:bg-green-700',
-                          'disabled:opacity-50 disabled:cursor-not-allowed'
-                        )}
-                      >
-                        {isExecuting ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
+                        {message.content === 'Processing...' && message.role === 'assistant' ? (
+                          <div className="flex items-center gap-3">
+                            <Loader2 className="w-4 h-4 animate-spin text-primary dark:text-primary-dark" />
+                            <p className="text-sm text-text-main-DEFAULT dark:text-text-main-dark">
+                              Processing your request...
+                            </p>
+                          </div>
                         ) : (
-                          <Play className="w-4 h-4" />
+                          <p className={cn(
+                            'text-sm whitespace-pre-wrap',
+                            message.role === 'assistant' && 'text-text-main-DEFAULT dark:text-text-main-dark'
+                          )}>
+                            {message.content}
+                          </p>
                         )}
-                        {isExecuting ? 'Executing...' : 'Execute'}
-                      </button>
-                      <button
-                        onClick={() => onExplain(message.sql_generated!)}
-                        disabled={isExecuting || isExplaining || isOptimizing}
-                        className={cn(
-                          'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
-                          'bg-surface-light dark:bg-surface-dark',
-                          'border border-border-DEFAULT dark:border-border-dark',
-                          'hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark',
-                          'disabled:opacity-50 disabled:cursor-not-allowed'
-                        )}
-                      >
-                        {isExplaining ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <LineChart className="w-4 h-4" />
-                        )}
-                        {isExplaining ? 'Explaining...' : 'Explain'}
-                      </button>
-                      <button
-                        onClick={() => onOptimize(message.sql_generated!)}
-                        disabled={isExecuting || isExplaining || isOptimizing}
-                        className={cn(
-                          'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
-                          'bg-gradient-to-r from-primary to-secondary dark:from-primary-dark dark:to-secondary-dark',
-                          'text-white',
-                          'hover:shadow-lg',
-                          'disabled:opacity-50 disabled:cursor-not-allowed'
-                        )}
-                      >
-                        {isOptimizing ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <Sparkles className="w-4 h-4" />
-                        )}
-                        {isOptimizing ? 'Optimizing...' : 'Optimize'}
-                      </button>
+                      </div>
+                      
+                      {/* Timestamp Column on the right */}
+                      <div className="text-[11px] text-text-muted-DEFAULT dark:text-text-muted-dark opacity-60 mb-2 whitespace-nowrap flex-shrink-0">
+                        {format(new Date(message.created_at), 'HH:mm')}
+                      </div>
                     </div>
-                  </div>
-                )}
-              </div>
-            ))}
+                  )}
+
+                  {/* Interactive ClarificationBlock — active pending */}
+                  {isClarificationMessage && pendingClarification && (
+                    <div className="max-w-3xl">
+                      <ClarificationBlock
+                        questions={pendingClarification.questions}
+                        onSubmit={onSubmitClarification || (() => {})}
+                        isLoading={isLoading}
+                      />
+                    </div>
+                  )}
+
+                  {/* Answered clarification — compact badge */}
+                  {isClarificationMessage && !pendingClarification && (
+                    <div className="flex justify-start">
+                      <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800">
+                        <Sparkles className="w-3.5 h-3.5 text-purple-500" />
+                        <span className="text-xs text-purple-600 dark:text-purple-400">
+                          Schema questions answered — schema generated below
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* SQL Block with Action Bar */}
+                  {message.sql_generated && (
+                    <div className={cn(
+                      'max-w-3xl rounded-xl overflow-hidden',
+                      'bg-surface-light dark:bg-surface-dark',
+                      'border border-border-DEFAULT dark:border-border-dark'
+                    )}>
+                      <pre className="p-4 overflow-x-auto">
+                        <code className="text-sm font-mono text-text-main-DEFAULT dark:text-text-main-dark">
+                          {message.sql_generated}
+                        </code>
+                      </pre>
+
+                      <div className="flex items-center gap-2 px-4 py-3 bg-surface-highlight-DEFAULT dark:bg-surface-highlight-dark border-t border-border-DEFAULT dark:border-border-dark">
+                        <button
+                          onClick={() => onExecute(message.sql_generated!)}
+                          disabled={isExecuting || isExplaining || isOptimizing}
+                          className={cn(
+                            'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
+                            'bg-green-600 dark:bg-green-600 text-white',
+                            'hover:bg-green-700 dark:hover:bg-green-700',
+                            'disabled:opacity-50 disabled:cursor-not-allowed'
+                          )}
+                        >
+                          {isExecuting ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Play className="w-4 h-4" />
+                          )}
+                          {isExecuting ? 'Executing...' : 'Execute'}
+                        </button>
+                        <button
+                          onClick={() => onExplain(message.sql_generated!)}
+                          disabled={isExecuting || isExplaining || isOptimizing}
+                          className={cn(
+                            'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
+                            'bg-surface-light dark:bg-surface-dark',
+                            'border border-border-DEFAULT dark:border-border-dark',
+                            'hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark',
+                            'disabled:opacity-50 disabled:cursor-not-allowed'
+                          )}
+                        >
+                          {isExplaining ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <LineChart className="w-4 h-4" />
+                          )}
+                          {isExplaining ? 'Explaining...' : 'Explain'}
+                        </button>
+                        <button
+                          onClick={() => onOptimize(message.sql_generated!)}
+                          disabled={isExecuting || isExplaining || isOptimizing}
+                          className={cn(
+                            'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
+                            'bg-gradient-to-r from-primary to-secondary dark:from-primary-dark dark:to-secondary-dark',
+                            'text-white',
+                            'hover:shadow-lg',
+                            'disabled:opacity-50 disabled:cursor-not-allowed'
+                          )}
+                        >
+                          {isOptimizing ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Sparkles className="w-4 h-4" />
+                          )}
+                          {isOptimizing ? 'Optimizing...' : 'Optimize'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {message.schema_generated && (
+                    <div className="max-w-3xl">
+                      <SchemaBlock
+                        schema={message.schema_generated}
+                        onApplyToSandbox={onApplySchemaToSandbox || (() => {})}
+                        isSimulationWorkspace={isSimulationWorkspace}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
             {/* Scroll anchor */}
             <div ref={messagesEndRef} />
           </div>

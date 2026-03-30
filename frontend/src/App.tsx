@@ -128,7 +128,7 @@ function AppContent() {
       </Route>
 
       {/* Editor Route - Outside MainLayout for full-screen experience */}
-      <Route path="/editor/:workspaceId" element={
+      <Route path="/editor/:workspaceId/:conversationId?" element={
         isLoading ? (
           <div className="flex items-center justify-center h-screen">
             <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-primary"></div>
@@ -143,7 +143,7 @@ function AppContent() {
 
 
       {/* Schema Editor Route - For editing schema of any workspace (real or simulation) */}
-      <Route path="/schema-editor/:workspaceId" element={
+      <Route path="/schema-editor/:workspaceId/:conversationId?" element={
         isLoading ? (
           <div className="flex items-center justify-center h-screen">
             <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-primary"></div>

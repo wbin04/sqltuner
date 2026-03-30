@@ -6,6 +6,7 @@
  */
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { Database, Loader2, AlertCircle, RefreshCw, ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useWorkspace } from '../../hooks/useWorkspace';
@@ -15,11 +16,14 @@ import { SessionManager } from '../../components/editor/SessionManager';
 import { ChatArea } from '../../components/editor/ChatArea';
 import { OptimizationModal } from '../../components/editor/OptimizationModal';
 import { JSONViewerModal } from '../../components/editor/JSONViewerModal';
+import { SchemaGeneratedData } from '../../services/chatService';
+import { workspaceService } from '../../services/workspaceService';
 import { DbType } from '../../types/workspace';
 import { extractErrorMessage, getSQLErrorSuggestion } from '../../utils/sqlErrorHelper';
+import { toast } from 'react-toastify';
 
 export function EditorPage() {
-  const { workspaceId } = useParams<{ workspaceId: string }>();
+  const { workspaceId, conversationId } = useParams<{ workspaceId: string; conversationId?: string }>();
   const navigate = useNavigate();
   const [autoSyncTriggered, setAutoSyncTriggered] = useState(false);
   const [activeResultSql, setActiveResultSql] = useState<string | null>(null);
@@ -28,6 +32,7 @@ export function EditorPage() {
   const [isResizing, setIsResizing] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [jsonViewerData, setJsonViewerData] = useState<{ data: any; column: string } | null>(null);
+  const queryClient = useQueryClient();
 
   if (!workspaceId) {
     navigate('/workspaces');
@@ -37,7 +42,16 @@ export function EditorPage() {
   const { workspace, isLoading, isError, error, syncSchema, isSyncing } = useWorkspace(workspaceId);
 
   // Use editor logic hook
-  const editorLogic = useEditorLogic({ connectionId: workspaceId });
+  const editorLogic = useEditorLogic({ connectionId: workspaceId, initialConversationId: conversationId });
+
+  // Sync URL when active conversation changes
+  useEffect(() => {
+    if (editorLogic.activeConversationId && editorLogic.activeConversationId !== conversationId) {
+      navigate(`/editor/${workspaceId}/${editorLogic.activeConversationId}`, { replace: true });
+    } else if (!editorLogic.activeConversationId && conversationId) {
+      navigate(`/editor/${workspaceId}`, { replace: true });
+    }
+  }, [editorLogic.activeConversationId, conversationId, navigate, workspaceId]);
 
   // Handlers that integrate with editor logic
   const handleSendMessage = (content: string) => {
@@ -59,6 +73,43 @@ export function EditorPage() {
 
   const handleExplain = async (sql: string) => {
     await editorLogic.handleExplain(sql);
+  };
+
+  const handleApplySchemaToSandbox = async (schema: SchemaGeneratedData) => {
+    if (!workspace || workspace.db_type !== DbType.SIMULATION) {
+      toast.error('Please switch to a Simulation workspace to apply schema');
+      return;
+    }
+
+    try {
+      const schemaPayload = {
+        tables: schema.tables.map((table) => ({
+          name: table.name,
+          columns: table.columns.map((col) => ({
+            name: col.name,
+            type: col.type,
+            is_pk: col.is_pk,
+            is_nullable: col.is_nullable,
+            default: col.default ?? null,
+          })),
+          foreign_keys: table.foreign_keys || [],
+          indexes: (table.indexes || []).map((idx) => ({
+            name: idx.name,
+            column_names: idx.column_names,
+            unique: idx.unique,
+          })),
+          sample_data: [],
+        })),
+      };
+
+      await workspaceService.updateSimulationSchema(workspaceId, schemaPayload);
+      queryClient.invalidateQueries({ queryKey: ['workspace', workspaceId] });
+      toast.success(
+        `Schema "${schema.system_name}" applied - ${schema.tables.length} tables created`
+      );
+    } catch (_err) {
+      toast.error('Failed to apply schema to sandbox');
+    }
   };
 
   // Handle resize of results panel
@@ -91,7 +142,6 @@ export function EditorPage() {
     const schemaIsEmpty = !workspace.meta_schema || Object.keys(workspace.meta_schema).length === 0;
 
     if (isRealDatabase && schemaIsEmpty) {
-      console.log('[EditorPage] Auto-syncing schema for real database...');
       setAutoSyncTriggered(true);
       syncSchema();
     }
@@ -197,11 +247,13 @@ export function EditorPage() {
               id: c.id,
               title: c.title,
               created_at: c.created_at,
-              updated_at: c.created_at,
+              updated_at: c.updated_at ?? c.created_at,
             }))}
             activeConversationId={editorLogic.activeConversationId}
             onSelectConversation={editorLogic.handleSelectConversation}
             onNewChat={editorLogic.handleNewChat}
+            onRenameConversation={editorLogic.handleRenameConversation}
+            onDeleteConversation={editorLogic.handleDeleteConversation}
           />
         </aside>
 
@@ -217,6 +269,10 @@ export function EditorPage() {
               onExecute={handleExecute}
               onOptimize={handleOptimize}
               onExplain={handleExplain}
+              onApplySchemaToSandbox={handleApplySchemaToSandbox}
+              isSimulationWorkspace={workspace?.db_type === DbType.SIMULATION}
+              pendingClarification={editorLogic.pendingClarification}
+              onSubmitClarification={editorLogic.handleSubmitClarification}
               inputValue={inputValue}
               onUpdateInput={setInputValue}
               isLoading={editorLogic.isSendingMessage}
@@ -450,7 +506,7 @@ export function EditorPage() {
           'bg-surface-light dark:bg-surface-dark',
           'border-l border-border-DEFAULT dark:border-border-dark'
         )} style={{ minWidth: '360px' }}>
-          <SchemaViewer schema={workspace.meta_schema} workspaceId={workspace.id} dbType={workspace.db_type} />
+          <SchemaViewer schema={workspace.meta_schema} workspaceId={workspace.id} conversationId={conversationId} dbType={workspace.db_type} />
         </aside>
       </div>
 
@@ -462,7 +518,7 @@ export function EditorPage() {
           original_cost: editorLogic.optimizationResult.stats_comparison?.old_cost || null,
           bottlenecks: [], // TODO: extract from explanation or add to backend response
           optimized_sql: editorLogic.optimizationResult.optimized_sql,
-          index_recommendation: editorLogic.optimizationResult.index_recommendation,
+          index_recommendation: editorLogic.optimizationResult.index_recommendation ?? undefined,
           explanation: editorLogic.optimizationResult.explanation,
           stats_comparison: editorLogic.optimizationResult.stats_comparison,
         } : null}

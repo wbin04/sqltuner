@@ -4,11 +4,47 @@
  */
 import axios from '../lib/axios';
 
+export interface SchemaGeneratedData {
+  system_name: string;
+  tables: Array<{
+    name: string;
+    purpose?: string;
+    design_rationale?: string;
+    columns: Array<{
+      name: string;
+      type: string;
+      is_pk: boolean;
+      is_nullable: boolean;
+      default?: string | null;
+    }>;
+    foreign_keys?: Array<{
+      column: string;
+      ref_table: string;
+      ref_column: string;
+      on_delete?: string;
+    }>;
+    indexes?: Array<{
+      name: string;
+      column_names: string[];
+      unique: boolean;
+    }>;
+  }>;
+  relationships?: Array<{
+    from_table: string;
+    to_table: string;
+    type: string;
+    description: string;
+  }>;
+  design_notes?: string[];
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   sql_generated?: string;
+  schema_generated?: SchemaGeneratedData | null;
+  is_schema_design?: boolean;
   created_at: string;
 }
 
@@ -16,12 +52,14 @@ export interface Conversation {
   id: string;
   title: string;
   created_at: string;
+  updated_at: string;
 }
 
 export interface ChatCompletionRequest {
   connection_id: string;
   conversation_id?: string;
   message: string;
+  clarification_answers?: Array<{ q: string; answer: string }>;
 }
 
 export interface ChatCompletionResponse {
@@ -29,6 +67,42 @@ export interface ChatCompletionResponse {
   role: string;
   content: string;
   sql_generated?: string;
+  schema_generated?: SchemaGeneratedData | null;
+  is_schema_design?: boolean;
+}
+
+function normalizeSchemaGenerated(
+  value: unknown
+): SchemaGeneratedData | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  let parsed: unknown = value;
+
+  if (typeof parsed === 'string') {
+    const trimmed = parsed.trim();
+    if (!trimmed || trimmed.toLowerCase() === 'null') {
+      return null;
+    }
+
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      return null;
+    }
+  }
+
+  if (!parsed || typeof parsed !== 'object') {
+    return null;
+  }
+
+  const maybeSchema = parsed as Partial<SchemaGeneratedData>;
+  if (!Array.isArray(maybeSchema.tables)) {
+    return null;
+  }
+
+  return maybeSchema as SchemaGeneratedData;
 }
 
 export const chatService = {
@@ -40,7 +114,14 @@ export const chatService = {
       '/chat/completion',
       request
     );
-    return response.data;
+    return {
+      conversation_id: response.data.conversation_id,
+      role: response.data.role,
+      content: response.data.content,
+      sql_generated: response.data.sql_generated,
+      schema_generated: normalizeSchemaGenerated(response.data.schema_generated),
+      is_schema_design: response.data.is_schema_design ?? false,
+    };
   },
 
   /**
@@ -59,6 +140,35 @@ export const chatService = {
   async getMessages(conversationId: string): Promise<ChatMessage[]> {
     const response = await axios.get<ChatMessage[]>(
       `/chat/conversations/${conversationId}/messages`
+    );
+    return response.data.map((msg) => ({
+      id: msg.id,
+      role: msg.role,
+      content: msg.content,
+      sql_generated: msg.sql_generated,
+      schema_generated: normalizeSchemaGenerated(msg.schema_generated),
+      is_schema_design: msg.is_schema_design ?? false,
+      created_at: msg.created_at,
+    }));
+  },
+
+  /**
+   * Rename a conversation
+   */
+  async renameConversation(conversationId: string, title: string): Promise<{ id: string; title: string }> {
+    const response = await axios.patch<{ id: string; title: string }>(
+      `/chat/conversations/${conversationId}/rename`,
+      { title }
+    );
+    return response.data;
+  },
+
+  /**
+   * Delete a conversation
+   */
+  async deleteConversation(conversationId: string): Promise<{ success: boolean; id: string }> {
+    const response = await axios.delete<{ success: boolean; id: string }>(
+      `/chat/conversations/${conversationId}`
     );
     return response.data;
   },

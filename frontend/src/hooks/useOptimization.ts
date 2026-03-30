@@ -46,10 +46,12 @@ export function useOptimization({
       // Transform backend response to frontend analysis format
       const optimizationAnalysis: OptimizationAnalysis = {
         original_cost: data.stats_comparison?.old_cost ?? null,
-        bottlenecks: extractBottlenecks(data.explanation),
+        bottlenecks: data.bottlenecks ?? [],
         optimized_sql: data.optimized_sql,
-        index_recommendation: data.index_recommendation,
+        index_recommendation: data.index_recommendation ?? undefined,
         explanation: data.explanation,
+        rewrite_type: data.rewrite_type,
+        changes_made: data.changes_made ?? [],
         stats_comparison: data.stats_comparison,
       };
 
@@ -121,43 +123,4 @@ export function useOptimization({
     applyFix,
     resetAnalysis,
   };
-}
-
-/**
- * Extract bottlenecks from explanation text
- * Looks for common performance issue patterns
- */
-function extractBottlenecks(explanation: string): string[] {
-  const bottlenecks: string[] = [];
-  const lowerExplanation = explanation.toLowerCase();
-
-  // Common bottleneck patterns
-  const patterns = [
-    { regex: /sequential scan|seq scan|full table scan/i, label: 'Sequential Scan' },
-    { regex: /missing index|no index|without index/i, label: 'Missing Index' },
-    { regex: /high cost|expensive|slow/i, label: 'High Query Cost' },
-    { regex: /nested loop/i, label: 'Nested Loop Join' },
-    { regex: /hash join/i, label: 'Hash Join' },
-    { regex: /sort|sorting/i, label: 'Expensive Sort Operation' },
-  ];
-
-  for (const pattern of patterns) {
-    if (pattern.regex.test(lowerExplanation)) {
-      bottlenecks.push(pattern.label);
-    }
-  }
-
-  // Extract specific bottlenecks from "Detected Performance Bottlenecks:" section
-  const bottleneckSection = explanation.match(/Detected Performance Bottlenecks:([\s\S]*?)(?:\n\n|$)/);
-  if (bottleneckSection && bottleneckSection[1]) {
-    const items = bottleneckSection[1]
-      .split('\n')
-      .map(line => line.replace(/^[•\-\*]\s*/, '').trim())
-      .filter(line => line.length > 0);
-    
-    bottlenecks.push(...items);
-  }
-
-  // Remove duplicates and return
-  return Array.from(new Set(bottlenecks));
 }

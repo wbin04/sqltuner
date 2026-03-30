@@ -1,4 +1,5 @@
 import json
+import asyncio
 import logging
 import re
 import time
@@ -13,10 +14,19 @@ from app.core.constants import (APP_CONFIG_KEY_LLM_URL,
                                 LLM_HTTP_POOL_TIMEOUT, LLM_HTTP_WRITE_TIMEOUT,
                                 LLM_REQUEST_TIMEOUT, LLM_URL_CACHE_TTL)
 from app.core.exceptions import LLMServiceError
-from app.core.prompts import (SQL_OPTIMIZATION_SYSTEM_PROMPT,
+from app.core.prompts import (SCHEMA_CLARIFICATION_SYSTEM_PROMPT,
+                              SCHEMA_GENERATION_SYSTEM_PROMPT,
+                              SCHEMA_PHASE1_SYSTEM_PROMPT,
+                              SCHEMA_PHASE2_SYSTEM_PROMPT,
+                              SQL_OPTIMIZATION_SYSTEM_PROMPT,
+                              get_schema_clarification_prompt,
+                              get_schema_generation_prompt,
                               get_sql_explanation_prompt,
                               get_sql_optimization_prompt)
-from sqlglot import exp
+
+from app.repositories.config_repository import config_repository
+from sqlglot import exp as sqlglot_exp
+
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -66,6 +76,278 @@ class LLMService:
         self._cache_timestamp: float = 0
         self._cache_ttl: int = LLM_URL_CACHE_TTL
 
+    @staticmethod
+    def _extract_json_object(text: str) -> str:
+        start = text.find('{')
+        if start == -1:
+            raise ValueError("No JSON object found")
+        depth = 0
+        in_string = False
+        escaped = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if in_string:
+                if escaped:
+                    escaped = False
+                    continue
+                if ch == '\\':
+                    escaped = True
+                    continue
+                if ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+                continue
+            if ch == '{':
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0:
+                    return text[start:i + 1]
+        raise ValueError("Unclosed JSON object")
+
+    @staticmethod
+    def _extract_json_array(text: str) -> str:
+        start = text.find('[')
+        if start == -1:
+            raise ValueError("No JSON array found")
+        depth = 0
+        in_string = False
+        escaped = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if in_string:
+                if escaped:
+                    escaped = False
+                    continue
+                if ch == '\\':
+                    escaped = True
+                    continue
+                if ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+                continue
+            if ch == '[':
+                depth += 1
+            elif ch == ']':
+                depth -= 1
+                if depth == 0:
+                    return text[start:i + 1]
+        raise ValueError("Unclosed JSON array")
+
+    async def _call_ollama_with_timeout(
+        self,
+        prompt: str,
+        system_prompt: str,
+        max_tokens: int,
+        read_timeout: float = 120.0,
+        json_mode: bool = True,
+        num_ctx: int = 2048,
+    ) -> str:
+        url = self._build_api_url()
+        payload_config = OllamaPayload(
+            model=self.chat_model,
+            prompt=prompt,
+            system_prompt=system_prompt,
+            temperature=0.1,
+            num_ctx=num_ctx,
+            num_predict=max_tokens,
+            json_mode=json_mode,
+        )
+        payload = payload_config.to_dict()
+        payload["keep_alive"] = "120m"
+
+        timeout_config = httpx.Timeout(
+            connect=LLM_HTTP_CONNECT_TIMEOUT,
+            read=read_timeout,
+            write=LLM_HTTP_WRITE_TIMEOUT,
+            pool=LLM_HTTP_POOL_TIMEOUT,
+        )
+
+        async with httpx.AsyncClient(timeout=timeout_config) as client:
+            response = await client.post(url, json=payload)
+            response.raise_for_status()
+            return response.json().get("response", "").strip()
+
+    async def generate_schema_two_phase(
+        self,
+        description: str,
+        clarification_context: str = "",
+    ) -> dict:
+        # Phase 1: table structure
+        phase1_prompt = (
+            f"List the tables needed for this system: {description}"
+            f"{clarification_context}"
+        )
+
+        logger.info("[SCHEMA-2P] Phase 1 — description: %s...", description[:60])
+
+        try:
+            phase1_raw = await self._call_ollama_with_timeout(
+                prompt=phase1_prompt,
+                system_prompt=SCHEMA_PHASE1_SYSTEM_PROMPT,
+                max_tokens=500,
+                read_timeout=120.0,
+            )
+            clean1 = re.sub(r"```(?:json)?\s*|```", "", phase1_raw).strip()
+            structure = json.loads(self._extract_json_object(clean1))
+            tables_raw = structure.get("tables", [])
+
+            if not tables_raw:
+                raise ValueError("Phase 1 returned empty tables list")
+
+            logger.info(
+                "[SCHEMA-2P] Phase 1 done: %s tables: %s",
+                len(tables_raw),
+                [t.get("name") for t in tables_raw],
+            )
+        except Exception as e:
+            logger.error("[SCHEMA-2P] Phase 1 failed: %s", e)
+            raise ValueError(f"Schema structure generation failed: {e}")
+
+        # Phase 2: enrich ALL tables in a single call
+        all_lines = []
+        for t in tables_raw:
+            fk_refs = t.get("has_fk_to", [])
+            fk_info = f", FK to: {', '.join(fk_refs)}" if fk_refs else ""
+            key_cols = t.get("key_columns", [])
+            cols_hint = (
+                f", include columns: {', '.join(key_cols)}" if key_cols else ""
+            )
+            all_lines.append(
+                f'Table "{t["name"]}": {t.get("purpose", "")}{fk_info}{cols_hint}'
+            )
+
+        phase2_prompt = (
+            f"System: {description}"
+            + (
+                f"\nUser requirements: {clarification_context.strip()}"
+                if clarification_context.strip()
+                else ""
+            )
+            + f"\n\nGenerate columns for ALL these tables:\n"
+            + "\n".join(all_lines)
+        )
+
+        logger.info(
+            "[SCHEMA-2P] Phase 2 — single call for %d tables: %s",
+            len(tables_raw),
+            [t.get("name") for t in tables_raw],
+        )
+
+        enriched_tables: list[dict] = []
+
+        try:
+            phase2_raw = await self._call_ollama_with_timeout(
+                prompt=phase2_prompt,
+                system_prompt=SCHEMA_PHASE2_SYSTEM_PROMPT,
+                max_tokens=1300,      # đủ cho ~5-6 tables với 6-7 cols mỗi table
+                read_timeout=180.0,   # single call lớn hơn → timeout cao hơn
+                num_ctx=3072,         # đủ cho input + output
+            )
+            clean2 = re.sub(r"```(?:json)?\s*|```", "", phase2_raw).strip()
+            parsed2 = json.loads(self._extract_json_object(clean2))
+            batch_result = parsed2.get("tables", [])
+
+            if not batch_result:
+                raise ValueError("Phase 2 response missing 'tables' key or empty")
+
+            for table in batch_result:
+                if not isinstance(table, dict) or "name" not in table:
+                    raise ValueError("Invalid table object in response")
+                cols = table.get("columns", [])
+                if not isinstance(cols, list) or len(cols) < 3:
+                    raise ValueError(
+                        f"Table '{table.get('name')}' has only {len(cols)} columns"
+                    )
+
+            enriched_tables.extend(batch_result)
+            logger.info(
+                "[SCHEMA-2P] Phase 2 done: %d tables enriched",
+                len(enriched_tables),
+            )
+
+        except Exception as e:
+            logger.warning(
+                "[SCHEMA-2P] Phase 2 failed: %s — using key_columns fallback for all tables",
+                e,
+            )
+            # Fallback: dùng key_columns từ Phase 1 với type inference
+            for t in tables_raw:
+                fallback_cols = [
+                    {"name": "id", "type": "UUID", "is_pk": True,
+                     "is_nullable": False, "default": None},
+                    {"name": "created_at", "type": "TIMESTAMP", "is_pk": False,
+                     "is_nullable": False, "default": None},
+                ]
+                for col_name in t.get("key_columns", []):
+                    if col_name.endswith("_id"):
+                        col_type = "UUID"
+                    elif any(k in col_name for k in ["price", "amount", "total", "cost", "salary", "fee"]):
+                        col_type = "DECIMAL(10,2)"
+                    elif any(k in col_name for k in ["count", "quantity", "age", "number", "stock"]):
+                        col_type = "INTEGER"
+                    elif any(k in col_name for k in ["is_", "has_", "active", "enabled", "available"]):
+                        col_type = "BOOLEAN"
+                    elif any(k in col_name for k in ["date", "time", "_at", "due", "expiry"]):
+                        col_type = "TIMESTAMP"
+                    elif any(k in col_name for k in ["description", "notes", "content", "text", "detail"]):
+                        col_type = "TEXT"
+                    else:
+                        col_type = "VARCHAR(255)"
+                    fallback_cols.append({
+                        "name": col_name,
+                        "type": col_type,
+                        "is_pk": False,
+                        "is_nullable": True,
+                        "default": None,
+                    })
+                enriched_tables.append({
+                    "name": t["name"],
+                    "purpose": t.get("purpose", ""),
+                    "design_rationale": t.get("purpose", ""),
+                    "columns": fallback_cols,
+                    "foreign_keys": [],
+                    "indexes": [],
+                })
+
+        # Merge: attach purpose/rationale from Phase 1
+        phase1_map = {t["name"]: t for t in tables_raw}
+        final_tables = []
+        for table in enriched_tables:
+            p1 = phase1_map.get(table["name"], {})
+            table["purpose"] = table.get("purpose") or p1.get("purpose", "")
+            table["design_rationale"] = (
+                table.get("design_rationale") or p1.get("purpose", "")
+            )
+            final_tables.append(table)
+
+        # Build relationships from Phase 1 FK info
+        relationships = []
+        for t in tables_raw:
+            for ref in t.get("has_fk_to", []):
+                relationships.append({
+                    "from_table": t["name"],
+                    "to_table": ref,
+                    "type": "many_to_one",
+                    "description": f"{t['name']} references {ref}",
+                })
+
+        logger.info(
+            "[SCHEMA-2P] Complete: %s tables, %s relationships",
+            len(final_tables), len(relationships),
+        )
+
+        return {
+            "system_name": structure.get("system_name", "GeneratedSchema"),
+            "tables": final_tables,
+            "relationships": relationships,
+            "design_notes": structure.get("design_notes", []),
+        }
+
     def update_base_url(self, new_url: str) -> None:
         if new_url and new_url.strip():
             self.base_url = new_url.strip().rstrip('/')
@@ -77,7 +359,6 @@ class LLMService:
         self, db: "AsyncSession"
     ) -> None:
         try:
-            from app.repositories.config_repository import config_repository
 
             llm_url = await config_repository.get_config(
                 db, APP_CONFIG_KEY_LLM_URL
@@ -227,31 +508,73 @@ class LLMService:
 
         return await self._make_ollama_request(payload, url)
 
+    async def chat_schema_design(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+    ) -> str:
+        """Delegate to 2-phase generation. Returns JSON string."""
+        description = prompt
+        clarification_context = ""
+
+        prefix = "Design a database schema for: "
+        context_marker = "\n\nAdditional context:\n"
+
+        if prompt.startswith(prefix):
+            body = prompt.removeprefix(prefix)
+            if context_marker in body:
+                parts = body.split(context_marker, 1)
+                description = parts[0].strip()
+                clarification_context = f"{context_marker}{parts[1]}"
+            else:
+                description = body.strip()
+
+        result = await self.generate_schema_two_phase(
+            description=description,
+            clarification_context=clarification_context,
+        )
+        return json.dumps(result, ensure_ascii=False)
+
     def _is_sql_query(self, message: str) -> bool:
-        try:
-            clean_message = re.sub(
-                r'```sql\s*|\s*```', '', message, flags=re.IGNORECASE
-            )
-            clean_message = clean_message.strip()
-
-            sqlglot.parse_one(clean_message)
-            logger.info("[INTENT] SQL detected via sqlglot parsing")
-            return True
-        except Exception:
-            pass
-
         sql_keywords = [
             'SELECT', 'INSERT', 'UPDATE', 'DELETE',
             'CREATE', 'ALTER', 'DROP', 'WITH',
-            'TRUNCATE', 'MERGE', 'GRANT', 'REVOKE'
+            'TRUNCATE', 'MERGE', 'GRANT', 'REVOKE',
         ]
-
         message_upper = message.upper()
+        has_keyword = any(
+            re.search(rf'\b{kw}\b', message_upper)
+            for kw in sql_keywords
+        )
+        if has_keyword:
+            logger.info("[INTENT] SQL detected via keyword")
+            return True
 
-        for keyword in sql_keywords:
-            if re.search(rf'\b{keyword}\b', message_upper):
-                logger.info(f"[INTENT] SQL detected via keyword: {keyword}")
+        try:
+            clean_message = re.sub(
+                r'```sql\s*|\s*```', '', message, flags=re.IGNORECASE
+            ).strip()
+
+            if len(clean_message.split()) < 3:
+                return False
+
+            parsed = sqlglot.parse_one(clean_message)
+
+            is_real_sql = isinstance(parsed, (
+                sqlglot_exp.Select,
+                sqlglot_exp.Insert,
+                sqlglot_exp.Update,
+                sqlglot_exp.Delete,
+                sqlglot_exp.Create,
+                sqlglot_exp.Drop,
+                sqlglot_exp.Alter,
+                sqlglot_exp.With,
+            ))
+            if is_real_sql:
+                logger.info("[INTENT] SQL detected via sqlglot statement parsing")
                 return True
+        except Exception:
+            pass
 
         logger.info("[INTENT] No SQL detected - treating as general chat")
         return False
@@ -299,7 +622,7 @@ class LLMService:
             parsed = sqlglot.parse_one(sql_query)
             table_names = {
                 table.name.lower()
-                for table in parsed.find_all(exp.Table)
+                for table in parsed.find_all(sqlglot_exp.Table)
                 if table.name
             }
             return list(table_names)
@@ -393,9 +716,16 @@ class LLMService:
         )
 
     def _create_optimization_payload(
-        self, sql_query: str, schema_text: str
+        self,
+        sql_query: str,
+        schema_text: str,
+        detected_issues: str = "",
     ) -> OllamaPayload:
-        user_prompt = get_sql_optimization_prompt(sql_query, schema_text)
+        user_prompt = get_sql_optimization_prompt(
+            sql_query=sql_query,
+            schema_text=schema_text,
+            detected_issues=detected_issues,
+        )
 
         return OllamaPayload(
             model=self.coder_model,
@@ -403,7 +733,7 @@ class LLMService:
             system_prompt=SQL_OPTIMIZATION_SYSTEM_PROMPT,
             temperature=0.1,
             num_ctx=2048,
-            num_predict=150,
+            num_predict=300,
             json_mode=True,
         )
 
@@ -420,6 +750,8 @@ class LLMService:
             return {
                 "optimized_sql": parsed.get("optimized_sql", original_query),
                 "index_suggestion": parsed.get("index_suggestion"),
+                "rewrite_type": parsed.get("rewrite_type", "none"),
+                "changes_made": parsed.get("changes_made", []),
                 "explanation": parsed.get("explanation", "Analysis completed"),
             }
 
@@ -428,6 +760,8 @@ class LLMService:
             return {
                 "optimized_sql": original_query,
                 "index_suggestion": None,
+                "rewrite_type": "none",
+                "changes_made": [],
                 "explanation": "Analysis failed due to response parsing error",
             }
 
@@ -453,7 +787,10 @@ class LLMService:
         return index_suggestion, ""
 
     async def optimize_sql(
-        self, sql_query: str, db_schema: Optional[str] = None
+        self,
+        sql_query: str,
+        db_schema: Optional[str] = None,
+        static_issues: Optional[list] = None,
     ) -> Dict[str, Any]:
         used_tables = self._extract_table_names(sql_query)
         original_schema_size = len(db_schema) if db_schema else 0
@@ -465,11 +802,19 @@ class LLMService:
             original_schema_size, len(filtered_schema), used_tables
         )
 
-        schema_text = (
-            f"\nRelevant Schema:\n{filtered_schema}" if filtered_schema else ""
-        )
+        schema_text = filtered_schema if filtered_schema else ""
+
+        issues_text = ""
+        if static_issues:
+            issues_text = "\n".join(
+                f"- [{i.severity.upper()}] {i.type}: {i.message}"
+                for i in static_issues
+            )
+
         payload_config = self._create_optimization_payload(
-            sql_query, schema_text
+            sql_query,
+            schema_text,
+            issues_text,
         )
 
         system_len = len(payload_config.system_prompt or "")
@@ -511,6 +856,8 @@ class LLMService:
         return {
             "optimized_sql": parsed_result["optimized_sql"].strip(),
             "index_suggestion": index_suggestion,
+            "rewrite_type": parsed_result.get("rewrite_type", "none"),
+            "changes_made": parsed_result.get("changes_made", []),
             "explanation": parsed_result["explanation"].strip(),
             "reasoning": reasoning
         }
@@ -522,6 +869,170 @@ class LLMService:
             prompt=prompt,
             temperature=0.4
         )
+
+    async def check_schema_clarification(
+        self, user_description: str
+    ) -> Dict[str, Any]:
+        prompt = get_schema_clarification_prompt(user_description)
+
+        payload_config = OllamaPayload(
+            model=self.chat_model,
+            prompt=prompt,
+            system_prompt=SCHEMA_CLARIFICATION_SYSTEM_PROMPT,
+            temperature=0.2,
+            num_ctx=2048,
+            num_predict=512,
+            json_mode=True,
+        )
+
+        url = self._build_api_url()
+        payload = payload_config.to_dict()
+
+        try:
+            raw = await self._make_ollama_request(payload, url)
+            clean = re.sub(r"```json|```", "", raw).strip()
+            result = json.loads(self._extract_json_object(clean))
+            logger.info(
+                "[SCHEMA-GEN] Clarification check: "
+                "needs_clarification=%s",
+                result.get("needs_clarification"),
+            )
+            return result
+        except Exception as e:
+            logger.warning(f"[SCHEMA-GEN] Clarification check failed: {e}")
+            return {"needs_clarification": False, "questions": []}
+
+    async def generate_schema_from_prompt(
+        self,
+        user_description: str,
+        clarifications: Optional[list[dict]] = None,
+    ) -> Dict[str, Any]:
+        prompt = get_schema_generation_prompt(user_description, clarifications)
+
+        payload_config = OllamaPayload(
+            model=self.chat_model,
+            prompt=prompt,
+            system_prompt=SCHEMA_GENERATION_SYSTEM_PROMPT,
+            temperature=0.1,
+            num_ctx=3072,
+            num_predict=2500,
+            json_mode=True,
+        )
+
+        url = self._build_api_url()
+        payload = payload_config.to_dict()
+        payload["keep_alive"] = "120m"
+
+        logger.info(
+            "[SCHEMA-GEN] Generating schema for: %s...",
+            user_description[:80],
+        )
+
+        raw = ""
+        try:
+            raw = await self._make_ollama_request(payload, url)
+            clean = re.sub(r"```(?:json)?\s*", "", raw)
+            clean = re.sub(r"```", "", clean).strip()
+
+            brace_start = clean.find("{")
+            brace_end = clean.rfind("}")
+            if brace_start != -1 and brace_end != -1 and brace_end > brace_start:
+                clean = clean[brace_start:brace_end + 1]
+
+            try:
+                schema_json = json.loads(clean)
+            except json.JSONDecodeError:
+                logger.warning("[SCHEMA-GEN] JSON malformed, attempting repair")
+                schema_json = self._repair_truncated_schema_json(clean)
+
+            if "tables" not in schema_json or not schema_json["tables"]:
+                raise ValueError("LLM response missing 'tables' key or empty tables")
+
+            logger.info(
+                "[SCHEMA-GEN] Generated %s tables: %s",
+                len(schema_json["tables"]),
+                ", ".join(t.get("name", "") for t in schema_json["tables"]),
+            )
+            return schema_json
+
+        except ValueError:
+            raise
+        except Exception as e:
+            logger.error(
+                "[SCHEMA-GEN] Generation failed: %s | raw snippet: %s",
+                e,
+                raw[:300],
+            )
+            raise ValueError(
+                "Schema generation failed: LLM returned invalid JSON. "
+                "Try describing your system with fewer tables or more specific details."
+            )
+
+    def _repair_truncated_schema_json(self, broken_json: str) -> Dict[str, Any]:
+        tables_start = broken_json.find('"tables"')
+        if tables_start == -1:
+            raise ValueError("Cannot find 'tables' key in response")
+
+        arr_start = broken_json.find('[', tables_start)
+        if arr_start == -1:
+            raise ValueError("Cannot find tables array start")
+
+        depth = 0
+        last_complete_end = arr_start
+
+        for i in range(arr_start, len(broken_json)):
+            ch = broken_json[i]
+            if ch == '{':
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0:
+                    last_complete_end = i
+
+        if last_complete_end == arr_start:
+            raise ValueError("No complete table object found")
+
+        tables_section = broken_json[arr_start:last_complete_end + 1]
+
+        try:
+            sys_name_match = re.search(r'"system_name"\s*:\s*"([^"]+)"', broken_json)
+            system_name = sys_name_match.group(1) if sys_name_match else "Generated Schema"
+        except Exception:
+            system_name = "Generated Schema"
+
+        complete_tables: list[Dict[str, Any]] = []
+        depth = 0
+        obj_start = -1
+
+        for i, ch in enumerate(tables_section):
+            if ch == '{':
+                if depth == 0:
+                    obj_start = i
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0 and obj_start != -1:
+                    try:
+                        obj = json.loads(tables_section[obj_start:i + 1])
+                        if "name" in obj and "columns" in obj:
+                            complete_tables.append(obj)
+                    except Exception:
+                        pass
+                    obj_start = -1
+
+        if not complete_tables:
+            raise ValueError("No parseable table objects found")
+
+        logger.info("[SCHEMA-GEN] Repaired JSON: recovered %s tables", len(complete_tables))
+
+        return {
+            "system_name": system_name,
+            "tables": complete_tables,
+            "relationships": [],
+            "design_notes": [
+                "Schema was partially recovered due to response truncation."
+            ],
+        }
 
     async def check_health(self) -> bool:
         try:

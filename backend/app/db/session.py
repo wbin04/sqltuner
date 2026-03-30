@@ -10,6 +10,8 @@ if settings.ENABLE_DATABASE and settings.SQLALCHEMY_DATABASE_URL:
         echo=True,
         future=True,
         pool_pre_ping=True,
+        pool_recycle=300,
+        pool_timeout=10,
     )
 
     AsyncSessionLocal = async_sessionmaker(
