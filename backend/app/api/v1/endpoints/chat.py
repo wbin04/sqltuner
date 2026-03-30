@@ -684,3 +684,46 @@ async def get_conversation_messages(
         }
         for msg in messages
     ]
+
+@router.patch("/messages/{message_id}")
+async def update_message(
+    message_id: UUID,
+    body: dict,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    message = await query_log_repository.get(db, id=message_id)
+    if not message:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Message not found"
+        )
+        
+    conversation = await conversation_repository.get(db, id=message.conversation_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found"
+        )
+        
+    connection = await connection_repository.get_by_user_and_id(
+        db=db,
+        user_id=current_user.id,
+        connection_id=conversation.connection_id
+    )
+    if not connection:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied"
+        )
+
+    updated_sql = body.get("sql_generated")
+    if updated_sql is not None:
+        updated = await query_log_repository.update(
+            db,
+            db_obj=message,
+            obj_in={"sql_generated": updated_sql}
+        )
+        return {"id": str(updated.id), "sql_generated": updated.sql_generated}
+        
+    return {"id": str(message.id)}

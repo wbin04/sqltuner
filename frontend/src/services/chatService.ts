@@ -172,4 +172,15 @@ export const chatService = {
     );
     return response.data;
   },
+
+  /**
+   * Update a message's SQL content
+   */
+  async updateMessage(messageId: string, sql_generated: string): Promise<{ id: string; sql_generated: string }> {
+    const response = await axios.patch<{ id: string; sql_generated: string }>(
+      `/chat/messages/${messageId}`,
+      { sql_generated }
+    );
+    return response.data;
+  },
 };

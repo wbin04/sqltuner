@@ -3,12 +3,13 @@
  * Main workbench with chat stream, SQL blocks, and action bar
  */
 import { useState, useEffect, useRef } from 'react';
-import { Send, Sparkles, Play, LineChart, Loader2 } from 'lucide-react';
+import { Send, Sparkles, Loader2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { SchemaGeneratedData } from '../../services/chatService';
 import { SchemaBlock } from './SchemaBlock';
 import { ClarificationBlock } from './ClarificationBlock';
 import { format } from 'date-fns';
+import { SQLBlock } from './SQLBlock';
 
 const CLARIFICATION_MARKER = 'Before designing the schema, I have a few questions:';
 
@@ -224,72 +225,17 @@ export function ChatArea({
 
                   {/* SQL Block with Action Bar */}
                   {message.sql_generated && (
-                    <div className={cn(
-                      'max-w-3xl rounded-xl overflow-hidden',
-                      'bg-surface-light dark:bg-surface-dark',
-                      'border border-border-DEFAULT dark:border-border-dark'
-                    )}>
-                      <pre className="p-4 overflow-x-auto">
-                        <code className="text-sm font-mono text-text-main-DEFAULT dark:text-text-main-dark">
-                          {message.sql_generated}
-                        </code>
-                      </pre>
-
-                      <div className="flex items-center gap-2 px-4 py-3 bg-surface-highlight-DEFAULT dark:bg-surface-highlight-dark border-t border-border-DEFAULT dark:border-border-dark">
-                        <button
-                          onClick={() => onExecute(message.sql_generated!)}
-                          disabled={isExecuting || isExplaining || isOptimizing}
-                          className={cn(
-                            'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
-                            'bg-green-600 dark:bg-green-600 text-white',
-                            'hover:bg-green-700 dark:hover:bg-green-700',
-                            'disabled:opacity-50 disabled:cursor-not-allowed'
-                          )}
-                        >
-                          {isExecuting ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <Play className="w-4 h-4" />
-                          )}
-                          {isExecuting ? 'Executing...' : 'Execute'}
-                        </button>
-                        <button
-                          onClick={() => onExplain(message.sql_generated!)}
-                          disabled={isExecuting || isExplaining || isOptimizing}
-                          className={cn(
-                            'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
-                            'bg-surface-light dark:bg-surface-dark',
-                            'border border-border-DEFAULT dark:border-border-dark',
-                            'hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark',
-                            'disabled:opacity-50 disabled:cursor-not-allowed'
-                          )}
-                        >
-                          {isExplaining ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <LineChart className="w-4 h-4" />
-                          )}
-                          {isExplaining ? 'Explaining...' : 'Explain'}
-                        </button>
-                        <button
-                          onClick={() => onOptimize(message.sql_generated!)}
-                          disabled={isExecuting || isExplaining || isOptimizing}
-                          className={cn(
-                            'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
-                            'bg-gradient-to-r from-primary to-secondary dark:from-primary-dark dark:to-secondary-dark',
-                            'text-white',
-                            'hover:shadow-lg',
-                            'disabled:opacity-50 disabled:cursor-not-allowed'
-                          )}
-                        >
-                          {isOptimizing ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <Sparkles className="w-4 h-4" />
-                          )}
-                          {isOptimizing ? 'Optimizing...' : 'Optimize'}
-                        </button>
-                      </div>
+                    <div className="max-w-3xl">
+                      <SQLBlock
+                        sql={message.sql_generated}
+                        queryLogId={message.id}
+                        onExecute={onExecute}
+                        onExplain={onExplain}
+                        onOptimize={onOptimize}
+                        isExecuting={isExecuting}
+                        isExplaining={isExplaining}
+                        isOptimizing={isOptimizing}
+                      />
                     </div>
                   )}
 
