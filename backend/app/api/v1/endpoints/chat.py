@@ -56,6 +56,7 @@ def extract_mentioned_tables(message: str, all_tables: list) -> list:
         table_name = table.get("name", "").lower()
         if table_name in message_lower:
             mentioned.append(table)
+            continue
 
     return mentioned
 
@@ -68,45 +69,59 @@ def format_schema_for_prompt(
     if not meta_schema or "tables" not in meta_schema:
         return "No schema information available."
 
-    schema_lines = ["Database Schema:"]
     all_tables = meta_schema.get("tables", [])
 
+    # Nếu có mentioned tables → format chi tiết, giới hạn 10
     if mentioned_tables:
         tables = mentioned_tables[:limit_tables]
-        if len(mentioned_tables) > limit_tables:
-            schema_lines.append(
-                f"(Showing {limit_tables} of {len(mentioned_tables)}"
-                "relevant tables)")
-    else:
-        tables = all_tables[:limit_tables]
-        if len(all_tables) > limit_tables:
-            schema_lines.append(
-                f"(Showing {limit_tables} of {len(all_tables)} tables)")
+        return _format_tables_detailed(tables)
 
+    # Không có mentioned tables → inject TẤT CẢ tables dạng compact
+    # để LLM biết đủ bảng để chọn đúng
+    return _format_tables_compact(all_tables)
+
+
+def _format_tables_detailed(tables: list) -> str:
+    """Format đầy đủ với columns và FK — dùng khi biết bảng cụ thể."""
+    lines = ["Database Schema (relevant tables):"]
     for table in tables:
         table_name = table.get("name", "unknown")
         columns = table.get("columns", [])
-
-        schema_lines.append(f"\nTable: {table_name}")
-
+        lines.append(f"\nTable: {table_name}")
         for col in columns:
             col_name = col.get("name", "unknown")
             col_type = col.get("type", col.get("data_type", "unknown"))
             nullable = "NULL" if col.get("is_nullable", True) else "NOT NULL"
             pk = " PRIMARY KEY" if col.get("is_pk", False) else ""
-
-            schema_lines.append(f"  - {col_name}: {col_type} {nullable}{pk}")
-
+            lines.append(f"  - {col_name}: {col_type} {nullable}{pk}")
         foreign_keys = table.get("foreign_keys", [])
         if foreign_keys:
-            schema_lines.append("  Foreign Keys:")
+            lines.append("  Foreign Keys:")
             for fk in foreign_keys:
                 fk_col = fk.get("column", "")
                 ref_table = fk.get("ref_table", fk.get("referenced_table", ""))
                 ref_col = fk.get("ref_column", fk.get("referenced_column", ""))
-                schema_lines.append(f"    - {fk_col} -> {ref_table}.{ref_col}")
+                lines.append(f"    - {fk_col} -> {ref_table}.{ref_col}")
+    return "\n".join(lines)
 
-    return "\n".join(schema_lines)
+
+def _format_tables_compact(tables: list) -> str:
+    """Format compact — dùng khi inject tất cả tables để LLM tự tìm bảng phù hợp."""
+    lines = ["Database Schema (all tables):"]
+    for table in tables:
+        table_name = table.get("name", "unknown")
+        columns = table.get("columns", [])
+        col_names = [c.get("name", "") for c in columns]
+        fks = table.get("foreign_keys", [])
+        fk_info = ""
+        if fks:
+            fk_parts = [
+                f"{fk.get('column')}→{fk.get('ref_table', fk.get('referenced_table', ''))}.{fk.get('ref_column', fk.get('referenced_column', ''))}"
+                for fk in fks
+            ]
+            fk_info = f" | FK: {', '.join(fk_parts)}"
+        lines.append(f"- {table_name}({', '.join(col_names)}){fk_info}")
+    return "\n".join(lines)
 
 
 def _is_schema_design_intent(message: str) -> bool:
@@ -404,7 +419,7 @@ async def chat_completion(
                 prompt=request.message,
                 system_prompt=system_prompt,
                 temperature=0.3,
-                max_tokens=256,
+                max_tokens=2048,
             )
         llm_duration = time.time() - llm_start
         logger.info(f"[CHAT] LLM took: {llm_duration:.2f}s")
