@@ -1,3 +1,4 @@
+import re
 from typing import List
 from uuid import UUID
 
@@ -12,7 +13,7 @@ from app.schemas.connection import (DBConnectionCreate, DBConnectionResponse,
 from app.schemas.schema_def import SchemaDef
 from app.services.inspector_service import inspector_service
 from app.services.simulation_service import simulation_service
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status, Response
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -287,3 +288,122 @@ async def get_connection_ddl(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate DDL: {str(e)}"
         )
+
+
+@router.get(
+    "/{connection_id}/export-sql",
+    response_class=PlainTextResponse,
+    summary="Export schema and data as SQL file",
+)
+async def export_schema_as_sql(
+    connection_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    connection = await connection_repository.get_by_user_and_id(
+        db=db,
+        user_id=current_user.id,
+        connection_id=connection_id,
+    )
+    if not connection:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Connection not found",
+        )
+    if not connection.meta_schema or connection.meta_schema == {}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No schema data available to export.",
+        )
+
+    try:
+        sql_content = simulation_service.generate_sql_export(connection.meta_schema)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Export failed: {str(e)}",
+        )
+
+    safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', connection.name)
+    filename = f"{safe_name}_schema.sql"
+
+    return Response(
+        content=sql_content,
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post(
+    "/{connection_id}/import-sql",
+    response_model=dict,
+    summary="Import SQL file to overwrite simulation schema",
+)
+async def import_schema_from_sql(
+    connection_id: UUID,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    connection = await connection_repository.get_by_user_and_id(
+        db=db,
+        user_id=current_user.id,
+        connection_id=connection_id,
+    )
+    if not connection:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Connection not found",
+        )
+    if connection.db_type != DBType.SIMULATION:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="SQL import is only supported for Simulation connections.",
+        )
+    if not file.filename or not file.filename.endswith('.sql'):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please upload a valid .sql file.",
+        )
+
+    try:
+        content = await file.read()
+        sql_text = content.decode('utf-8')
+    except UnicodeDecodeError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File encoding error. Please ensure the file is UTF-8 encoded.",
+        )
+
+    try:
+        new_meta_schema = simulation_service.parse_sql_to_schema(sql_text)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e),
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to parse SQL file: {str(e)}",
+        )
+
+    # Update meta_schema
+    from sqlalchemy.future import select as sa_select
+    result = await db.execute(
+        sa_select(connection_repository.model).where(
+            connection_repository.model.id == connection_id
+        )
+    )
+    conn_obj = result.scalar_one_or_none()
+    if conn_obj:
+        conn_obj.meta_schema = new_meta_schema
+        await db.commit()
+
+    tables_count = len(new_meta_schema.get("tables", []))
+    return {
+        "success": True,
+        "message": f"Successfully imported {tables_count} table(s) from SQL file.",
+        "tables_count": tables_count,
+        "table_names": [t["name"] for t in new_meta_schema.get("tables", [])],
+    }

@@ -189,4 +189,42 @@ export const workspaceService = {
     const response = await api.post('/schema-generator/generate', params);
     return response.data;
   },
+
+  /**
+   * Export schema as SQL file — works for both simulation and real DB
+   */
+  async exportSchemaAsSql(id: string, filename?: string): Promise<void> {
+    const response = await api.get(`${BASE_URL}/${id}/export-sql`, {
+      responseType: 'blob',
+    });
+    const blob = new Blob([response.data], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    // Lấy filename từ Content-Disposition header nếu có
+    const disposition = response.headers['content-disposition'];
+    const nameMatch = disposition?.match(/filename="([^"]+)"/);
+    link.download = nameMatch?.[1] ?? filename ?? 'schema_export.sql';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  },
+
+  /**
+   * Import SQL file to overwrite simulation schema
+   */
+  async importSchemaFromSql(id: string, file: File): Promise<{
+    success: boolean;
+    message: string;
+    tables_count: number;
+    table_names: string[];
+  }> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await api.post(`${BASE_URL}/${id}/import-sql`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  },
 };

@@ -5,7 +5,7 @@
  */
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save, Loader2, AlertCircle, Network, Sparkles } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, AlertCircle, Network, Sparkles, Upload, Download } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useWorkspace } from '../../hooks/useWorkspace';
 import { useUnsavedChangesWarning } from '../../hooks/useUnsavedChangesWarning';
@@ -39,6 +39,12 @@ export function SchemaEditor() {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showUnsavedModal, setShowUnsavedModal] = useState(false);
   
+  const [isImporting, setIsImporting] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [showImportConfirm, setShowImportConfirm] = useState(false);
+  const [pendingImportFile, setPendingImportFile] = useState<File | null>(null);
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+
   // Store initial schema to compare for changes
   const initialSchemaRef = useRef<string>('');
 
@@ -429,6 +435,46 @@ export function SchemaEditor() {
     }
   };
 
+  const handleExportSql = async () => {
+    if (!workspaceId) return;
+    setIsExporting(true);
+    try {
+      await workspaceService.exportSchemaAsSql(workspaceId);
+      toast.success('Schema exported successfully!');
+    } catch (err) {
+      toast.error('Failed to export schema. Ensure schema has been saved first.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleImportFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPendingImportFile(file);
+    setShowImportConfirm(true);
+    // Reset input để có thể chọn cùng file lần sau
+    e.target.value = '';
+  };
+
+  const handleConfirmImport = async () => {
+    if (!workspaceId || !pendingImportFile) return;
+    setShowImportConfirm(false);
+    setIsImporting(true);
+    try {
+      const result = await workspaceService.importSchemaFromSql(workspaceId, pendingImportFile);
+      toast.success(result.message);
+      // Reload workspace để cập nhật schema mới
+      window.location.reload();
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail || 'Failed to import SQL file.';
+      toast.error(detail);
+    } finally {
+      setIsImporting(false);
+      setPendingImportFile(null);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-background-light dark:bg-background-dark flex items-center justify-center">
@@ -485,6 +531,51 @@ export function SchemaEditor() {
         </div>
 
         <div className="flex items-center gap-3">
+          {/* Export SQL */}
+          <button
+            onClick={handleExportSql}
+            disabled={isExporting}
+            className={cn(
+              'flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
+              'border border-border-DEFAULT dark:border-border-dark',
+              'text-text-main-DEFAULT dark:text-text-main-dark',
+              'hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark',
+              'disabled:opacity-50 disabled:cursor-not-allowed',
+            )}
+            title="Export schema and data as .sql file"
+          >
+            {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+            Export SQL
+          </button>
+
+          {/* Import SQL */}
+          {workspace?.db_type === DbType.SIMULATION && (
+            <>
+              <input
+                ref={importFileInputRef}
+                type="file"
+                accept=".sql"
+                className="hidden"
+                onChange={handleImportFileSelected}
+              />
+              <button
+                onClick={() => importFileInputRef.current?.click()}
+                disabled={isImporting}
+                className={cn(
+                  'flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
+                  'border border-border-DEFAULT dark:border-border-dark',
+                  'text-text-main-DEFAULT dark:text-text-main-dark',
+                  'hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark',
+                  'disabled:opacity-50 disabled:cursor-not-allowed',
+                )}
+                title="Import .sql file (will overwrite current schema)"
+              >
+                {isImporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                Import SQL
+              </button>
+            </>
+          )}
+
           {workspace?.db_type === DbType.SIMULATION && (
             <button
               onClick={() => setIsGenerateModalOpen(true)}
@@ -860,6 +951,44 @@ export function SchemaEditor() {
           setShowUnsavedModal(false);
         }}
       />
+
+      {/* Import Confirm Dialog */}
+      {showImportConfirm && pendingImportFile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl w-full max-w-md mx-4 p-6">
+            <div className="flex items-start gap-3 mb-4">
+              <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+              <div>
+                <h3 className="text-base font-semibold text-text-main-DEFAULT dark:text-text-main-dark">
+                  Import SQL — Overwrite Warning
+                </h3>
+                <p className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark mt-1">
+                  Importing <span className="font-medium">"{pendingImportFile.name}"</span> will
+                  <strong> replace all current tables and data</strong> in this sandbox.
+                  This action cannot be undone.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={() => {
+                  setShowImportConfirm(false);
+                  setPendingImportFile(null);
+                }}
+                className="px-4 py-2 text-sm text-text-muted-DEFAULT dark:text-text-muted-dark hover:text-text-main-DEFAULT transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmImport}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium rounded-lg transition-colors"
+              >
+                Yes, overwrite and import
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
