@@ -122,5 +122,265 @@ class SimulationService:
 
         return self.generate_ddl_script(schema_def)
 
+    def generate_sql_export(self, meta_schema: dict) -> str:
+        """
+        Sinh SQL export từ raw meta_schema dict.
+        Dùng được cho cả simulation và real DB.
+        """
+        if not meta_schema or "tables" not in meta_schema:
+            raise ValueError("No schema data available to export")
+
+        lines = []
+        lines.append("-- SQLTuner Schema Export")
+        lines.append(f"-- Generated at: {__import__('datetime').datetime.utcnow().isoformat()}Z")
+        lines.append("")
+
+        tables = meta_schema.get("tables", [])
+
+        # CREATE TABLE statements
+        for table in tables:
+            table_name = table.get("name", "")
+            columns = table.get("columns", [])
+            foreign_keys = table.get("foreign_keys", [])
+            indexes = table.get("indexes", [])
+
+            lines.append(f"CREATE TABLE {table_name} (")
+            col_defs = []
+
+            for col in columns:
+                col_name = col.get("name", "")
+                col_type = col.get("type", col.get("data_type", "TEXT"))
+                is_nullable = col.get("is_nullable", True)
+                is_pk = col.get("is_pk", False)
+                default_val = col.get("default")
+
+                col_def = f"    {col_name} {col_type}"
+                if not is_nullable:
+                    col_def += " NOT NULL"
+                if default_val is not None:
+                    col_def += f" DEFAULT {default_val}"
+                col_defs.append(col_def)
+
+            pk_cols = [c.get("name") for c in columns if c.get("is_pk")]
+            if pk_cols:
+                col_defs.append(f"    PRIMARY KEY ({', '.join(pk_cols)})")
+
+            lines.append(",\n".join(col_defs))
+            lines.append(");")
+            lines.append("")
+
+            # FOREIGN KEY constraints
+            for fk in foreign_keys:
+                fk_col = fk.get("column", "")
+                ref_table = fk.get("ref_table", fk.get("referenced_table", ""))
+                ref_col = fk.get("ref_column", fk.get("referenced_column", "id"))
+                fk_name = f"fk_{table_name}_{fk_col}"
+                lines.append(
+                    f"ALTER TABLE {table_name} "
+                    f"ADD CONSTRAINT {fk_name} "
+                    f"FOREIGN KEY ({fk_col}) "
+                    f"REFERENCES {ref_table}({ref_col});"
+                )
+
+            # CREATE INDEX statements
+            for idx in indexes:
+                idx_name = idx.get("name", "")
+                idx_cols = idx.get("column_names", [])
+                unique = "UNIQUE " if idx.get("unique") else ""
+                if idx_name and idx_cols:
+                    lines.append(
+                        f"CREATE {unique}INDEX {idx_name} "
+                        f"ON {table_name} ({', '.join(idx_cols)});"
+                    )
+
+            if foreign_keys or indexes:
+                lines.append("")
+
+        # INSERT statements (sample_data — chỉ có ở simulation)
+        for table in tables:
+            table_name = table.get("name", "")
+            sample_data = table.get("sample_data", [])
+            if not sample_data:
+                continue
+
+            lines.append(f"-- Data for {table_name}")
+            for row in sample_data:
+                cols = list(row.keys())
+                values = []
+                for val in row.values():
+                    if val is None:
+                        values.append("NULL")
+                    elif isinstance(val, bool):
+                        values.append("TRUE" if val else "FALSE")
+                    elif isinstance(val, (int, float)):
+                        values.append(str(val))
+                    else:
+                        escaped = str(val).replace("'", "''")
+                        values.append(f"'{escaped}'")
+                lines.append(
+                    f"INSERT INTO {table_name} ({', '.join(cols)}) "
+                    f"VALUES ({', '.join(values)});"
+                )
+            lines.append("")
+
+        return "\n".join(lines)
+
+    def parse_sql_to_schema(self, sql_content: str) -> dict:
+        """
+        Parse SQL file content → meta_schema dict compatible với SchemaDef.
+        Hỗ trợ: CREATE TABLE, ALTER TABLE ADD CONSTRAINT FOREIGN KEY,
+                 CREATE INDEX, INSERT INTO.
+        """
+        import re
+
+        tables: dict[str, dict] = {}
+        table_order: list[str] = []
+
+        # Normalize: bỏ comments, normalize whitespace
+        sql = re.sub(r'--[^\n]*', '', sql_content)
+        sql = re.sub(r'/\*.*?\*/', '', sql, flags=re.DOTALL)
+        sql = sql.strip()
+
+        # Parse CREATE TABLE
+        create_pattern = re.compile(
+            r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`"\[]?(\w+)[`"\]]?\s*\((.*?)\)\s*;',
+            re.IGNORECASE | re.DOTALL
+        )
+        for match in create_pattern.finditer(sql):
+            table_name = match.group(1)
+            body = match.group(2)
+
+            columns = []
+            pk_columns = []
+
+            for line in body.split('\n'):
+                line = line.strip().rstrip(',').strip()
+                if not line:
+                    continue
+
+                # PRIMARY KEY constraint line
+                pk_match = re.match(
+                    r'PRIMARY\s+KEY\s*\(([^)]+)\)', line, re.IGNORECASE
+                )
+                if pk_match:
+                    pk_columns = [c.strip().strip('`"[]') for c in pk_match.group(1).split(',')]
+                    continue
+
+                # Skip FOREIGN KEY inline constraints in CREATE TABLE
+                if re.match(r'(FOREIGN\s+KEY|CONSTRAINT|UNIQUE\s+KEY|KEY\s+)', line, re.IGNORECASE):
+                    continue
+
+                # Column definition: name type [modifiers...]
+                col_match = re.match(r'[`"\[]?(\w+)[`"\]]?\s+(\S+(?:\([^)]*\))?)(.*)', line)
+                if col_match:
+                    col_name = col_match.group(1)
+                    col_type = col_match.group(2).upper()
+                    modifiers = col_match.group(3).upper()
+
+                    is_pk = 'PRIMARY KEY' in modifiers
+                    is_nullable = 'NOT NULL' not in modifiers
+                    default_val = None
+                    default_match = re.search(r'DEFAULT\s+(\S+)', modifiers)
+                    if default_match:
+                        default_val = default_match.group(1)
+
+                    if is_pk:
+                        pk_columns.append(col_name)
+
+                    columns.append({
+                        "name": col_name,
+                        "type": col_type,
+                        "is_pk": is_pk,
+                        "is_nullable": is_nullable,
+                        "default": default_val,
+                    })
+
+            # Apply pk_columns from PRIMARY KEY constraint line
+            for col in columns:
+                if col["name"] in pk_columns:
+                    col["is_pk"] = True
+
+            tables[table_name] = {
+                "name": table_name,
+                "columns": columns,
+                "foreign_keys": [],
+                "indexes": [],
+                "sample_data": [],
+            }
+            table_order.append(table_name)
+
+        # Parse ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY
+        fk_pattern = re.compile(
+            r'ALTER\s+TABLE\s+[`"\[]?(\w+)[`"\]]?\s+ADD\s+(?:CONSTRAINT\s+\w+\s+)?'
+            r'FOREIGN\s+KEY\s*\(([^)]+)\)\s*REFERENCES\s+[`"\[]?(\w+)[`"\]]?\s*\(([^)]+)\)',
+            re.IGNORECASE
+        )
+        for match in fk_pattern.finditer(sql):
+            table_name = match.group(1)
+            fk_col = match.group(2).strip().strip('`"[]')
+            ref_table = match.group(3)
+            ref_col = match.group(4).strip().strip('`"[]')
+            if table_name in tables:
+                tables[table_name]["foreign_keys"].append({
+                    "column": fk_col,
+                    "ref_table": ref_table,
+                    "ref_column": ref_col,
+                })
+
+        # Parse CREATE INDEX
+        idx_pattern = re.compile(
+            r'CREATE\s+(UNIQUE\s+)?INDEX\s+[`"\[]?(\w+)[`"\]]?\s+ON\s+[`"\[]?(\w+)[`"\]]?\s*\(([^)]+)\)',
+            re.IGNORECASE
+        )
+        for match in idx_pattern.finditer(sql):
+            is_unique = bool(match.group(1))
+            idx_name = match.group(2)
+            table_name = match.group(3)
+            idx_cols = [c.strip().strip('`"[]') for c in match.group(4).split(',')]
+            if table_name in tables:
+                tables[table_name]["indexes"].append({
+                    "name": idx_name,
+                    "column_names": idx_cols,
+                    "unique": is_unique,
+                })
+
+        # Parse INSERT INTO
+        insert_pattern = re.compile(
+            r'INSERT\s+INTO\s+[`"\[]?(\w+)[`"\]]?\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)',
+            re.IGNORECASE
+        )
+        for match in insert_pattern.finditer(sql):
+            table_name = match.group(1)
+            cols = [c.strip().strip('`"[]\'') for c in match.group(2).split(',')]
+            raw_vals = match.group(3)
+
+            # Parse values: handle quoted strings, NULL, numbers
+            values = []
+            for v in re.split(r",(?=(?:[^']*'[^']*')*[^']*$)", raw_vals):
+                v = v.strip()
+                if v.upper() == 'NULL':
+                    values.append(None)
+                elif v.startswith("'") and v.endswith("'"):
+                    values.append(v[1:-1].replace("''", "'"))
+                else:
+                    try:
+                        values.append(int(v))
+                    except ValueError:
+                        try:
+                            values.append(float(v))
+                        except ValueError:
+                            values.append(v)
+
+            if table_name in tables and len(cols) == len(values):
+                tables[table_name]["sample_data"].append(dict(zip(cols, values)))
+
+        if not tables:
+            raise ValueError(
+                "No CREATE TABLE statements found in SQL file. "
+                "Please ensure the file contains valid SQL DDL statements."
+            )
+
+        return {"tables": [tables[name] for name in table_order if name in tables]}
+
 
 simulation_service = SimulationService()
