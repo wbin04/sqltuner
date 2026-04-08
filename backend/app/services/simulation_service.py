@@ -382,5 +382,106 @@ class SimulationService:
 
         return {"tables": [tables[name] for name in table_order if name in tables]}
 
+    def parse_sqlite_to_schema(self, db_path: str) -> dict:
+        import sqlite3
+        
+        tables: dict[str, dict] = {}
+        table_order: list[str] = []
+
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        try:
+            # Get all tables
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
+            db_tables = cursor.fetchall()
+            
+            for table_row in db_tables:
+                table_name = table_row['name']
+                
+                escaped_table_name = table_name.replace('"', '""')
+                
+                # Get PRAGMA table_info
+                cursor.execute(f'PRAGMA table_info("{escaped_table_name}")')
+                columns_info = cursor.fetchall()
+                
+                columns = []
+                pk_cols = []
+                for col in columns_info:
+                    col_name = col['name']
+                    col_type = col['type']
+                    is_nullable = not col['notnull']
+                    default_val = col['dflt_value']
+                    is_pk = col['pk'] > 0
+                    
+                    if is_pk:
+                        pk_cols.append(col_name)
+                        
+                    columns.append({
+                        "name": col_name,
+                        "type": col_type if col_type else "TEXT",
+                        "is_pk": is_pk,
+                        "is_nullable": is_nullable,
+                        "default": default_val,
+                    })
+                    
+                # Get PRAGMA foreign_key_list
+                cursor.execute(f'PRAGMA foreign_key_list("{escaped_table_name}")')
+                fks_info = cursor.fetchall()
+                
+                foreign_keys = []
+                for fk in fks_info:
+                    foreign_keys.append({
+                        "column": fk['from'],
+                        "ref_table": fk['table'],
+                        "ref_column": fk['to'] if fk['to'] else 'id',
+                    })
+                    
+                # Get indexes
+                cursor.execute(f'PRAGMA index_list("{escaped_table_name}")')
+                indexes_info = cursor.fetchall()
+                indexes = []
+                for idx in indexes_info:
+                    # PRAGMA index_info
+                    idx_name = idx['name']
+                    escaped_idx_name = idx_name.replace('"', '""')
+                    is_unique = idx['unique'] == 1
+                    cursor.execute(f'PRAGMA index_info("{escaped_idx_name}")')
+                    idx_cols_info = cursor.fetchall()
+                    idx_cols = [c['name'] for c in idx_cols_info]
+                    
+                    if not idx_name.startswith("sqlite_autoindex_"):
+                        indexes.append({
+                            "name": idx_name,
+                            "column_names": idx_cols,
+                            "unique": is_unique,
+                        })
+
+                # Get sample data
+                cursor.execute(f'SELECT * FROM "{escaped_table_name}" LIMIT 100')
+                rows = cursor.fetchall()
+                sample_data = []
+                for row in rows:
+                    sample_data.append(dict(row))
+                    
+                tables[table_name] = {
+                    "name": table_name,
+                    "columns": columns,
+                    "foreign_keys": foreign_keys,
+                    "indexes": indexes,
+                    "sample_data": sample_data,
+                }
+                table_order.append(table_name)
+                
+        finally:
+            conn.close()
+            
+        if not tables:
+            raise ValueError(
+                "No tables found in the SQLite file. "
+            )
+
+        return {"tables": [tables[name] for name in table_order]}
 
 simulation_service = SimulationService()

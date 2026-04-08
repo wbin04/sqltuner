@@ -169,7 +169,7 @@ export function SQLBlock({
             ) : (
               <Play className="w-4 h-4 fill-current" />
             )}
-            <span>{isExecuting ? 'Executing...' : 'Run Query'}</span>
+            <span>{isExecuting ? 'Executing...' : 'Execute'}</span>
           </button>
         )}
 

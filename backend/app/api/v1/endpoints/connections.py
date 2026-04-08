@@ -360,33 +360,59 @@ async def import_schema_from_sql(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="SQL import is only supported for Simulation connections.",
         )
-    if not file.filename or not file.filename.endswith('.sql'):
+    if not file.filename or not (file.filename.endswith('.sql') or file.filename.endswith('.sqlite') or file.filename.endswith('.db')):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Please upload a valid .sql file.",
+            detail="Please upload a valid .sql or .sqlite file.",
         )
 
-    try:
-        content = await file.read()
-        sql_text = content.decode('utf-8')
-    except UnicodeDecodeError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="File encoding error. Please ensure the file is UTF-8 encoded.",
-        )
+    if file.filename.endswith('.sqlite') or file.filename.endswith('.db'):
+        import tempfile
+        import os
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.sqlite') as tmp:
+                tmp.write(await file.read())
+                tmp_path = tmp.name
+            new_meta_schema = simulation_service.parse_sqlite_to_schema(tmp_path)
+        except ValueError as e:
+            if 'tmp_path' in locals():
+                os.remove(tmp_path)
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(e),
+            )
+        except Exception as e:
+            if 'tmp_path' in locals():
+                os.remove(tmp_path)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to parse SQLite file: {str(e)}",
+            )
+        finally:
+            if 'tmp_path' in locals() and os.path.exists(tmp_path):
+                os.remove(tmp_path)
+    else:
+        try:
+            content = await file.read()
+            sql_text = content.decode('utf-8')
+        except UnicodeDecodeError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File encoding error. Please ensure the file is UTF-8 encoded.",
+            )
 
-    try:
-        new_meta_schema = simulation_service.parse_sql_to_schema(sql_text)
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(e),
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to parse SQL file: {str(e)}",
-        )
+        try:
+            new_meta_schema = simulation_service.parse_sql_to_schema(sql_text)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(e),
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to parse SQL file: {str(e)}",
+            )
 
     # Update meta_schema
     from sqlalchemy.future import select as sa_select
@@ -403,7 +429,7 @@ async def import_schema_from_sql(
     tables_count = len(new_meta_schema.get("tables", []))
     return {
         "success": True,
-        "message": f"Successfully imported {tables_count} table(s) from SQL file.",
+        "message": f"Successfully imported {tables_count} table(s).",
         "tables_count": tables_count,
         "table_names": [t["name"] for t in new_meta_schema.get("tables", [])],
     }
