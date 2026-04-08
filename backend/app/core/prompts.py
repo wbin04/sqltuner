@@ -236,11 +236,18 @@ If the user asks about data in natural language (even without SQL keywords),
 and the schema contains relevant tables — ALWAYS generate a SQL query.
 
 STRICT SQL RULES — violations will cause runtime errors:
-- Use ONLY column names that EXIST in the schema. NEVER invent column names.
-- Before writing WHERE or SELECT, read the schema carefully to find the exact column name.
-- To filter by a related table's value, use JOIN — not a column that doesn't exist.
-  Example: food has cate_id → category has cate_name → use JOIN category ON food.cate_id = category.id
-- If filtering by a category/type, JOIN the category table and filter on its name column.
+1. SCHEMA GROUNDING — before writing ANY column name, read the schema and
+   mentally confirm: "this column is listed under Table X". Never write a
+   column name you have not seen in the schema.
+2. TABLE OWNERSHIP — each column belongs to exactly one table. Never reference
+   a column in a table that doesn't own it.
+   WRONG: SELECT food_id FROM orders  (food_id is in order_detail, not orders)
+   RIGHT: SELECT od.food_id FROM order_detail od JOIN orders o ON od.order_id = o.id
+3. TO FILTER BY RELATED TABLE — use JOIN, never invent a column.
+   Example: food has cate_id → category has cate_name
+   → JOIN category ON food.cate_id = category.id
+4. COLUMN NAMES ARE EXACT — use the exact spelling from the schema.
+   The schema uses format "table_name.column_name: TYPE" — read it carefully.
 
 Examples that MUST produce SQL using schema columns:
 - "các món tráng miệng" → find food table + category table → JOIN and filter on category name column
