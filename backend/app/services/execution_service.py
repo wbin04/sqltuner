@@ -128,6 +128,15 @@ class ValueSanitizer:
     def _sanitize_numeric_value(value: Any) -> str:
         if isinstance(value, bool):
             return "1" if value else "0"
+        if isinstance(value, str):
+            val_upper = value.upper()
+            if val_upper in ("TRUE", "T"):
+                return "1"
+            if val_upper in ("FALSE", "F"):
+                return "0"
+            if not value.strip():
+                return "NULL"
+            return ValueSanitizer._escape_and_quote(value)
         return str(value)
 
     @staticmethod

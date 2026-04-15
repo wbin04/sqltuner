@@ -467,7 +467,7 @@ export function SchemaEditor() {
       // Reload workspace để cập nhật schema mới
       window.location.reload();
     } catch (err: any) {
-      const detail = err?.response?.data?.detail || 'Failed to import SQL file.';
+      const detail = err?.response?.data?.detail || 'Failed to import file.';
       toast.error(detail);
     } finally {
       setIsImporting(false);
@@ -554,7 +554,7 @@ export function SchemaEditor() {
               <input
                 ref={importFileInputRef}
                 type="file"
-                accept=".sql"
+                accept=".sql,.sqlite,.db"
                 className="hidden"
                 onChange={handleImportFileSelected}
               />
@@ -568,10 +568,10 @@ export function SchemaEditor() {
                   'hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark',
                   'disabled:opacity-50 disabled:cursor-not-allowed',
                 )}
-                title="Import .sql file (will overwrite current schema)"
+                title="Import .sql or .sqlite file (will overwrite current schema)"
               >
                 {isImporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-                Import SQL
+                Import File
               </button>
             </>
           )}
@@ -960,7 +960,7 @@ export function SchemaEditor() {
               <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
               <div>
                 <h3 className="text-base font-semibold text-text-main-DEFAULT dark:text-text-main-dark">
-                  Import SQL — Overwrite Warning
+                  Import File — Overwrite Warning
                 </h3>
                 <p className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark mt-1">
                   Importing <span className="font-medium">"{pendingImportFile.name}"</span> will

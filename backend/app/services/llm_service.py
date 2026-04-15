@@ -41,7 +41,7 @@ class OllamaPayload:
     system_prompt: Optional[str] = None
     temperature: float = 0.1
     num_ctx: int = 4096
-    num_predict: int = 512
+    num_predict: int = 1024
     json_mode: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
@@ -485,7 +485,7 @@ class LLMService:
         prompt: str,
         system_prompt: Optional[str] = None,
         temperature: float = 0.3,
-        max_tokens: int = 256
+        max_tokens: int = 2048
     ) -> str:
         url = self._build_api_url()
 
@@ -733,7 +733,7 @@ class LLMService:
             system_prompt=SQL_OPTIMIZATION_SYSTEM_PROMPT,
             temperature=0.1,
             num_ctx=2048,
-            num_predict=300,
+            num_predict=2048,
             json_mode=True,
         )
 
@@ -745,7 +745,15 @@ class LLMService:
     ) -> Dict[str, Any]:
         try:
             clean_json = self._clean_json_response(raw_response)
-            parsed = json.loads(clean_json)
+
+            try:
+                parsed = json.loads(clean_json)
+            except json.JSONDecodeError:
+                # JSON bị cắt: tìm dấu { cuối cùng hợp lệ và đóng lại
+                last_brace = clean_json.rfind('"')
+                if last_brace != -1:
+                    clean_json = clean_json[:last_brace] + '"}'
+                parsed = json.loads(clean_json)
 
             return {
                 "optimized_sql": parsed.get("optimized_sql", original_query),
