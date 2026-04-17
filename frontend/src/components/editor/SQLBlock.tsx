@@ -7,7 +7,7 @@ import { chatService } from '../../services/chatService';
 interface SQLBlockProps {
   sql: string;
   queryLogId?: string;
-  onExplain?: (sql: string) => void;
+  onExplain?: (sql: string) => Promise<any> | void;
   onOptimize?: (sql: string) => void;
   onExecute?: (sql: string) => void;
   isExecuting?: boolean;

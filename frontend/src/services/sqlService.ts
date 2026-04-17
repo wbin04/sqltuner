@@ -25,9 +25,14 @@ export interface SQLExplainPlanRequest {
 }
 
 export interface SQLExplainPlanResponse {
-  plan: Record<string, any>;
-  total_cost: number;
-  execution_time_ms?: number;
+  db_type: 'simulation' | 'mysql' | 'postgresql';
+  explain_columns: string[];
+  explain_rows: Record<string, any>[];
+  analyze_columns: string[] | null;
+  analyze_rows: Record<string, any>[] | null;
+  analyze_available: boolean;
+  analyze_unavailable_reason: string | null;
+  execution_time_ms: number | null;
 }
 
 export interface SQLOptimizeRequest {

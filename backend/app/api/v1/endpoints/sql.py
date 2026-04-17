@@ -351,6 +351,172 @@ async def execute_sql(
         return run_sandbox_execution(connection, request)
 
 
+
+def _rows_to_dicts(columns: list, rows: list) -> list:
+    """Convert list-of-tuples rows to list-of-dicts using column names."""
+    return [dict(zip(columns, row)) for row in rows]
+
+
+def _run_explain_simulation(connection, sql: str) -> SQLExplainPlanResponse:
+    """Run EXPLAIN QUERY PLAN on in-memory SQLite for SIMULATION connections."""
+    import sqlite3 as _sqlite3
+
+    meta_schema = connection.meta_schema or {}
+    t_total = time.time()
+
+    raw_db = _sqlite3.connect(":memory:")
+    for table in meta_schema.get("tables", []):
+        tname = table.get("name")
+        cols = table.get("columns", [])
+        if not tname or not cols:
+            continue
+        col_defs, pk_cols = [], []
+        for col in cols:
+            cname = col.get("name")
+            ctype = col.get("type", "TEXT")
+            nullable = col.get("is_nullable", True)
+            if col.get("is_pk"):
+                pk_cols.append(cname)
+            col_defs.append(f'"{cname}" {ctype}{"" if nullable else " NOT NULL"}')
+        if pk_cols:
+            col_defs.append(f'PRIMARY KEY ({", ".join(pk_cols)})')
+        raw_db.execute(f'CREATE TABLE IF NOT EXISTS "{tname}" ({", ".join(col_defs)})')
+        for row in table.get("sample_data", []):
+            rc, rv = list(row.keys()), list(row.values())
+            ph = ", ".join("?" for _ in rc)
+            cs = ", ".join(f'"{c}"' for c in rc)
+            try:
+                raw_db.execute(f'INSERT OR IGNORE INTO "{tname}" ({cs}) VALUES ({ph})', rv)
+            except Exception:
+                pass
+    raw_db.commit()
+    cur = raw_db.cursor()
+
+    cur.execute(f"EXPLAIN QUERY PLAN {sql}")
+    plan_cols = [d[0] for d in cur.description] if cur.description else ["id", "parent", "notused", "detail"]
+    plan_rows_raw = cur.fetchall()
+
+    t_exec_start = time.time()
+    actual_row_count = 0
+    exec_error = None
+    try:
+        cur.execute(sql)
+        actual_row_count = len(cur.fetchall())
+    except Exception as e:
+        exec_error = str(e)
+    t_exec_ms = (time.time() - t_exec_start) * 1000
+    raw_db.close()
+
+    explain_rows = [dict(zip(plan_cols, row)) for row in plan_rows_raw]
+    explain_rows.append({"id": "", "parent": "", "notused": "", "detail": "---"})
+    if exec_error:
+        explain_rows.append({"id": "", "parent": "", "notused": "",
+                             "detail": f"[Execution ERROR] {exec_error}"})
+    else:
+        explain_rows.append({"id": "", "parent": "", "notused": "",
+                             "detail": f"[Execution OK] {actual_row_count} rows — {t_exec_ms:.2f} ms"})
+
+    return SQLExplainPlanResponse(
+        db_type="simulation",
+        explain_columns=list(plan_cols),
+        explain_rows=explain_rows,
+        analyze_available=False,
+        analyze_unavailable_reason=(
+            "EXPLAIN ANALYZE is not supported by SQLite. "
+            "Showing EXPLAIN QUERY PLAN with actual execution timing."
+        ),
+        execution_time_ms=(time.time() - t_total) * 1000,
+    )
+
+
+def _run_explain_mysql(engine, sql: str) -> SQLExplainPlanResponse:
+    """Run EXPLAIN and EXPLAIN ANALYZE on MySQL."""
+    start_time = time.time()
+    raw_conn = engine.raw_connection()
+    try:
+        cursor = raw_conn.cursor()
+
+        cursor.execute(f"EXPLAIN {sql}")
+        explain_cols = [desc[0] for desc in cursor.description] if cursor.description else []
+        explain_rows = _rows_to_dicts(explain_cols, cursor.fetchall())
+
+        analyze_cols = None
+        analyze_rows = None
+        analyze_available = False
+        analyze_unavailable_reason = None
+        try:
+            cursor.execute(f"EXPLAIN ANALYZE {sql}")
+            analyze_desc = cursor.description or []
+            analyze_cols_raw = [desc[0] for desc in analyze_desc]
+            analyze_rows_raw = cursor.fetchall()
+            if analyze_rows_raw:
+                if len(analyze_cols_raw) == 1:
+                    full_text = analyze_rows_raw[0][0] if analyze_rows_raw else ""
+                    lines = [line for line in full_text.split("\n") if line.strip()]
+                    analyze_cols = ["Plan"]
+                    analyze_rows = [{"Plan": line} for line in lines]
+                else:
+                    analyze_cols = analyze_cols_raw
+                    analyze_rows = _rows_to_dicts(analyze_cols_raw, analyze_rows_raw)
+                analyze_available = True
+        except Exception as e:
+            analyze_unavailable_reason = f"EXPLAIN ANALYZE requires MySQL 8.0+. Error: {str(e)}"
+
+        return SQLExplainPlanResponse(
+            db_type="mysql",
+            explain_columns=explain_cols,
+            explain_rows=explain_rows,
+            analyze_columns=analyze_cols,
+            analyze_rows=analyze_rows,
+            analyze_available=analyze_available,
+            analyze_unavailable_reason=analyze_unavailable_reason,
+            execution_time_ms=(time.time() - start_time) * 1000,
+        )
+    finally:
+        cursor.close()
+        raw_conn.close()
+
+
+def _run_explain_postgres(engine, sql: str) -> SQLExplainPlanResponse:
+    """Run EXPLAIN and EXPLAIN ANALYZE on PostgreSQL."""
+    start_time = time.time()
+    raw_conn = engine.raw_connection()
+    try:
+        cursor = raw_conn.cursor()
+
+        cursor.execute(f"EXPLAIN {sql}")
+        explain_rows_raw = cursor.fetchall()
+        explain_cols = ["QUERY PLAN"]
+        explain_rows = [{"QUERY PLAN": row[0]} for row in explain_rows_raw]
+
+        analyze_cols = None
+        analyze_rows = None
+        analyze_available = False
+        analyze_unavailable_reason = None
+        try:
+            cursor.execute(f"EXPLAIN ANALYZE {sql}")
+            analyze_rows_raw2 = cursor.fetchall()
+            analyze_cols = ["QUERY PLAN"]
+            analyze_rows = [{"QUERY PLAN": row[0]} for row in analyze_rows_raw2]
+            analyze_available = True
+        except Exception as e:
+            analyze_unavailable_reason = f"EXPLAIN ANALYZE failed: {str(e)}"
+
+        return SQLExplainPlanResponse(
+            db_type="postgresql",
+            explain_columns=explain_cols,
+            explain_rows=explain_rows,
+            analyze_columns=analyze_cols,
+            analyze_rows=analyze_rows,
+            analyze_available=analyze_available,
+            analyze_unavailable_reason=analyze_unavailable_reason,
+            execution_time_ms=(time.time() - start_time) * 1000,
+        )
+    finally:
+        cursor.close()
+        raw_conn.close()
+
+
 @router.post("/explain", response_model=SQLExplainPlanResponse)
 async def explain_sql_plan(
     request: SQLExplainPlanRequest,
@@ -370,17 +536,18 @@ async def explain_sql_plan(
         )
 
     if connection.db_type == DBType.SIMULATION:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "EXPLAIN analysis is not supported for SIMULATION connections."
-                "Use this feature with real PostgreSQL/MySQL databases."
+        try:
+            return _run_explain_simulation(connection, request.sql)
+        except Exception as e:
+            logger.error(f"[SANDBOX EXPLAIN ERROR]: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Sandbox EXPLAIN error: {str(e)}"
             )
-        )
 
+    engine = None
     try:
         conn_string = build_sync_connection_string(connection)
-
         connect_args = {}
         if connection.db_type.value == "postgresql":
             connect_args = {"connect_timeout": SQL_CONNECTION_TIMEOUT}
@@ -392,78 +559,35 @@ async def explain_sql_plan(
             pool_pre_ping=True,
             pool_recycle=3600,
             connect_args=connect_args,
-            pool_timeout=SQL_CONNECTION_TIMEOUT)
-
-        logger.info("[EXPLAIN] Testing database connection...")
+            pool_timeout=SQL_CONNECTION_TIMEOUT
+        )
         with engine.connect() as test_conn:
             test_conn.execute(text("SELECT 1"))
-        logger.info("[EXPLAIN] Connection test successful")
-
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=(
                 f"Failed to connect to {connection.db_type.value} database "
                 f"at {connection.host}:{connection.port}. "
-                f"Error: {str(e)}. "
-                f"EXPLAIN requires a real database connection."
+                f"Error: {str(e)}."
             )
         )
 
     try:
-        start_time = time.time()
-
-        with engine.connect() as conn:
-            if connection.db_type == DBType.POSTGRES:
-                explain_query = (
-                    f"EXPLAIN (ANALYZE, FORMAT JSON) {request.sql}"
-                )
-                result_proxy = conn.execute(text(explain_query))
-                explain_output = result_proxy.fetchone()[0]
-
-                if isinstance(explain_output, str):
-                    plan_data = json.loads(explain_output)
-                else:
-                    plan_data = explain_output
-
-                total_cost = (
-                    plan_data[0]["Plan"]["Total Cost"] if plan_data else 0.0
-                )
-
-            else:
-                explain_query = (
-                    f"EXPLAIN FORMAT=JSON {request.sql}"
-                )
-                result_proxy = conn.execute(text(explain_query))
-                explain_output = result_proxy.fetchone()[0]
-
-                plan_data = json.loads(explain_output) if isinstance(
-                    explain_output, str) else explain_output
-                total_cost = plan_data.get(
-                    "query_block",
-                    {}).get(
-                    "cost_info",
-                    {}).get(
-                    "query_cost",
-                    0.0)
-
-        execution_time_ms = (time.time() - start_time) * 1000
-
-        engine.dispose()
-
-        return SQLExplainPlanResponse(
-            plan=plan_data,
-            total_cost=float(total_cost),
-            execution_time_ms=execution_time_ms
-        )
-
+        if connection.db_type == DBType.MYSQL:
+            result = _run_explain_mysql(engine, request.sql)
+        else:
+            result = _run_explain_postgres(engine, request.sql)
+        return result
     except Exception as e:
-        if engine:
-            engine.dispose()
+        logger.error(f"[EXPLAIN ERROR]: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"EXPLAIN error: {str(e)}"
         )
+    finally:
+        if engine:
+            engine.dispose()
 
 
 @router.post("/optimize", response_model=SQLOptimizeResponse)

@@ -5,7 +5,7 @@
 import { useState, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { chatService, ChatMessage } from '../services/chatService';
-import { sqlService, SQLExecuteResponse, SQLOptimizeResponse } from '../services/sqlService';
+import { sqlService, SQLExecuteResponse, SQLOptimizeResponse, SQLExplainPlanResponse } from '../services/sqlService';
 
 interface QueryResult {
   sql: string;
@@ -26,6 +26,8 @@ export function useEditorLogic({ connectionId, initialConversationId }: UseEdito
   const [queryResults, setQueryResults] = useState<Map<string, QueryResult>>(new Map());
   const [optimizationResult, setOptimizationResult] = useState<SQLOptimizeResponse | null>(null);
   const [isOptimizationModalOpen, setIsOptimizationModalOpen] = useState(false);
+  const [explainResult, setExplainResult] = useState<SQLExplainPlanResponse | null>(null);
+  const [isExplainModalOpen, setIsExplainModalOpen] = useState(false);
   const [optimisticMessages, setOptimisticMessages] = useState<ChatMessage[]>([]);
   const [appliedOptimizationMessages, setAppliedOptimizationMessages] = useState<ChatMessage[]>([]);
   const [pendingClarification, setPendingClarification] = useState<{
@@ -186,6 +188,10 @@ export function useEditorLogic({ connectionId, initialConversationId }: UseEdito
         connection_id: connectionId,
         sql,
       }),
+    onSuccess: (data) => {
+      setExplainResult(data);
+      setIsExplainModalOpen(true);
+    },
   });
 
   // Handlers
@@ -255,8 +261,7 @@ export function useEditorLogic({ connectionId, initialConversationId }: UseEdito
 
   const handleExplain = useCallback(
     async (sql: string) => {
-      const result = await explainSqlMutation.mutateAsync(sql);
-      return result;
+      await explainSqlMutation.mutateAsync(sql);
     },
     [explainSqlMutation]
   );
@@ -301,6 +306,11 @@ export function useEditorLogic({ connectionId, initialConversationId }: UseEdito
     setOptimizationResult(null);
   }, []);
 
+  const handleCloseExplainModal = useCallback(() => {
+    setIsExplainModalOpen(false);
+    setExplainResult(null);
+  }, []);
+
   const handleApplyOptimization = useCallback(
     (combinedScript: string) => {
       // Display the combined script as an assistant message in chat
@@ -329,6 +339,8 @@ export function useEditorLogic({ connectionId, initialConversationId }: UseEdito
     queryResults,
     optimizationResult,
     isOptimizationModalOpen,
+    explainResult,
+    isExplainModalOpen,
 
     // Loading states
     isLoadingConversations,
@@ -356,6 +368,7 @@ export function useEditorLogic({ connectionId, initialConversationId }: UseEdito
     handleDeleteConversation,
     handleCloseOptimizationModal,
     handleApplyOptimization,
+    handleCloseExplainModal,
 
     // Clarification
     pendingClarification,
