@@ -57,7 +57,7 @@ class TaskStatus(str, enum.Enum):
 
 class TaskType(str, enum.Enum):
     LLM_OPTIMIZE = "llm_optimize"
-    SQLITE_SANDBOX = "sqlite_sandbox"
+    POSTGRES_SANDBOX = "postgres_sandbox"
     SCHEMA_SYNC = "schema_sync"
 
 

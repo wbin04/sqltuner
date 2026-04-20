@@ -58,7 +58,7 @@ class SQLExplainPlanRequest(BaseModel):
 
 
 class SQLExplainPlanResponse(BaseModel):
-    db_type: Literal["simulation", "mysql", "postgresql"]
+    db_type: Literal["simulation", "mysql", "postgresql", "postgresql_sandbox"]
     explain_columns: List[str]
     explain_rows: List[Dict[str, Any]]
     analyze_columns: Optional[List[str]] = None

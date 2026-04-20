@@ -69,112 +69,39 @@ def format_schema_for_llm(meta_schema: dict) -> str:
     return "\n".join(lines)
 
 
-def run_sandbox_execution(
+async def run_sandbox_execution(
     connection,
-    request: SQLExecuteRequest
+    request: SQLExecuteRequest,
+    db: AsyncSession,          # thêm param này
 ):
-    logger.warning(f"[DEBUG] ENTERED run_sandbox_execution for connection {connection.id}")
-    logger.warning(
-        f"[SANDBOX] Using SQLite sandbox for SIMULATION connection "
-        f"{connection.id}"
-    )
-    logger.warning(f"[SANDBOX] SQL: {request.sql}")
+    from app.services.postgres_sandbox_service import postgres_sandbox_service
 
-    # Validate meta_schema exists
     if not connection.meta_schema:
-        logger.error(
-            f"[SANDBOX ERROR] connection.meta_schema is None or empty for "
-            f"connection {connection.id}"
-        )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="SIMULATION connection requires meta_schema. "
-            "Please sync schema first."
-        )
-
-    # Validate meta_schema structure
-    if not isinstance(connection.meta_schema, dict):
-        logger.error(
-            f"[SANDBOX ERROR] meta_schema is not a dict: "
-            f"{type(connection.meta_schema)}"
-        )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid meta_schema format. Expected dictionary."
-        )
-
-    tables = connection.meta_schema.get('tables', [])
-    if not isinstance(tables, list):
-        logger.error(
-            f"[SANDBOX ERROR] meta_schema.tables is not a list: "
-            f"{type(tables)}"
-        )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid meta_schema.tables format. Expected list."
-        )
-
-    tables_count = len(tables)
-    logger.info(f"[SANDBOX] Tables in meta_schema: {tables_count}")
+        raise HTTPException(400, "SIMULATION connection requires meta_schema.")
 
     try:
         start_time = time.time()
 
-        result = simulation_executor.execute(
+        result = await postgres_sandbox_service.execute(
+            db=db,
             meta_schema=connection.meta_schema,
             sql_query=request.sql,
-            sample_data=connection.meta_schema.get('sample_data')
         )
 
         execution_time_ms = (time.time() - start_time) * 1000
-
-        total_rows = result['row_count']
-        rows = result['rows'][:settings.SANDBOX_MAX_ROWS]
-        truncated = total_rows > settings.SANDBOX_MAX_ROWS
-
-        logger.info(
-            f"[SANDBOX] Success! Total rows: {total_rows}, "
-            f"Returned: {len(rows)}, Truncated: {truncated}, "
-            f"Time: {execution_time_ms}ms"
-        )
+        rows = result["rows"][:settings.SANDBOX_MAX_ROWS]
 
         return SQLExecuteResponse(
-            columns=result['columns'],
+            columns=result["columns"],
             rows=rows,
             execution_time_ms=execution_time_ms,
             row_count=len(rows),
-            total_rows=total_rows,
-            truncated=truncated,
-            max_rows=settings.SANDBOX_MAX_ROWS
-        )
-    except ValidationError as e:
-        error_msg = f"Validation error: {str(e)}"
-        logger.error(f"[SANDBOX ERROR] {error_msg}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=error_msg
-        )
-    except ExecutionError as e:
-        error_msg = f"Execution error: {str(e)}"
-        logger.error(f"[SANDBOX ERROR] {error_msg}")
-        logger.error(f"[SANDBOX ERROR] Traceback: {traceback.format_exc()}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=error_msg
+            total_rows=result["row_count"],
+            truncated=result["row_count"] > settings.SANDBOX_MAX_ROWS,
+            max_rows=settings.SANDBOX_MAX_ROWS,
         )
     except Exception as e:
-        error_detail = (
-            f"Sandbox execution error: {str(e)}\n"
-            f"Type: {type(e).__name__}"
-        )
-        logger.error(f"[SANDBOX ERROR] {error_detail}")
-        logger.error(
-            f"[SANDBOX ERROR] Full traceback:\n{traceback.format_exc()}"
-        )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=error_detail
-        )
+        raise HTTPException(500, detail=str(e))
 
 
 @router.post("/execute", response_model=SQLExecuteResponse)
@@ -212,7 +139,7 @@ async def execute_sql(
 
     if connection.db_type == DBType.SIMULATION:
         logger.info(f"[DEBUG] Entering sandbox execution for connection {connection.id}")
-        return run_sandbox_execution(connection, request)
+        return await run_sandbox_execution(connection, request, db)
 
     logger.info("[DEBUG] Not SIMULATION, proceeding to live execution")
 
@@ -265,7 +192,7 @@ async def execute_sql(
             "[LIVE] Falling back to sandbox execution due to "
             "connection failure"
         )
-        return run_sandbox_execution(connection, request)
+        return await run_sandbox_execution(connection, request, db)
 
     try:
         start_time = time.time()
@@ -348,7 +275,7 @@ async def execute_sql(
         logger.info(
             "[LIVE] Falling back to sandbox execution due to error"
         )
-        return run_sandbox_execution(connection, request)
+        return await run_sandbox_execution(connection, request, db)
 
 
 
@@ -357,76 +284,41 @@ def _rows_to_dicts(columns: list, rows: list) -> list:
     return [dict(zip(columns, row)) for row in rows]
 
 
-def _run_explain_simulation(connection, sql: str) -> SQLExplainPlanResponse:
-    """Run EXPLAIN QUERY PLAN on in-memory SQLite for SIMULATION connections."""
-    import sqlite3 as _sqlite3
+async def _run_explain_simulation(
+    connection, sql: str, db: AsyncSession
+) -> SQLExplainPlanResponse:
+    """
+    Run EXPLAIN (ANALYZE, FORMAT JSON) on PostgreSQL sandbox
+    for SIMULATION connections — replaces SQLite in-memory approach.
+    """
+    from app.services.postgres_sandbox_service import postgres_sandbox_service
 
-    meta_schema = connection.meta_schema or {}
     t_total = time.time()
+    meta_schema = connection.meta_schema or {}
 
-    raw_db = _sqlite3.connect(":memory:")
-    for table in meta_schema.get("tables", []):
-        tname = table.get("name")
-        cols = table.get("columns", [])
-        if not tname or not cols:
-            continue
-        col_defs, pk_cols = [], []
-        for col in cols:
-            cname = col.get("name")
-            ctype = col.get("type", "TEXT")
-            nullable = col.get("is_nullable", True)
-            if col.get("is_pk"):
-                pk_cols.append(cname)
-            col_defs.append(f'"{cname}" {ctype}{"" if nullable else " NOT NULL"}')
-        if pk_cols:
-            col_defs.append(f'PRIMARY KEY ({", ".join(pk_cols)})')
-        raw_db.execute(f'CREATE TABLE IF NOT EXISTS "{tname}" ({", ".join(col_defs)})')
-        for row in table.get("sample_data", []):
-            rc, rv = list(row.keys()), list(row.values())
-            ph = ", ".join("?" for _ in rc)
-            cs = ", ".join(f'"{c}"' for c in rc)
-            try:
-                raw_db.execute(f'INSERT OR IGNORE INTO "{tname}" ({cs}) VALUES ({ph})', rv)
-            except Exception:
-                pass
-    raw_db.commit()
-    cur = raw_db.cursor()
-
-    cur.execute(f"EXPLAIN QUERY PLAN {sql}")
-    plan_cols = [d[0] for d in cur.description] if cur.description else ["id", "parent", "notused", "detail"]
-    plan_rows_raw = cur.fetchall()
-
-    t_exec_start = time.time()
-    actual_row_count = 0
-    exec_error = None
     try:
-        cur.execute(sql)
-        actual_row_count = len(cur.fetchall())
+        result = await postgres_sandbox_service.explain_analyze(
+            db=db,
+            meta_schema=meta_schema,
+            sql_query=sql,
+        )
+
+        explain_rows = result.get("explain_rows", [])
+        analyze_rows = result.get("analyze_rows", [])
+        explain_cols = ["QUERY PLAN"]
+
+        return SQLExplainPlanResponse(
+            db_type="postgresql_sandbox",
+            explain_columns=explain_cols,
+            explain_rows=explain_rows,
+            analyze_columns=explain_cols,
+            analyze_rows=analyze_rows,
+            analyze_available=True,
+            execution_time_ms=(time.time() - t_total) * 1000,
+        )
     except Exception as e:
-        exec_error = str(e)
-    t_exec_ms = (time.time() - t_exec_start) * 1000
-    raw_db.close()
-
-    explain_rows = [dict(zip(plan_cols, row)) for row in plan_rows_raw]
-    explain_rows.append({"id": "", "parent": "", "notused": "", "detail": "---"})
-    if exec_error:
-        explain_rows.append({"id": "", "parent": "", "notused": "",
-                             "detail": f"[Execution ERROR] {exec_error}"})
-    else:
-        explain_rows.append({"id": "", "parent": "", "notused": "",
-                             "detail": f"[Execution OK] {actual_row_count} rows — {t_exec_ms:.2f} ms"})
-
-    return SQLExplainPlanResponse(
-        db_type="simulation",
-        explain_columns=list(plan_cols),
-        explain_rows=explain_rows,
-        analyze_available=False,
-        analyze_unavailable_reason=(
-            "EXPLAIN ANALYZE is not supported by SQLite. "
-            "Showing EXPLAIN QUERY PLAN with actual execution timing."
-        ),
-        execution_time_ms=(time.time() - t_total) * 1000,
-    )
+        logger.error(f"[SANDBOX EXPLAIN] PostgreSQL explain failed: {e}")
+        raise
 
 
 def _run_explain_mysql(engine, sql: str) -> SQLExplainPlanResponse:
@@ -537,7 +429,7 @@ async def explain_sql_plan(
 
     if connection.db_type == DBType.SIMULATION:
         try:
-            return _run_explain_simulation(connection, request.sql)
+            return await _run_explain_simulation(connection, request.sql, db)
         except Exception as e:
             logger.error(f"[SANDBOX EXPLAIN ERROR]: {str(e)}")
             raise HTTPException(

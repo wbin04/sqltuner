@@ -120,8 +120,8 @@ async def process_background_task(
     try:
         if task_type_str == TaskType.LLM_OPTIMIZE.value:
             result = await execute_llm_optimize(task_data)
-        elif task_type_str == TaskType.SQLITE_SANDBOX.value:
-            result = await execute_sqlite_sandbox(task_data)
+        elif task_type_str == TaskType.POSTGRES_SANDBOX.value:
+            result = await execute_postgres_sandbox(task_data)
         elif task_type_str == TaskType.SCHEMA_SYNC.value:
             result = await execute_schema_sync(task_data)
         else:
@@ -162,7 +162,7 @@ async def execute_llm_optimize(data: dict) -> dict:
     }
 
 
-async def execute_sqlite_sandbox(data: dict) -> dict:
+async def execute_postgres_sandbox(data: dict) -> dict:
     logger.info(f"Executing SQLite sandbox with data: {data}")
 
     return {

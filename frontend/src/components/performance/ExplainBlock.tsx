@@ -282,7 +282,8 @@ export function ExplainBlock({ isOpen, result, isLoading, onClose }: ExplainBloc
   const dbLabel: Record<string, string> = {
     postgresql: 'PostgreSQL',
     mysql: 'MySQL',
-    simulation: 'SQLite Sandbox',
+    postgresql_sandbox: 'PostgreSQL Sandbox',
+    simulation: 'Legacy Sandbox', // Just in case
   };
 
   // Loading overlay
@@ -376,18 +377,6 @@ export function ExplainBlock({ isOpen, result, isLoading, onClose }: ExplainBloc
             <X className="w-5 h-5 text-text-muted-DEFAULT dark:text-text-muted-dark" />
           </button>
         </div>
-
-        {/* SQLite info banner */}
-        {result.db_type === 'simulation' && (
-          <div className="flex items-center gap-2 px-6 py-2 bg-blue-50 dark:bg-blue-900/20 border-b border-blue-200 dark:border-blue-800 text-xs text-blue-700 dark:text-blue-400 flex-shrink-0">
-            <Info className="w-3.5 h-3.5 flex-shrink-0" />
-            <span>
-              <strong>SQLite Sandbox:</strong> Showing{' '}
-              <code className="font-mono">EXPLAIN QUERY PLAN</code> — human-readable query steps.
-              EXPLAIN ANALYZE is not supported in SQLite.
-            </span>
-          </div>
-        )}
 
         {/* Tabs — only for MySQL / Postgres */}
         {showAnalyzeTab && (
