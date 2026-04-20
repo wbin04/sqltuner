@@ -1,4 +1,5 @@
 import { User, Bot } from 'lucide-react';
+import { format } from 'date-fns';
 import { cn } from '../../lib/utils';
 import type { QueryLog } from '../../types';
 import { SQLBlock } from './SQLBlock';
@@ -58,7 +59,7 @@ export function ChatMessage({
             {isUser ? 'You' : 'AI Assistant'}
           </span>
           <span className="text-xs text-text-muted-DEFAULT dark:text-text-muted-dark">
-            {new Date(message.createdAt).toLocaleTimeString()}
+            {format(new Date(message.createdAt), 'HH:mm:ss')}
           </span>
         </div>
 

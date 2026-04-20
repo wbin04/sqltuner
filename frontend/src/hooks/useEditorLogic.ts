@@ -95,12 +95,15 @@ export function useEditorLogic({ connectionId, initialConversationId }: UseEdito
       message: string;
       clarification_answers?: Array<{ q: string; answer: string }>;
     }) => {
+      // Capture send time before mutation
+      const sentAt = new Date().toISOString();
+
       // Add optimistic user message
       const userMessage: ChatMessage = {
         id: `temp-user-${Date.now()}`,
         role: 'user',
         content: payload.message,
-        created_at: new Date().toISOString(),
+        created_at: sentAt,
       };
 
       // Add loading assistant message
@@ -108,12 +111,15 @@ export function useEditorLogic({ connectionId, initialConversationId }: UseEdito
         id: `temp-loading-${Date.now()}`,
         role: 'assistant',
         content: 'Processing...',
-        created_at: new Date().toISOString(),
+        created_at: sentAt,
       };
 
       setOptimisticMessages([userMessage, loadingMessage]);
+
+      // Return sentAt so onSuccess can use it to fix user message timestamp
+      return { sentAt, userContent: payload.message };
     },
-    onSuccess: (response) => {
+    onSuccess: async (response, _payload, context) => {
       // Clear optimistic messages
       setOptimisticMessages([]);
 
@@ -122,9 +128,29 @@ export function useEditorLogic({ connectionId, initialConversationId }: UseEdito
         setActiveConversationId(response.conversation_id);
       }
 
-      // Invalidate queries to refresh data
+      // Invalidate conversations list (non-blocking)
       queryClient.invalidateQueries({ queryKey: ['conversations', connectionId] });
-      queryClient.invalidateQueries({ queryKey: ['messages', response.conversation_id] });
+
+      // refetchQueries actually awaits until the refetch is complete
+      // (unlike invalidateQueries which only marks stale and resolves immediately)
+      await queryClient.refetchQueries({ queryKey: ['messages', response.conversation_id] });
+
+      // Now the cache has fresh data — patch user message timestamp back to sent time
+      if (context?.sentAt) {
+        const cached = queryClient.getQueryData<ChatMessage[]>(['messages', response.conversation_id]);
+        if (cached) {
+          const fixed = cached.map((msg) => {
+            if (
+              msg.role === 'user' &&
+              msg.content === _payload.message
+            ) {
+              return { ...msg, created_at: context.sentAt };
+            }
+            return msg;
+          });
+          queryClient.setQueryData(['messages', response.conversation_id], fixed);
+        }
+      }
 
       if (response.content.includes('Before designing the schema, I have a few questions:')) {
         const questions = parseClarificationQuestions(response.content);

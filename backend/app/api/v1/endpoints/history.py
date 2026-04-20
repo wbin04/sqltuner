@@ -64,7 +64,7 @@ class HistoryListResponse(BaseModel):
     items: List[HistoryLogResponse]
 
 
-@router.get("/", response_model=HistoryListResponse)
+@router.get("", response_model=HistoryListResponse)
 async def get_history(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),

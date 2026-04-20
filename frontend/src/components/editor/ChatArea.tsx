@@ -199,7 +199,7 @@ export function ChatArea({
                       
                       {/* Timestamp Column on the right */}
                       <div className="text-[11px] text-text-muted-DEFAULT dark:text-text-muted-dark opacity-60 mb-2 whitespace-nowrap flex-shrink-0">
-                        {format(new Date(message.created_at), 'HH:mm')}
+                        {format(new Date(message.created_at), 'HH:mm:ss')}
                       </div>
                     </div>
                   )}

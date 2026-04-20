@@ -112,7 +112,7 @@ export function TablesSidebar({
           </div>
         ) : (
           <div className="space-y-1">
-            {schema.tables.map((table) => (
+            {[...schema.tables].sort((a, b) => a.name.localeCompare(b.name)).map((table) => (
               <div
                 key={table.id}
                 onClick={() => onSelectTable(table.id)}
