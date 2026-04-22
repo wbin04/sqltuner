@@ -25,7 +25,7 @@ interface Message {
 
 interface ChatAreaProps {
   messages: Message[];
-  onSendMessage: (content: string) => void;
+  onSendMessage: (content: string, mode?: 'chat' | 'check' | 'gen') => void;
   onExecute: (sql: string) => void;
   onOptimize: (sql: string) => void;
   onExplain: (sql: string) => void;
@@ -62,6 +62,7 @@ export function ChatArea({
   isOptimizing = false,
 }: ChatAreaProps) {
   const [internalInputValue, setInternalInputValue] = useState('');
+  const [chatMode, setChatMode] = useState<'chat' | 'check' | 'gen'>('chat');
   const handleExplainAction = (_messageId: string, sql: string) => {
     if (onExplain) onExplain(sql);
   };
@@ -97,7 +98,7 @@ export function ChatArea({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (inputValue.trim() && !isLoading) {
-      onSendMessage(inputValue.trim());
+      onSendMessage(inputValue.trim(), chatMode);
       setInputValue('');
     }
   };
@@ -271,6 +272,23 @@ export function ChatArea({
       )}>
         <form onSubmit={handleSubmit} className="max-w-4xl mx-auto">
           <div className="flex gap-3 items-end">
+            <select
+              value={chatMode}
+              onChange={(e) => setChatMode(e.target.value as 'chat' | 'check' | 'gen')}
+              title="Select chat mode"
+              className={cn(
+                'px-3 py-3 rounded-lg flex-shrink-0',
+                'bg-background-light dark:bg-background-dark',
+                'border border-border-DEFAULT dark:border-border-dark',
+                'text-text-main-DEFAULT dark:text-text-main-dark',
+                'focus:outline-none focus:ring-2 focus:ring-primary/50 dark:focus:ring-primary-dark/50',
+                'h-[60px]'
+              )}
+            >
+              <option value="chat">Chat</option>
+              <option value="check">Check</option>
+              <option value="gen">Gen</option>
+            </select>
             <textarea
               ref={textareaRef}
               value={inputValue}

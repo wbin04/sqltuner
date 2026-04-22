@@ -59,6 +59,7 @@ export interface ChatCompletionRequest {
   connection_id: string;
   conversation_id?: string;
   message: string;
+  chat_mode?: 'chat' | 'check' | 'gen';
   clarification_answers?: Array<{ q: string; answer: string }>;
 }
 

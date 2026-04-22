@@ -684,3 +684,32 @@ def get_chat_schema_design_prompt(
             context = f"\n\nAdditional context:\n{pairs}"
 
     return f"Design a database schema for: {user_description}{context}"
+
+
+def get_chat_check_system_prompt(db_type: str) -> str:
+    return f"""You are a {db_type} SQL Syntax Expert.
+Your task is to fix syntax errors in a user's SQL query.
+Return ONLY the corrected SQL query inside a markdown block. Do not include any explanations.
+If the user's input is incomplete (e.g. missing FROM or WHERE parts), complete it based on standard SQL syntax to make it runnable, even if using generic table/column names."""
+
+
+def get_chat_check_user_prompt(raw_sql: str) -> str:
+    return f"""Please fix the following SQL query:
+
+```sql
+{raw_sql}
+```"""
+
+
+def get_chat_generate_sql_system_prompt(dialect: str, schema_text: str) -> str:
+    return f"""You are an expert SQL Assistant specialized in {dialect} syntax.
+Your task is to generate optimized, runnable SQL queries based on the user's request and the provided database schema.
+
+{schema_text}
+
+### INSTRUCTIONS:
+1. You must respond with the SQL query inside a markdown block (` ```sql ... ``` `).
+2. You can also provide a brief explanation of the query before or after the markdown block.
+3. Ensure the syntax strictly follows {dialect} conventions.
+4. Use the exact table and column names provided in the schema.
+"""

@@ -13,6 +13,14 @@ class ChatCompletionRequest(BaseModel):
         default=None,
         description="Answers from clarification step: [{q: str, answer: str}]"
     )
+    chat_mode: Literal["chat", "check", "gen"] = Field(
+        default="chat",
+        description=(
+            "chat: generate SQL from natural language. "
+            "check: validate/fix SQL syntax — bypasses LLM if already valid. "
+            "gen: design database schema."
+        )
+    )
 
 
 class ChatCompletionResponse(BaseModel):

@@ -83,16 +83,19 @@ export function useEditorLogic({ connectionId, initialConversationId }: UseEdito
   const sendMessageMutation = useMutation({
     mutationFn: (payload: {
       message: string;
+      chat_mode?: 'chat' | 'check' | 'gen';
       clarification_answers?: Array<{ q: string; answer: string }>;
     }) =>
       chatService.sendMessage({
         connection_id: connectionId,
         conversation_id: activeConversationId || undefined,
         message: payload.message,
+        chat_mode: payload.chat_mode,
         clarification_answers: payload.clarification_answers,
       }),
     onMutate: async (payload: {
       message: string;
+      chat_mode?: 'chat' | 'check' | 'gen';
       clarification_answers?: Array<{ q: string; answer: string }>;
     }) => {
       // Capture send time before mutation
@@ -222,7 +225,7 @@ export function useEditorLogic({ connectionId, initialConversationId }: UseEdito
 
   // Handlers
   const handleSendMessage = useCallback(
-    async (message: string) => {
+    async (message: string, chat_mode?: 'chat' | 'check' | 'gen') => {
       const lastAssistantMsg = [...fetchedMessages]
         .reverse()
         .find((msg) => msg.role === 'assistant');
@@ -235,6 +238,7 @@ export function useEditorLogic({ connectionId, initialConversationId }: UseEdito
       if (isClarificationReply && pendingClarification) {
         await sendMessageMutation.mutateAsync({
           message,
+          chat_mode: chat_mode || 'chat',
           clarification_answers: pendingClarification.questions.map((question) => ({
             q: question.q,
             answer: message,
@@ -244,7 +248,7 @@ export function useEditorLogic({ connectionId, initialConversationId }: UseEdito
         return;
       }
 
-      await sendMessageMutation.mutateAsync({ message });
+      await sendMessageMutation.mutateAsync({ message, chat_mode: chat_mode || 'chat' });
     },
     [fetchedMessages, pendingClarification, sendMessageMutation]
   );

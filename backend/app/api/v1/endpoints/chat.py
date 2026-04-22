@@ -1,17 +1,30 @@
+"""
+chat.py — Chat completion endpoint with 3 distinct modes:
+  - chat : generate SQL from natural language (fast, schema-aware)
+  - check: validate/fix SQL syntax — skips LLM entirely if syntax is valid
+  - gen  : design database schema (uses existing 2-phase generation)
+"""
+
 import json
 import logging
 import re
 import time
 from datetime import datetime, timezone
 from functools import lru_cache
+from typing import Any, Dict, Optional
 from uuid import UUID
 
+import sqlglot
+
 from app.api.v1.endpoints.auth import get_current_user
-from app.core.prompts import (CHAT_GENERAL_SYSTEM_PROMPT,
-                              CHAT_SCHEMA_DESIGN_SYSTEM_PROMPT,
-                              get_chat_schema_design_prompt,
-                              get_chat_sql_system_prompt,
-                              get_schema_clarification_prompt)
+from app.core.prompts import (
+    CHAT_SCHEMA_DESIGN_SYSTEM_PROMPT,
+    get_chat_check_system_prompt,
+    get_chat_check_user_prompt,
+    get_chat_generate_sql_system_prompt,
+    get_chat_schema_design_prompt,
+    get_schema_clarification_prompt,
+)
 from app.db.session import get_db
 from app.models.models import ChatRole, User
 from app.repositories.connection_repository import connection_repository
@@ -23,66 +36,40 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter()
-
 logger = logging.getLogger(__name__)
 
 SCHEMA_DESIGN_MIN_WORDS_FOR_DIRECT_GENERATE = 12
 
 
+# ---------------------------------------------------------------------------
+# Schema formatting helpers
+# ---------------------------------------------------------------------------
+
 @lru_cache(maxsize=128)
-def _cached_format_schema(
-    schema_json: str,
-    limit_tables: int,
-    mentioned_table_names: tuple
-) -> str:
+def _cached_format_schema(schema_json: str, limit_tables: int, mentioned_table_names: tuple) -> str:
     meta_schema = json.loads(schema_json)
     all_tables = meta_schema.get("tables", [])
-
     mentioned_tables = None
     if mentioned_table_names:
-        mentioned_tables = [t for t in all_tables
-                            if t.get("name") in mentioned_table_names]
-
-    return format_schema_for_prompt(meta_schema,
-                                    limit_tables,
-                                    mentioned_tables)
+        mentioned_tables = [t for t in all_tables if t.get("name") in mentioned_table_names]
+    return format_schema_for_prompt(meta_schema, limit_tables, mentioned_tables)
 
 
 def extract_mentioned_tables(message: str, all_tables: list) -> list:
     message_lower = message.lower()
-    mentioned = []
-
-    for table in all_tables:
-        table_name = table.get("name", "").lower()
-        if table_name in message_lower:
-            mentioned.append(table)
-            continue
-
-    return mentioned
+    return [t for t in all_tables if t.get("name", "").lower() in message_lower]
 
 
-def format_schema_for_prompt(
-    meta_schema: dict,
-    limit_tables: int = 10,
-    mentioned_tables: list = None
-) -> str:
+def format_schema_for_prompt(meta_schema: dict, limit_tables: int = 10, mentioned_tables: list = None) -> str:
     if not meta_schema or "tables" not in meta_schema:
         return "No schema information available."
-
     all_tables = meta_schema.get("tables", [])
-
-    # Nếu có mentioned tables → format chi tiết, giới hạn 10
     if mentioned_tables:
-        tables = mentioned_tables[:limit_tables]
-        return _format_tables_detailed(tables)
-
-    # Không có mentioned tables → inject TẤT CẢ tables dạng compact
-    # để LLM biết đủ bảng để chọn đúng
+        return _format_tables_detailed(mentioned_tables[:limit_tables])
     return _format_tables_compact(all_tables)
 
 
 def _format_tables_detailed(tables: list) -> str:
-    """Format đầy đủ với columns và FK — dùng khi biết bảng cụ thể."""
     lines = ["Database Schema (relevant tables):"]
     for table in tables:
         table_name = table.get("name", "unknown")
@@ -106,7 +93,6 @@ def _format_tables_detailed(tables: list) -> str:
 
 
 def _format_tables_compact(tables: list) -> str:
-    """Format compact — dùng khi inject tất cả tables để LLM tự tìm bảng phù hợp."""
     lines = ["Database Schema (all tables):"]
     for table in tables:
         table_name = table.get("name", "unknown")
@@ -124,9 +110,227 @@ def _format_tables_compact(tables: list) -> str:
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# DB helpers: save messages, resolve conversation
+# ---------------------------------------------------------------------------
+
+async def _save_user_message(db: AsyncSession, conversation_id: UUID, message: str) -> None:
+    await query_log_repository.create(
+        db,
+        obj_in={
+            "conversation_id": conversation_id,
+            "role": ChatRole.USER,
+            "content": message,
+            "created_at": datetime.now(timezone.utc),
+        },
+    )
+
+
+async def _save_assistant_message(
+    db: AsyncSession,
+    conversation_id: UUID,
+    content: str,
+    sql_generated: Optional[str] = None,
+    schema_generated: Optional[dict] = None,
+) -> None:
+    try:
+        await db.rollback()
+    except Exception:
+        pass
+    await query_log_repository.create(
+        db,
+        obj_in={
+            "conversation_id": conversation_id,
+            "role": ChatRole.ASSISTANT,
+            "content": content,
+            "sql_generated": sql_generated,
+            "schema_generated": schema_generated if isinstance(schema_generated, dict) else None,
+            "created_at": datetime.now(timezone.utc),
+        },
+    )
+
+
+async def _resolve_conversation(db: AsyncSession, request: ChatCompletionRequest) -> UUID:
+    if request.conversation_id:
+        conversation = await conversation_repository.get(db, id=request.conversation_id)
+        if not conversation or conversation.connection_id != request.connection_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+        return conversation.id
+
+    conversation = await conversation_repository.create(
+        db,
+        obj_in={
+            "connection_id": request.connection_id,
+            "title": request.message[:50] + ("..." if len(request.message) > 50 else ""),
+            "created_at": datetime.now(timezone.utc),
+        },
+    )
+    return conversation.id
+
+
+# ---------------------------------------------------------------------------
+# CHECK MODE
+# ---------------------------------------------------------------------------
+
+_DIALECT_MAP = {
+    "postgres": "postgres", "postgresql": "postgres",
+    "mysql": "mysql", "mariadb": "mysql",
+    "sqlite": "sqlite",
+    "mssql": "tsql", "sqlserver": "tsql",
+    "simulation": "postgres",
+}
+
+
+def _sqlglot_dialect(db_type_value: str) -> str:
+    return _DIALECT_MAP.get((db_type_value or "").lower(), "postgres")
+
+
+def _strip_sql_markdown(text: str) -> str:
+    match = re.search(r"```sql\s*(.*?)\s*```", text, re.DOTALL | re.IGNORECASE)
+    if match:
+        return match.group(1).strip()
+    return text.strip()
+
+
+def _extract_sql_block(text: str) -> Optional[str]:
+    match = re.search(r"```sql\s*(.*?)\s*```", text, re.DOTALL | re.IGNORECASE)
+    return match.group(1).strip() if match else None
+
+
+def _check_syntax(sql: str, dialect: str):
+    """Returns (is_valid: bool, errors: list[str], cleaned_sql: str)."""
+    cleaned = _strip_sql_markdown(sql)
+    if not cleaned:
+        return False, ["Empty SQL statement"], ""
+    
+    try:
+        sqlglot.parse(cleaned, read=dialect)
+        return True, [], cleaned
+    except sqlglot.errors.ParseError as e:
+        return False, [str(e)], cleaned
+    except Exception as e:
+        return False, [str(e)], cleaned
+
+
+async def _handle_check_mode(
+    request: ChatCompletionRequest,
+    connection,
+    conversation_id: UUID,
+    db: AsyncSession,
+) -> ChatCompletionResponse:
+    message = request.message
+    db_type_value = connection.db_type.value if connection.db_type else "postgresql"
+    dialect_key = _sqlglot_dialect(db_type_value)
+
+    raw_sql = _strip_sql_markdown(message)
+    is_valid, errors, cleaned_sql = _check_syntax(raw_sql, dialect_key)
+
+    # ── Fast path: valid syntax → no LLM ──────────────────────────────────
+    if is_valid:
+        logger.info("[CHECK] Syntax valid — skipping LLM")
+        content = f"**Status:** Valid\n**Issue:** None\n\n```sql\n{cleaned_sql}\n```"
+        await _save_assistant_message(db, conversation_id, content, sql_generated=cleaned_sql)
+        return ChatCompletionResponse(
+            conversation_id=conversation_id,
+            role="assistant",
+            content=content,
+            sql_generated=cleaned_sql,
+            is_schema_design=False,
+        )
+
+    # ── Slow path: syntax errors → LLM fix ────────────────────────────────
+    error_summary = "; ".join(errors[:3])
+    logger.info("[CHECK] Errors: %s — calling LLM", error_summary)
+
+    system_prompt = get_chat_check_system_prompt(db_type_value)
+    user_prompt = (
+        f"{get_chat_check_user_prompt(raw_sql)}\n\n"
+        f"Detected issues: {error_summary}"
+    )
+
+    try:
+        t0 = time.time()
+        llm_response = await llm_service.chat(
+            prompt=user_prompt,
+            system_prompt=system_prompt,
+            temperature=0.1,
+            max_tokens=512,
+        )
+        logger.info("[CHECK] LLM fix took %.2fs", time.time() - t0)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"LLM service error: {str(e)}")
+
+    fixed_sql = _extract_sql_block(llm_response)
+    await _save_assistant_message(db, conversation_id, llm_response, sql_generated=fixed_sql)
+    return ChatCompletionResponse(
+        conversation_id=conversation_id,
+        role="assistant",
+        content=llm_response,
+        sql_generated=fixed_sql,
+        is_schema_design=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# CHAT MODE
+# ---------------------------------------------------------------------------
+
+async def _handle_chat_mode(
+    request: ChatCompletionRequest,
+    connection,
+    conversation_id: UUID,
+    db: AsyncSession,
+) -> ChatCompletionResponse:
+    message = request.message
+    db_type_value = connection.db_type.value if connection.db_type else "postgresql"
+
+    # Build schema context
+    all_tables = connection.meta_schema.get("tables", []) if connection.meta_schema else []
+    mentioned_tables = extract_mentioned_tables(message, all_tables)
+    schema_json = json.dumps(connection.meta_schema or {})
+    mentioned_names = tuple(sorted([t.get("name") for t in mentioned_tables])) if mentioned_tables else ()
+    schema_text = _cached_format_schema(schema_json, 10, mentioned_names)
+
+    system_prompt = get_chat_generate_sql_system_prompt(db_type_value, schema_text)
+
+    logger.info("[CHAT] mode=chat, dialect=%s, schema=%d bytes", db_type_value, len(schema_text))
+
+    try:
+        t0 = time.time()
+        llm_response = await llm_service.chat(
+            prompt=message,
+            system_prompt=system_prompt,
+            temperature=0.2,
+            max_tokens=1024,
+        )
+        logger.info("[CHAT] LLM took %.2fs", time.time() - t0)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"LLM service error: {str(e)}")
+
+    sql_generated = _extract_sql_block(llm_response)
+    detected_sql = llm_service._extract_sql_from_message(message)
+
+    await _save_assistant_message(db, conversation_id, llm_response, sql_generated=sql_generated)
+
+    response_data: Dict[str, Any] = {
+        "conversation_id": conversation_id,
+        "role": "assistant",
+        "content": llm_response,
+        "sql_generated": sql_generated,
+        "is_schema_design": False,
+    }
+    if detected_sql:
+        response_data["detected_sql"] = detected_sql
+    return ChatCompletionResponse(**response_data)
+
+
+# ---------------------------------------------------------------------------
+# GEN MODE
+# ---------------------------------------------------------------------------
+
 def _is_schema_design_intent(message: str) -> bool:
     message_lower = message.lower()
-    design_keywords = [
+    keywords = [
         "tạo database", "tạo cơ sở dữ liệu", "thiết kế database",
         "thiết kế cơ sở dữ liệu", "tạo bảng cho", "tạo schema",
         "xây dựng database", "xây dựng cơ sở dữ liệu", "thiết kế bảng",
@@ -138,22 +342,18 @@ def _is_schema_design_intent(message: str) -> bool:
         "data model for", "erd for", "i need a database",
         "i want to create a database", "create a schema", "design a schema",
     ]
-    return any(keyword in message_lower for keyword in design_keywords)
+    return any(k in message_lower for k in keywords)
 
 
 def _extract_first_json_object(text: str) -> str:
-    """Extract the first complete JSON object and ignore trailing content."""
     start = text.find("{")
     if start == -1:
         raise ValueError("No JSON object found")
-
     depth = 0
     in_string = False
     is_escaped = False
-
     for i in range(start, len(text)):
         ch = text[i]
-
         if in_string:
             if is_escaped:
                 is_escaped = False
@@ -164,18 +364,15 @@ def _extract_first_json_object(text: str) -> str:
             if ch == '"':
                 in_string = False
             continue
-
         if ch == '"':
             in_string = True
             continue
-
         if ch == "{":
             depth += 1
         elif ch == "}":
             depth -= 1
             if depth == 0:
-                return text[start:i + 1]
-
+                return text[start: i + 1]
     raise ValueError("Unclosed JSON object")
 
 
@@ -190,364 +387,156 @@ async def _check_schema_clarification_inline(message: str) -> dict:
         "library", "hospital", "school", "restaurant", "hotel",
         "supplier", "category", "invoice", "booking", "reservation",
     ]
-    has_specific = any(
-        kw in message.lower() for kw in specific_keywords
-    )
+    has_specific = any(kw in message.lower() for kw in specific_keywords)
 
-    if (
-        word_count >= SCHEMA_DESIGN_MIN_WORDS_FOR_DIRECT_GENERATE
-        and has_specific
-    ):
-        logger.info(
-            "[CHAT] Clarification skipped: %d words, specific=%s",
-            word_count, has_specific,
-        )
+    if word_count >= SCHEMA_DESIGN_MIN_WORDS_FOR_DIRECT_GENERATE and has_specific:
+        logger.info("[GEN] Clarification skipped: %d words, specific=%s", word_count, has_specific)
         return {"needs_clarification": False, "questions": []}
 
     try:
         context_prompt = get_schema_clarification_prompt(message)
-        raw = await llm_service.chat(
-            prompt=context_prompt,
-            system_prompt=None,
-            temperature=0.1,
-            max_tokens=512,
-        )
+        raw = await llm_service.chat(prompt=context_prompt, system_prompt=None, temperature=0.1, max_tokens=512)
         clean = re.sub(r"```(?:json)?\s*|```", "", raw).strip()
-        json_str = _extract_first_json_object(clean)
-        result = json.loads(json_str)
-        logger.info(
-            "[CHAT] Clarification result: needs=%s, q=%d",
-            result.get("needs_clarification"),
-            len(result.get("questions", [])),
-        )
+        result = json.loads(_extract_first_json_object(clean))
+        logger.info("[GEN] Clarification: needs=%s, q=%d", result.get("needs_clarification"), len(result.get("questions", [])))
         return result
     except Exception as e:
-        logger.warning("[CHAT] Clarification check failed: %s", e)
+        logger.warning("[GEN] Clarification check failed: %s", e)
         return {"needs_clarification": False, "questions": []}
 
+
+async def _handle_gen_mode(
+    request: ChatCompletionRequest,
+    conversation_id: UUID,
+    db: AsyncSession,
+) -> ChatCompletionResponse:
+    message = request.message
+    has_answers = bool(request.clarification_answers)
+
+    if not has_answers:
+        clarification_check = await _check_schema_clarification_inline(message)
+        if clarification_check.get("needs_clarification") and clarification_check.get("questions"):
+            questions = clarification_check["questions"]
+            clarification_content = (
+                "Before designing the schema, I have a few questions:\n\n"
+                + "\n".join(
+                    f"{idx + 1}. {q.get('q', '')}"
+                    + (f"\n   Options: {', '.join(q.get('options', []))}" if q.get("options") else "")
+                    for idx, q in enumerate(questions)
+                )
+                + "\n\nPlease answer these questions and I'll generate the schema."
+            )
+            await _save_assistant_message(db, conversation_id, clarification_content)
+            return ChatCompletionResponse(
+                conversation_id=conversation_id,
+                role="assistant",
+                content=clarification_content,
+                is_schema_design=False,
+                schema_generated=None,
+            )
+
+    schema_prompt = get_chat_schema_design_prompt(
+        user_description=message,
+        clarification_answers=request.clarification_answers,
+    )
+    logger.info("[GEN] Generating schema, prompt_len=%d", len(schema_prompt))
+
+    try:
+        t0 = time.time()
+        llm_response = await llm_service.chat_schema_design(
+            prompt=schema_prompt,
+            system_prompt=CHAT_SCHEMA_DESIGN_SYSTEM_PROMPT,
+        )
+        logger.info("[GEN] LLM took %.2fs", time.time() - t0)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"LLM service error: {str(e)}")
+
+    schema_generated = None
+    llm_response_for_content = llm_response
+    try:
+        clean = re.sub(r"```(?:json)?\s*|```", "", llm_response).strip()
+        schema_generated = json.loads(_extract_first_json_object(clean))
+        tables = schema_generated.get("tables", [])
+        table_names = ", ".join(t.get("name", "") for t in tables[:6] if t.get("name"))
+        llm_response_for_content = (
+            f"I've designed a {schema_generated.get('system_name', 'database')} "
+            f"schema with {len(tables)} tables"
+            + (f": {table_names}. " if table_names else ". ")
+            + "Review the schema below and click Apply to Sandbox to use it."
+        )
+        logger.info("[GEN] Schema parsed: %d tables", len(tables))
+    except Exception as e:
+        logger.warning("[GEN] Failed to parse schema JSON: %s", e)
+
+    await _save_assistant_message(db, conversation_id, llm_response_for_content, schema_generated=schema_generated)
+    return ChatCompletionResponse(
+        conversation_id=conversation_id,
+        role="assistant",
+        content=llm_response_for_content,
+        is_schema_design=True,
+        schema_generated=schema_generated,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Main endpoint
+# ---------------------------------------------------------------------------
 
 @router.post("/completion", response_model=ChatCompletionResponse)
 async def chat_completion(
     request: ChatCompletionRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     connection = await connection_repository.get_by_user_and_id(
-        db=db,
-        user_id=current_user.id,
-        connection_id=request.connection_id
+        db=db, user_id=current_user.id, connection_id=request.connection_id
     )
-
     if not connection:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Connection not found or access denied"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connection not found or access denied")
 
-    conversation_id = request.conversation_id
+    conversation_id = await _resolve_conversation(db, request)
+    await _save_user_message(db, conversation_id, request.message)
 
-    if conversation_id:
-        conversation = await conversation_repository.get(
-            db, id=conversation_id
-        )
+    chat_mode = request.chat_mode
+    logger.info("[DISPATCH] mode=%s conv=%s", chat_mode, conversation_id)
 
-        if not conversation or (
-            conversation.connection_id != request.connection_id
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Conversation not found"
-            )
-    else:
-        conversation = await conversation_repository.create(
-            db,
-            obj_in={
-                "connection_id": request.connection_id,
-                "title": request.message[:50] +
-                ("..." if len(request.message) > 50 else ""),
-                "created_at": datetime.now(timezone.utc)
-            }
-        )
-        conversation_id = conversation.id
+    if chat_mode == "check":
+        return await _handle_check_mode(request, connection, conversation_id, db)
 
-    # Save the user message immediately (before LLM) to preserve the true send timestamp
-    user_message_received_at = datetime.now(timezone.utc)
-    await query_log_repository.create(
-        db,
-        obj_in={
-            "conversation_id": conversation_id,
-            "role": ChatRole.USER,
-            "content": request.message,
-            "created_at": user_message_received_at
-        }
-    )
+    if chat_mode == "gen":
+        return await _handle_gen_mode(request, conversation_id, db)
 
-    start_time = time.time()
+    # Default: "chat"
+    return await _handle_chat_mode(request, connection, conversation_id, db)
 
-    all_tables = connection.meta_schema.get(
-        "tables",
-        []
-    ) if connection.meta_schema else []
-    mentioned_tables = extract_mentioned_tables(request.message, all_tables)
 
-    logger.info("[CHAT] Mentioned tables:"
-                f"{[t.get('name') for t in mentioned_tables]}")
-
-    schema_json = json.dumps(connection.meta_schema or {})
-    mentioned_names = tuple(
-        sorted([t.get('name') for t in mentioned_tables])
-    ) if mentioned_tables else ()
-
-    schema_text = _cached_format_schema(schema_json, 10, mentioned_names)
-    schema_format_time = time.time() - start_time
-
-    logger.info(f"[CHAT] Schema formatted: {len(schema_text):,} bytes"
-                f"in {schema_format_time:.2f}s")
-
-    db_type_name = (
-        connection.db_type.value if connection.db_type else "PostgreSQL"
-    )
-
-    dialect = connection.db_type.value if connection.db_type else "postgres"
-
-    is_schema_design = (
-        _is_schema_design_intent(request.message)
-        or bool(request.clarification_answers)
-    )
-    is_sql_query = (
-        llm_service._is_sql_query(request.message) and not is_schema_design
-    )
-    extracted_sql = None
-
-    if is_schema_design:
-        system_prompt = CHAT_SCHEMA_DESIGN_SYSTEM_PROMPT
-        logger.info("[CHAT] Schema design intent detected")
-    elif is_sql_query:
-        extracted_sql = llm_service._extract_sql_from_message(request.message)
-
-        sql_system_prompt = get_chat_sql_system_prompt(dialect)
-        system_note = (
-            f"[SYSTEM NOTE: Ensure all SQL syntax is valid "
-            f"for {dialect.upper()}]"
-        )
-        system_prompt = (
-            f"{sql_system_prompt}\n\n"
-            f"Database Type: {db_type_name}\n\n"
-            f"{schema_text}\n\n"
-            f"{system_note}"
-        )
-        logger.info(f"[CHAT] Using SQL analysis prompt for dialect: {dialect}")
-    else:
-        system_prompt = (
-            f"{CHAT_GENERAL_SYSTEM_PROMPT}\n\n"
-            f"Database Type: {db_type_name}\n\n"
-            f"{schema_text}\n\n"
-            f"Instructions:\n"
-            f"- Answer user questions about the database\n"
-            f"- Generate SQL queries when requested\n"
-            f"- Explain query results clearly\n"
-            f"- If generating SQL, wrap it in ```sql code blocks\n"
-            f"- Be concise and helpful"
-        )
-        logger.info("[CHAT] Using general chat system prompt")
-
-    schema_prompt = request.message
-    if is_schema_design:
-        has_answers = bool(request.clarification_answers)
-
-        if not has_answers:
-            clarification_check = await _check_schema_clarification_inline(
-                request.message
-            )
-            if (
-                clarification_check.get("needs_clarification")
-                and clarification_check.get("questions")
-            ):
-                questions = clarification_check["questions"]
-                clarification_content = (
-                    "Before designing the schema, I have a few questions:\n\n"
-                    + "\n".join(
-                        f"{index + 1}. {q.get('q', '')}"
-                        + (
-                            f"\n   Options: {', '.join(q.get('options', []))}"
-                            if q.get("options")
-                            else ""
-                        )
-                        for index, q in enumerate(questions)
-                    )
-                    + "\n\nPlease answer these questions and I'll generate the schema."
-                )
-
-                # User message already saved above — only save the assistant clarification response
-                await query_log_repository.create(
-                    db,
-                    obj_in={
-                        "conversation_id": conversation_id,
-                        "role": ChatRole.ASSISTANT,
-                        "content": clarification_content,
-                        "schema_generated": None,
-                        "created_at": datetime.now(timezone.utc)
-                    }
-                )
-
-                return ChatCompletionResponse(
-                    conversation_id=conversation_id,
-                    role="assistant",
-                    content=clarification_content,
-                    is_schema_design=False,
-                    schema_generated=None,
-                )
-
-        schema_prompt = get_chat_schema_design_prompt(
-            user_description=request.message,
-            clarification_answers=request.clarification_answers,
-        )
-        logger.info(
-            "[CHAT] Schema design - generating with prompt len=%s",
-            len(schema_prompt),
-        )
-
-    prompt_size = len(system_prompt) + len(schema_prompt)
-    logger.info(f"[CHAT] Total prompt: {prompt_size:,} bytes")
-
-    try:
-        llm_start = time.time()
-        if is_schema_design:
-            llm_response = await llm_service.chat_schema_design(
-                prompt=schema_prompt,
-                system_prompt=system_prompt,
-            )
-        else:
-            llm_response = await llm_service.chat(
-                prompt=request.message,
-                system_prompt=system_prompt,
-                temperature=0.3,
-                max_tokens=2048,
-            )
-        llm_duration = time.time() - llm_start
-        logger.info(f"[CHAT] LLM took: {llm_duration:.2f}s")
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"LLM service error: {str(e)}"
-        )
-
-    sql_generated = None
-    schema_generated = None
-    llm_response_for_content = llm_response
-    if is_schema_design:
-        try:
-            clean = re.sub(r"```(?:json)?\s*|```", "", llm_response).strip()
-            json_str = _extract_first_json_object(clean)
-            schema_generated = json.loads(json_str)
-
-            tables = schema_generated.get("tables", [])
-            has_columns = all(
-                isinstance(table.get("columns"), list)
-                and len(table.get("columns", [])) > 0
-                for table in tables
-            ) if tables else False
-
-            if not has_columns:
-                logger.warning("[CHAT] Schema missing columns in some tables")
-
-            logger.info(
-                "[CHAT] Schema generated: %s tables, has_columns=%s",
-                len(tables),
-                has_columns,
-            )
-
-            table_names = ", ".join(
-                table.get("name", "")
-                for table in tables[:6]
-                if table.get("name")
-            )
-            llm_response_for_content = (
-                f"I've designed a {schema_generated.get('system_name', 'database')} "
-                f"schema with {len(tables)} tables"
-                + (f": {table_names}. " if table_names else ". ")
-                + "Review the schema below and click Apply to Sandbox to use it."
-            )
-        except Exception as e:
-            logger.warning(f"[CHAT] Failed to parse schema JSON: {e}")
-            schema_generated = None
-            llm_response_for_content = llm_response
-    elif "```sql" in llm_response:
-        try:
-            sql_start = llm_response.index("```sql") + 6
-            sql_end = llm_response.index("```", sql_start)
-            sql_generated = llm_response[sql_start:sql_end].strip()
-        except (ValueError, IndexError):
-            pass
-
-    detected_sql = extracted_sql
-
-    try:
-        await db.rollback()
-    except Exception:
-        pass
-
-    # User message was already saved at request-receive time above.
-    # Only save the assistant response now.
-    await query_log_repository.create(
-        db,
-        obj_in={
-            "conversation_id": conversation_id,
-            "role": ChatRole.ASSISTANT,
-            "content": llm_response_for_content,
-            "sql_generated": sql_generated,
-            "schema_generated": (
-                schema_generated if isinstance(schema_generated, dict) else None
-            ),
-            "created_at": datetime.now(timezone.utc)
-        }
-    )
-
-    response_data = {
-        "conversation_id": conversation_id,
-        "role": "assistant",
-        "content": llm_response_for_content,
-        "sql_generated": sql_generated,
-        "is_schema_design": is_schema_design,
-        "schema_generated": schema_generated,
-    }
-
-    if detected_sql:
-        response_data["detected_sql"] = detected_sql
-        logger.info(f"[CHAT] Returning detected SQL: {detected_sql[:50]}...")
-
-    return ChatCompletionResponse(**response_data)
-
+# ---------------------------------------------------------------------------
+# Conversation management (unchanged)
+# ---------------------------------------------------------------------------
 
 @router.get("/conversations/{connection_id}")
 async def get_conversations(
     connection_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     connection = await connection_repository.get_by_user_and_id(
-        db=db,
-        user_id=current_user.id,
-        connection_id=connection_id
+        db=db, user_id=current_user.id, connection_id=connection_id
     )
-
     if not connection:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Connection not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connection not found")
 
-    conversations = await conversation_repository.get_by_connection(
-        db=db,
-        connection_id=connection_id
-    )
-
+    conversations = await conversation_repository.get_by_connection(db=db, connection_id=connection_id)
     return [
         {
             "id": str(conv.id),
             "title": conv.title,
             "created_at": conv.created_at.isoformat(),
-            "updated_at": conv.updated_at.isoformat() if hasattr(conv, 'updated_at') and conv.updated_at else conv.created_at.isoformat(),
+            "updated_at": (
+                conv.updated_at.isoformat()
+                if hasattr(conv, "updated_at") and conv.updated_at
+                else conv.created_at.isoformat()
+            ),
         }
         for conv in conversations
     ]
@@ -558,80 +547,45 @@ async def rename_conversation(
     conversation_id: UUID,
     body: dict,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     conversation = await conversation_repository.get(db, id=conversation_id)
-
     if not conversation:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conversation not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
 
     connection = await connection_repository.get_by_user_and_id(
-        db=db,
-        user_id=current_user.id,
-        connection_id=conversation.connection_id
+        db=db, user_id=current_user.id, connection_id=conversation.connection_id
     )
-
     if not connection:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     new_title = body.get("title", "").strip()
     if not new_title:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Title cannot be empty"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Title cannot be empty")
 
-    updated = await conversation_repository.update(
-        db,
-        db_obj=conversation,
-        obj_in={"title": new_title}
-    )
-
-    return {
-        "id": str(updated.id),
-        "title": updated.title,
-    }
+    updated = await conversation_repository.update(db, db_obj=conversation, obj_in={"title": new_title})
+    return {"id": str(updated.id), "title": updated.title}
 
 
 @router.delete("/conversations/{conversation_id}")
 async def delete_conversation(
     conversation_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     conversation = await conversation_repository.get(db, id=conversation_id)
-
     if not conversation:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conversation not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
 
     connection = await connection_repository.get_by_user_and_id(
-        db=db,
-        user_id=current_user.id,
-        connection_id=conversation.connection_id
+        db=db, user_id=current_user.id, connection_id=conversation.connection_id
     )
-
     if not connection:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     deleted = await conversation_repository.delete(db, id=conversation_id)
-
     if not deleted:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete conversation"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete conversation")
 
     return {"success": True, "id": str(conversation_id)}
 
@@ -640,33 +594,19 @@ async def delete_conversation(
 async def get_conversation_messages(
     conversation_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     conversation = await conversation_repository.get(db, id=conversation_id)
-
     if not conversation:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conversation not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
 
     connection = await connection_repository.get_by_user_and_id(
-        db=db,
-        user_id=current_user.id,
-        connection_id=conversation.connection_id
+        db=db, user_id=current_user.id, connection_id=conversation.connection_id
     )
-
     if not connection:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
-    messages = await query_log_repository.get_by_conversation(
-        db=db,
-        conversation_id=conversation_id
-    )
-
+    messages = await query_log_repository.get_by_conversation(db=db, conversation_id=conversation_id)
     return [
         {
             "id": str(msg.id),
@@ -680,45 +620,31 @@ async def get_conversation_messages(
         for msg in messages
     ]
 
+
 @router.patch("/messages/{message_id}")
 async def update_message(
     message_id: UUID,
     body: dict,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     message = await query_log_repository.get(db, id=message_id)
     if not message:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Message not found"
-        )
-        
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
+
     conversation = await conversation_repository.get(db, id=message.conversation_id)
     if not conversation:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conversation not found"
-        )
-        
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+
     connection = await connection_repository.get_by_user_and_id(
-        db=db,
-        user_id=current_user.id,
-        connection_id=conversation.connection_id
+        db=db, user_id=current_user.id, connection_id=conversation.connection_id
     )
     if not connection:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     updated_sql = body.get("sql_generated")
     if updated_sql is not None:
-        updated = await query_log_repository.update(
-            db,
-            db_obj=message,
-            obj_in={"sql_generated": updated_sql}
-        )
+        updated = await query_log_repository.update(db, db_obj=message, obj_in={"sql_generated": updated_sql})
         return {"id": str(updated.id), "sql_generated": updated.sql_generated}
-        
+
     return {"id": str(message.id)}
