@@ -270,6 +270,18 @@ async def chat_completion(
         )
         conversation_id = conversation.id
 
+    # Save the user message immediately (before LLM) to preserve the true send timestamp
+    user_message_received_at = datetime.now(timezone.utc)
+    await query_log_repository.create(
+        db,
+        obj_in={
+            "conversation_id": conversation_id,
+            "role": ChatRole.USER,
+            "content": request.message,
+            "created_at": user_message_received_at
+        }
+    )
+
     start_time = time.time()
 
     all_tables = connection.meta_schema.get(
@@ -366,16 +378,7 @@ async def chat_completion(
                     + "\n\nPlease answer these questions and I'll generate the schema."
                 )
 
-                await query_log_repository.create(
-                    db,
-                    obj_in={
-                        "conversation_id": conversation_id,
-                        "role": ChatRole.USER,
-                        "content": request.message,
-                        "created_at": datetime.now(timezone.utc)
-                    }
-                )
-
+                # User message already saved above — only save the assistant clarification response
                 await query_log_repository.create(
                     db,
                     obj_in={
@@ -484,16 +487,8 @@ async def chat_completion(
     except Exception:
         pass
 
-    await query_log_repository.create(
-        db,
-        obj_in={
-            "conversation_id": conversation_id,
-            "role": ChatRole.USER,
-            "content": request.message,
-            "created_at": datetime.now(timezone.utc)
-        }
-    )
-
+    # User message was already saved at request-receive time above.
+    # Only save the assistant response now.
     await query_log_repository.create(
         db,
         obj_in={

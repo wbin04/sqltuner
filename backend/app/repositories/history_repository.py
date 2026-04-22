@@ -27,6 +27,39 @@ class HistoryRepository(
         workspace_id: Optional[UUID] = None,
         activity_type: Optional[str] = None
     ) -> Tuple[List[QueryLog], int]:
+        from sqlalchemy import func
+
+        base_conditions = [DBConnection.user_id == user_id]
+
+        if search:
+            search_filter = or_(
+                QueryLog.content.ilike(f"%{search}%"),
+                QueryLog.sql_generated.ilike(f"%{search}%")
+            )
+            base_conditions.append(search_filter)
+
+        if workspace_id:
+            base_conditions.append(Conversation.connection_id == workspace_id)
+
+        if activity_type:
+            if activity_type == "optimization":
+                base_conditions.append(QueryLog.action_type == "optimize")
+            elif activity_type == "execution":
+                base_conditions.append(QueryLog.action_type == "explain")
+            elif activity_type == "chat":
+                base_conditions.append(QueryLog.action_type == "chat")
+
+        # 1. Count query without eager loads
+        count_query = (
+            select(func.count(QueryLog.id))
+            .join(Conversation, QueryLog.conversation_id == Conversation.id)
+            .join(DBConnection, Conversation.connection_id == DBConnection.id)
+            .where(and_(*base_conditions))
+        )
+        total_result = await db.execute(count_query)
+        total = total_result.scalar_one_or_none() or 0
+
+        # 2. Data query with eager loads
         query = (
             select(QueryLog)
             .join(Conversation, QueryLog.conversation_id == Conversation.id)
@@ -40,33 +73,11 @@ class HistoryRepository(
                     Conversation.connection),
                 selectinload(QueryLog.performance_analysis)
             )
-            .where(DBConnection.user_id == user_id)
+            .where(and_(*base_conditions))
+            .order_by(desc(QueryLog.created_at))
+            .offset((page - 1) * limit)
+            .limit(limit)
         )
-
-        if search:
-            search_filter = or_(
-                QueryLog.content.ilike(f"%{search}%"),
-                QueryLog.sql_generated.ilike(f"%{search}%")
-            )
-            query = query.where(search_filter)
-
-        if workspace_id:
-            query = query.where(Conversation.connection_id == workspace_id)
-
-        if activity_type:
-            if activity_type == "optimization":
-                query = query.where(QueryLog.action_type == "optimize")
-            elif activity_type == "execution":
-                query = query.where(QueryLog.action_type == "explain")
-            elif activity_type == "chat":
-                query = query.where(QueryLog.action_type == "chat")
-
-        count_query = select(QueryLog.id).select_from(query.subquery())
-        total_result = await db.execute(count_query)
-        total = len(total_result.all())
-
-        query = query.order_by(desc(QueryLog.created_at))
-        query = query.offset((page - 1) * limit).limit(limit)
 
         result = await db.execute(query)
         logs = list(result.scalars().all())

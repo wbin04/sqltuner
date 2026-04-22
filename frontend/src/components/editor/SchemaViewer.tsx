@@ -195,7 +195,7 @@ export function SchemaViewer({ schema, workspaceId, conversationId, onSync, dbTy
       ) : (
         /* Tree View */
         <div className="flex-1 overflow-y-auto p-2">
-          {schemaDef.tables.map((table) => {
+          {[...schemaDef.tables].sort((a, b) => a.name.localeCompare(b.name)).map((table) => {
             const isExpanded = expandedTables.has(table.name);
             
             return (

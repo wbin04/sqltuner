@@ -5,7 +5,7 @@
 import { useState, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { chatService, ChatMessage } from '../services/chatService';
-import { sqlService, SQLExecuteResponse, SQLOptimizeResponse } from '../services/sqlService';
+import { sqlService, SQLExecuteResponse, SQLOptimizeResponse, SQLExplainPlanResponse } from '../services/sqlService';
 
 interface QueryResult {
   sql: string;
@@ -26,6 +26,8 @@ export function useEditorLogic({ connectionId, initialConversationId }: UseEdito
   const [queryResults, setQueryResults] = useState<Map<string, QueryResult>>(new Map());
   const [optimizationResult, setOptimizationResult] = useState<SQLOptimizeResponse | null>(null);
   const [isOptimizationModalOpen, setIsOptimizationModalOpen] = useState(false);
+  const [explainResult, setExplainResult] = useState<SQLExplainPlanResponse | null>(null);
+  const [isExplainModalOpen, setIsExplainModalOpen] = useState(false);
   const [optimisticMessages, setOptimisticMessages] = useState<ChatMessage[]>([]);
   const [appliedOptimizationMessages, setAppliedOptimizationMessages] = useState<ChatMessage[]>([]);
   const [pendingClarification, setPendingClarification] = useState<{
@@ -93,12 +95,15 @@ export function useEditorLogic({ connectionId, initialConversationId }: UseEdito
       message: string;
       clarification_answers?: Array<{ q: string; answer: string }>;
     }) => {
+      // Capture send time before mutation
+      const sentAt = new Date().toISOString();
+
       // Add optimistic user message
       const userMessage: ChatMessage = {
         id: `temp-user-${Date.now()}`,
         role: 'user',
         content: payload.message,
-        created_at: new Date().toISOString(),
+        created_at: sentAt,
       };
 
       // Add loading assistant message
@@ -106,12 +111,15 @@ export function useEditorLogic({ connectionId, initialConversationId }: UseEdito
         id: `temp-loading-${Date.now()}`,
         role: 'assistant',
         content: 'Processing...',
-        created_at: new Date().toISOString(),
+        created_at: sentAt,
       };
 
       setOptimisticMessages([userMessage, loadingMessage]);
+
+      // Return sentAt so onSuccess can use it to fix user message timestamp
+      return { sentAt, userContent: payload.message };
     },
-    onSuccess: (response) => {
+    onSuccess: async (response, _payload, context) => {
       // Clear optimistic messages
       setOptimisticMessages([]);
 
@@ -120,9 +128,29 @@ export function useEditorLogic({ connectionId, initialConversationId }: UseEdito
         setActiveConversationId(response.conversation_id);
       }
 
-      // Invalidate queries to refresh data
+      // Invalidate conversations list (non-blocking)
       queryClient.invalidateQueries({ queryKey: ['conversations', connectionId] });
-      queryClient.invalidateQueries({ queryKey: ['messages', response.conversation_id] });
+
+      // refetchQueries actually awaits until the refetch is complete
+      // (unlike invalidateQueries which only marks stale and resolves immediately)
+      await queryClient.refetchQueries({ queryKey: ['messages', response.conversation_id] });
+
+      // Now the cache has fresh data — patch user message timestamp back to sent time
+      if (context?.sentAt) {
+        const cached = queryClient.getQueryData<ChatMessage[]>(['messages', response.conversation_id]);
+        if (cached) {
+          const fixed = cached.map((msg) => {
+            if (
+              msg.role === 'user' &&
+              msg.content === _payload.message
+            ) {
+              return { ...msg, created_at: context.sentAt };
+            }
+            return msg;
+          });
+          queryClient.setQueryData(['messages', response.conversation_id], fixed);
+        }
+      }
 
       if (response.content.includes('Before designing the schema, I have a few questions:')) {
         const questions = parseClarificationQuestions(response.content);
@@ -186,6 +214,10 @@ export function useEditorLogic({ connectionId, initialConversationId }: UseEdito
         connection_id: connectionId,
         sql,
       }),
+    onSuccess: (data) => {
+      setExplainResult(data);
+      setIsExplainModalOpen(true);
+    },
   });
 
   // Handlers
@@ -255,8 +287,7 @@ export function useEditorLogic({ connectionId, initialConversationId }: UseEdito
 
   const handleExplain = useCallback(
     async (sql: string) => {
-      const result = await explainSqlMutation.mutateAsync(sql);
-      return result;
+      await explainSqlMutation.mutateAsync(sql);
     },
     [explainSqlMutation]
   );
@@ -301,6 +332,11 @@ export function useEditorLogic({ connectionId, initialConversationId }: UseEdito
     setOptimizationResult(null);
   }, []);
 
+  const handleCloseExplainModal = useCallback(() => {
+    setIsExplainModalOpen(false);
+    setExplainResult(null);
+  }, []);
+
   const handleApplyOptimization = useCallback(
     (combinedScript: string) => {
       // Display the combined script as an assistant message in chat
@@ -329,6 +365,8 @@ export function useEditorLogic({ connectionId, initialConversationId }: UseEdito
     queryResults,
     optimizationResult,
     isOptimizationModalOpen,
+    explainResult,
+    isExplainModalOpen,
 
     // Loading states
     isLoadingConversations,
@@ -356,6 +394,7 @@ export function useEditorLogic({ connectionId, initialConversationId }: UseEdito
     handleDeleteConversation,
     handleCloseOptimizationModal,
     handleApplyOptimization,
+    handleCloseExplainModal,
 
     // Clarification
     pendingClarification,

@@ -417,6 +417,25 @@ class OptimizationService:
     def __init__(self):
         self._cache = OptimizationCache()
 
+    async def explain_in_sandbox(
+        self,
+        db: AsyncSession,
+        connection: DBConnection,
+        sql_query: str,
+    ) -> ExplainResult:
+        from app.services.postgres_sandbox_service import postgres_sandbox_service
+
+        result = await postgres_sandbox_service.explain_analyze(
+            db=db,
+            meta_schema=connection.meta_schema,
+            sql_query=sql_query,
+        )
+
+        plan = result["plan"]
+        # plan đã là JSON từ PostgreSQL, parse giống real DB
+        total_cost = plan[0]["Plan"].get("Total Cost", 0.0)
+        return ExplainResult(plan=plan[0], total_cost=total_cost)
+
     async def analyze_query(
         self,
         connection_id: UUID,

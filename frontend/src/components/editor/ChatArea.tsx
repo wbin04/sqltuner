@@ -62,6 +62,9 @@ export function ChatArea({
   isOptimizing = false,
 }: ChatAreaProps) {
   const [internalInputValue, setInternalInputValue] = useState('');
+  const handleExplainAction = (_messageId: string, sql: string) => {
+    if (onExplain) onExplain(sql);
+  };
   
   // Use external input value if provided, otherwise use internal
   const inputValue = externalInputValue !== undefined ? externalInputValue : internalInputValue;
@@ -69,10 +72,11 @@ export function ChatArea({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Auto scroll to bottom when new messages arrive
+  // Auto scroll to bottom when new messages arrive or loading state updates
+  const lastMessage = messages[messages.length - 1];
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages.length, lastMessage?.id, lastMessage?.content]);
 
   // Auto-resize textarea based on content
   useEffect(() => {
@@ -195,7 +199,7 @@ export function ChatArea({
                       
                       {/* Timestamp Column on the right */}
                       <div className="text-[11px] text-text-muted-DEFAULT dark:text-text-muted-dark opacity-60 mb-2 whitespace-nowrap flex-shrink-0">
-                        {format(new Date(message.created_at), 'HH:mm')}
+                        {format(new Date(message.created_at), 'HH:mm:ss')}
                       </div>
                     </div>
                   )}
@@ -230,12 +234,14 @@ export function ChatArea({
                         sql={message.sql_generated}
                         queryLogId={message.id}
                         onExecute={onExecute}
-                        onExplain={onExplain}
+                        onExplain={(sql) => handleExplainAction(message.id, sql)}
                         onOptimize={onOptimize}
                         isExecuting={isExecuting}
                         isExplaining={isExplaining}
                         isOptimizing={isOptimizing}
                       />
+
+                      {/* Explain Block display removed — shown as global modal */}
                     </div>
                   )}
 

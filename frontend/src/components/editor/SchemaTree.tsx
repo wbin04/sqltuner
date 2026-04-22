@@ -21,15 +21,19 @@ export function SchemaTree({ tables }: SchemaTreeProps) {
     setExpandedTables(newExpanded);
   };
 
+  const sortedTables = [...tables].sort((a, b) => 
+    a.table_name.localeCompare(b.table_name)
+  );
+
   return (
     <div className="h-full overflow-y-auto p-4 space-y-2">
-      {tables.length === 0 ? (
+      {sortedTables.length === 0 ? (
         <div className="text-center py-8">
           <Table2 className="w-12 h-12 text-text-muted-DEFAULT dark:text-text-muted-dark mx-auto mb-3 opacity-50" />
           <p className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark">No schema loaded</p>
         </div>
       ) : (
-        tables.map(table => {
+        sortedTables.map(table => {
           const isExpanded = expandedTables.has(table.table_name);
 
           return (

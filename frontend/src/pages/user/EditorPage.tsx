@@ -15,6 +15,7 @@ import { SchemaViewer } from '../../components/editor/SchemaViewer';
 import { SessionManager } from '../../components/editor/SessionManager';
 import { ChatArea } from '../../components/editor/ChatArea';
 import { OptimizationModal } from '../../components/editor/OptimizationModal';
+import { ExplainBlock } from '../../components/performance/ExplainBlock';
 import { JSONViewerModal } from '../../components/editor/JSONViewerModal';
 import { SchemaGeneratedData } from '../../services/chatService';
 import { workspaceService } from '../../services/workspaceService';
@@ -67,12 +68,20 @@ export function EditorPage() {
     await editorLogic.handleExecute(sql);
   };
 
-  const handleOptimize = (sql: string) => {
-    editorLogic.handleOptimize(sql);
+  const handleOptimize = async (sql: string) => {
+    try {
+      await editorLogic.handleOptimize(sql);
+    } catch (err: any) {
+      toast.error(extractErrorMessage(err) || 'Failed to optimize query');
+    }
   };
 
   const handleExplain = async (sql: string) => {
-    await editorLogic.handleExplain(sql);
+    try {
+      await editorLogic.handleExplain(sql);
+    } catch (err: any) {
+      toast.error(extractErrorMessage(err) || 'Failed to explain query');
+    }
   };
 
   const handleApplySchemaToSandbox = async (schema: SchemaGeneratedData) => {
@@ -533,6 +542,14 @@ export function EditorPage() {
           // Auto-run the script
           handleExecute(sql);
         }}
+      />
+
+      {/* Explain Modal */}
+      <ExplainBlock
+        isOpen={editorLogic.isExplainModalOpen}
+        result={editorLogic.explainResult}
+        isLoading={editorLogic.isExplaining && !editorLogic.explainResult}
+        onClose={editorLogic.handleCloseExplainModal}
       />
 
       {/* JSON Viewer Modal */}

@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -58,8 +58,13 @@ class SQLExplainPlanRequest(BaseModel):
 
 
 class SQLExplainPlanResponse(BaseModel):
-    plan: Dict[str, Any]
-    total_cost: float
+    db_type: Literal["simulation", "mysql", "postgresql", "postgresql_sandbox"]
+    explain_columns: List[str]
+    explain_rows: List[Dict[str, Any]]
+    analyze_columns: Optional[List[str]] = None
+    analyze_rows: Optional[List[Dict[str, Any]]] = None
+    analyze_available: bool = False
+    analyze_unavailable_reason: Optional[str] = None
     execution_time_ms: Optional[float] = None
 
 

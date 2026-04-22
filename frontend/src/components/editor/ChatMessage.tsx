@@ -1,4 +1,5 @@
 import { User, Bot } from 'lucide-react';
+import { format } from 'date-fns';
 import { cn } from '../../lib/utils';
 import type { QueryLog } from '../../types';
 import { SQLBlock } from './SQLBlock';
@@ -15,10 +16,10 @@ interface ChatMessageProps {
   isOptimizing?: boolean;
 }
 
-export function ChatMessage({ 
-  message, 
-  onExplain, 
-  onOptimize, 
+export function ChatMessage({
+  message,
+  onExplain,
+  onOptimize,
   onExecute,
   onFeedback,
   isExecuting = false,
@@ -32,11 +33,12 @@ export function ChatMessage({
       'flex gap-4 p-4',
       isUser ? 'bg-transparent' : 'bg-surface dark:bg-surface-dark'
     )}>
+      {/*... Avatar & Content...*/}
       {/* Avatar */}
       <div className={cn(
         'flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center',
-        isUser 
-          ? 'bg-gradient-to-br from-secondary to-purple-600' 
+        isUser
+          ? 'bg-gradient-to-br from-secondary to-purple-600'
           : 'bg-gradient-to-br from-primary to-blue-600'
       )}>
         {isUser ? (
@@ -57,7 +59,7 @@ export function ChatMessage({
             {isUser ? 'You' : 'AI Assistant'}
           </span>
           <span className="text-xs text-text-muted-DEFAULT dark:text-text-muted-dark">
-            {new Date(message.createdAt).toLocaleTimeString()}
+            {format(new Date(message.createdAt), 'HH:mm:ss')}
           </span>
         </div>
 
@@ -79,6 +81,7 @@ export function ChatMessage({
             isOptimizing={isOptimizing}
           />
         )}
+
 
         {/* Feedback (for AI messages only) */}
         {!isUser && onFeedback && (
