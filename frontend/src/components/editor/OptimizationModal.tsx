@@ -4,6 +4,8 @@
  */
 import { X } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { format } from 'sql-formatter';
+import * as Diff from 'diff';
 import {
   OptimizationAnalysis,
   REWRITE_TYPE_COLORS,
@@ -60,13 +62,11 @@ export function OptimizationModal({
 
   if (!analysis) return null;
 
-  // Construct modified code with index recommendation
-  const modifiedCode = analysis.index_recommendation
-    ? `-- AI Suggested Index\n${analysis.index_recommendation.trim().replace(/;+$/, '')};\n\n${analysis.optimized_sql}`
-    : analysis.optimized_sql;
+  // Only compare pure SQL (no index concatenation)
+  const optimizedSql = analysis.optimized_sql;
 
   // Check if there are actual differences
-  const hasDifferences = originalSql.trim() !== modifiedCode.trim();
+  const hasDifferences = originalSql.trim() !== optimizedSql.trim();
 
   // Calculate improvement stats
   const stats = analysis.stats_comparison;
@@ -84,11 +84,15 @@ export function OptimizationModal({
         : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 border border-gray-300 dark:border-gray-600'
     : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 border border-gray-300 dark:border-gray-600';
 
-  // Apply fix handler
+  // Apply fix handler — only replace SQL in editor, index is separate
   const handleApplyFix = () => {
     if (onReplaceQuery) {
-      onReplaceQuery(modifiedCode);
-      onNotify?.('Optimization applied successfully!', 'success');
+      onReplaceQuery(optimizedSql);
+      if (analysis.index_recommendation) {
+        onNotify?.('Optimization applied! Index suggestion copied — run it separately.', 'success');
+      } else {
+        onNotify?.('Optimization applied successfully!', 'success');
+      }
       onClose();
     }
   };
@@ -96,13 +100,13 @@ export function OptimizationModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
       <div className={cn(
-        'relative w-full max-w-5xl max-h-[85vh] rounded-xl shadow-2xl overflow-hidden',
+        'relative w-full max-w-[90vw] max-h-[85vh] rounded-xl shadow-2xl overflow-hidden',
         'bg-white dark:bg-surface-dark',
         'border border-gray-200 dark:border-border-dark',
         'flex flex-col'
       )}>
         {/* Minimalist Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-border-dark bg-surface-highlight-DEFAULT/30 dark:bg-surface-highlight-dark/30">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-border-dark bg-surface-highlight-DEFAULT/30 dark:bg-surface-highlight-dark/30 shrink-0">
           <div className="flex items-center gap-4">
             <h2 className="text-lg font-bold text-text-main-DEFAULT dark:text-text-main-dark">
               Optimization Analysis
@@ -124,7 +128,7 @@ export function OptimizationModal({
           </button>
         </div>
 
-        <div className="px-6 py-4 border-b border-gray-200 dark:border-border-dark bg-surface-highlight-DEFAULT/20 dark:bg-surface-highlight-dark/20">
+        <div className="px-6 py-4 border-b border-gray-200 dark:border-border-dark bg-surface-highlight-DEFAULT/20 dark:bg-surface-highlight-dark/20 shrink-0 overflow-y-auto max-h-[30vh]">
           {analysis.explanation && (
             <p className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark mb-3">
               {analysis.explanation}
@@ -180,10 +184,32 @@ export function OptimizationModal({
               </ul>
             </div>
           )}
+
+          {analysis.index_recommendation && (
+            <div className="mt-3">
+              <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                📌 Suggested Index (run separately):
+              </p>
+              <div className="relative group">
+                <pre className="bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg p-3 text-xs font-mono text-gray-800 dark:text-gray-200 overflow-x-auto whitespace-pre-wrap">
+                  {analysis.index_recommendation}
+                </pre>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(analysis.index_recommendation!);
+                    onNotify?.('Index SQL copied to clipboard!', 'success');
+                  }}
+                  className="absolute top-2 right-2 px-2 py-1 rounded text-xs bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-gray-300 dark:hover:bg-gray-600"
+                >
+                  Copy
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* DiffEditor - Core Component */}
-        <div className="flex-1 overflow-hidden" style={{ minHeight: '360px' }}>
+        <div className="flex-1 overflow-y-auto min-h-[300px] bg-surface-light dark:bg-surface-dark">
           {!hasDifferences ? (
             <div className="flex items-center justify-center h-full p-8">
               <div className="text-center max-w-md">
@@ -196,7 +222,7 @@ export function OptimizationModal({
                 </p>
               </div>
             </div>
-          ) : !originalSql || !modifiedCode ? (
+          ) : !originalSql || !optimizedSql ? (
             <div className="flex items-center justify-center h-full p-8">
               <div className="text-center max-w-md">
                 <div className="text-4xl mb-4">⚠️</div>
@@ -209,105 +235,90 @@ export function OptimizationModal({
               </div>
             </div>
           ) : (
-            <div className="h-full overflow-auto bg-surface-light dark:bg-surface-dark">
+            <div className="h-full">
               <div className="font-mono text-sm">
-                {/* Intelligent Inline Diff View */}
+                {/* Unified Diff View with SQL Formatting & Context */}
                 {(() => {
-                  const originalLines = originalSql.split('\n');
-                  const modifiedLines = modifiedCode.split('\n');
-
-                  // Build a simple line-by-line diff
-                  const diffLines: Array<{ type: 'removed' | 'added' | 'unchanged'; content: string; lineNum?: number }> = [];
-
-                  // Find common prefix (unchanged lines at the start)
-                  let commonPrefixLength = 0;
-                  while (
-                    commonPrefixLength < originalLines.length &&
-                    commonPrefixLength < modifiedLines.length &&
-                    originalLines[commonPrefixLength] === modifiedLines[commonPrefixLength]
-                  ) {
-                    commonPrefixLength++;
+                  let formattedOriginal = originalSql;
+                  let formattedModified = optimizedSql;
+                  try {
+                    formattedOriginal = format(originalSql, { language: 'postgresql' });
+                    formattedModified = format(optimizedSql, { language: 'postgresql' });
+                  } catch (e) {
+                    console.warn('SQL formatting failed', e);
                   }
 
-                  // Find common suffix (unchanged lines at the end)
-                  let commonSuffixLength = 0;
-                  while (
-                    commonSuffixLength < (originalLines.length - commonPrefixLength) &&
-                    commonSuffixLength < (modifiedLines.length - commonPrefixLength) &&
-                    originalLines[originalLines.length - 1 - commonSuffixLength] === 
-                    modifiedLines[modifiedLines.length - 1 - commonSuffixLength]
-                  ) {
-                    commonSuffixLength++;
-                  }
+                  const diffResult = Diff.diffLines(formattedOriginal, formattedModified);
 
-                  // Add unchanged prefix
-                  for (let i = 0; i < commonPrefixLength; i++) {
-                    diffLines.push({ 
-                      type: 'unchanged', 
-                      content: originalLines[i], 
-                      lineNum: i + 1 
+                  type LineData = { type: 'removed' | 'added' | 'unchanged' | 'ellipsis'; content: string; origLineNum?: number; modLineNum?: number };
+                  const allLines: LineData[] = [];
+                  let origLineNum = 1;
+                  let modLineNum = 1;
+
+                  diffResult.forEach(part => {
+                    const lines = part.value.split('\n');
+                    if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+
+                    lines.forEach(line => {
+                      if (part.added) {
+                        allLines.push({ type: 'added', content: line, modLineNum: modLineNum++ });
+                      } else if (part.removed) {
+                        allLines.push({ type: 'removed', content: line, origLineNum: origLineNum++ });
+                      } else {
+                        allLines.push({ type: 'unchanged', content: line, origLineNum: origLineNum++, modLineNum: modLineNum++ });
+                      }
                     });
-                  }
+                  });
 
-                  // Add removed lines (from original, not in common parts)
-                  for (let i = commonPrefixLength; i < originalLines.length - commonSuffixLength; i++) {
-                    diffLines.push({ 
-                      type: 'removed', 
-                      content: originalLines[i], 
-                      lineNum: i + 1 
-                    });
-                  }
+                  // Show all lines without hiding unchanged ones
 
-                  // Add added lines (from modified, not in common parts)
-                  for (let i = commonPrefixLength; i < modifiedLines.length - commonSuffixLength; i++) {
-                    diffLines.push({ 
-                      type: 'added', 
-                      content: modifiedLines[i], 
-                      lineNum: i + 1 
-                    });
-                  }
+                  // Helper to render a single line
+                  const renderDiffLine = (line: LineData, idx: number) => {
+                    return (
+                      <div
+                        key={idx}
+                        className={cn(
+                          'flex items-start px-2 py-0.5 leading-relaxed hover:bg-black/5 dark:hover:bg-white/5',
+                          line.type === 'removed' && 'bg-red-50 dark:bg-red-900/20 text-red-900 dark:text-red-200',
+                          line.type === 'added' && 'bg-green-50 dark:bg-green-900/20 text-green-900 dark:text-green-200',
+                          line.type === 'unchanged' && 'text-text-main-DEFAULT dark:text-text-main-dark'
+                        )}
+                      >
+                        {/* Old Line Number */}
+                        <span className={cn(
+                          'inline-block w-8 flex-shrink-0 text-right select-none opacity-50 text-xs font-mono mt-1',
+                          line.type === 'removed' && 'text-red-700 dark:text-red-400 font-medium',
+                          line.type === 'added' && 'text-transparent select-none' // hide old line num if added
+                        )}>
+                          {line.origLineNum || ' '}
+                        </span>
+                        
+                        {/* New Line Number */}
+                        <span className={cn(
+                          'inline-block w-8 flex-shrink-0 text-right select-none opacity-50 text-xs font-mono border-r border-gray-300 dark:border-gray-700 mr-3 pr-2 ml-2 mt-1',
+                          line.type === 'added' && 'text-green-700 dark:text-green-400 font-medium',
+                          line.type === 'removed' && 'text-transparent select-none' // hide new line num if removed
+                        )}>
+                          {line.modLineNum || ' '}
+                        </span>
 
-                  // Add unchanged suffix
-                  const suffixStartOrig = originalLines.length - commonSuffixLength;
-                  for (let i = 0; i < commonSuffixLength; i++) {
-                    diffLines.push({ 
-                      type: 'unchanged', 
-                      content: originalLines[suffixStartOrig + i], 
-                      lineNum: suffixStartOrig + i + 1 
-                    });
-                  }
+                        {/* Diff marker */}
+                        <span className={cn(
+                          "inline-block w-4 flex-shrink-0 font-bold text-center mt-0.5",
+                          line.type === 'removed' ? 'text-red-600 dark:text-red-400' : line.type === 'added' ? 'text-green-600 dark:text-green-400' : 'text-transparent select-none'
+                        )}>
+                          {line.type === 'removed' ? '−' : line.type === 'added' ? '+' : ' '}
+                        </span>
 
-                  return diffLines.map((line, idx) => (
-                    <div
-                      key={idx}
-                      className={cn(
-                        'flex items-start px-4 py-1 leading-relaxed',
-                        line.type === 'removed' && 'bg-red-50 dark:bg-red-900/20 text-red-900 dark:text-red-200',
-                        line.type === 'added' && 'bg-green-50 dark:bg-green-900/20 text-green-900 dark:text-green-200',
-                        line.type === 'unchanged' && 'text-text-main-DEFAULT dark:text-text-main-dark'
-                      )}
-                    >
-                      {/* Line number */}
-                      <span className={cn(
-                        'inline-block w-12 flex-shrink-0 text-right mr-4 select-none opacity-50 text-xs',
-                        line.type === 'removed' && 'text-red-700 dark:text-red-400',
-                        line.type === 'added' && 'text-green-700 dark:text-green-400',
-                        line.type === 'unchanged' && 'text-text-muted-DEFAULT dark:text-text-muted-dark'
-                      )}>
-                        {line.type !== 'unchanged' ? line.lineNum || '' : ''}
-                      </span>
+                        {/* Code content */}
+                        <span className="flex-1 whitespace-pre-wrap break-all font-mono text-sm leading-6">
+                          {line.content || ' '}
+                        </span>
+                      </div>
+                    );
+                  };
 
-                      {/* Diff marker */}
-                      <span className="inline-block w-4 flex-shrink-0 mr-2 font-bold">
-                        {line.type === 'removed' ? '−' : line.type === 'added' ? '+' : ' '}
-                      </span>
-
-                      {/* Code content */}
-                      <span className="flex-1 whitespace-pre-wrap break-all">
-                        {line.content || ' '}
-                      </span>
-                    </div>
-                  ));
+                  return allLines.map((line, idx) => renderDiffLine(line, idx));
                 })()}
               </div>
             </div>
@@ -315,7 +326,7 @@ export function OptimizationModal({
         </div>
 
         {/* Compact Footer */}
-        <div className="border-t border-gray-200 dark:border-border-dark bg-surface-highlight-DEFAULT/30 dark:bg-surface-highlight-dark/30 px-6 py-4">
+        <div className="border-t border-gray-200 dark:border-border-dark bg-surface-highlight-DEFAULT/30 dark:bg-surface-highlight-dark/30 px-6 py-4 shrink-0">
           {/* Action Buttons */}
           <div className="flex items-center justify-end gap-3">
             <button

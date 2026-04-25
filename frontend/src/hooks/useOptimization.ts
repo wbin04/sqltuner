@@ -2,7 +2,7 @@
  * useOptimization Hook
  * Manages SQL optimization analysis lifecycle
  */
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { sqlService } from '../services/sqlService';
 import { OptimizationAnalysis } from '../types/optimization';
@@ -22,6 +22,7 @@ interface UseOptimizationReturn {
   runAnalysis: () => Promise<void>;
   applyFix: () => Promise<void>;
   resetAnalysis: () => void;
+  markAsOptimized: (sql: string) => void;
 }
 
 export function useOptimization({
@@ -32,6 +33,8 @@ export function useOptimization({
 }: UseOptimizationProps): UseOptimizationReturn {
   const [analysis, setAnalysis] = useState<OptimizationAnalysis | null>(null);
   const [error, setError] = useState<Error | null>(null);
+  // Track the last optimized SQL to prevent redundant optimize calls
+  const lastOptimizedSqlRef = useRef<string | null>(null);
 
   // Optimize SQL mutation
   const optimizeMutation = useMutation({
@@ -95,8 +98,27 @@ export function useOptimization({
       return;
     }
 
+    // Idempotency guard: if this SQL was already optimized, show "no changes needed"
+    const normalizedCurrent = originalSql.trim().replace(/\s+/g, ' ').toLowerCase();
+    const normalizedLast = lastOptimizedSqlRef.current?.trim().replace(/\s+/g, ' ').toLowerCase();
+
+    if (normalizedLast && normalizedCurrent === normalizedLast) {
+      setAnalysis({
+        original_cost: null,
+        bottlenecks: [],
+        optimized_sql: originalSql,
+        explanation: 'This query has already been optimized. No further changes needed.',
+        rewrite_type: 'none',
+        changes_made: [],
+        stats_comparison: undefined,
+      });
+      setError(null);
+      onSuccess?.('Query is already optimized!');
+      return;
+    }
+
     await optimizeMutation.mutateAsync();
-  }, [originalSql, optimizeMutation, onError]);
+  }, [originalSql, optimizeMutation, onError, onSuccess]);
 
   // Apply the index recommendation
   const applyFix = useCallback(async () => {
@@ -107,6 +129,11 @@ export function useOptimization({
 
     await applyIndexMutation.mutateAsync();
   }, [analysis, applyIndexMutation, onError]);
+
+  // Mark a SQL string as "already optimized" to prevent re-optimization
+  const markAsOptimized = useCallback((sql: string) => {
+    lastOptimizedSqlRef.current = sql;
+  }, []);
 
   // Reset analysis state
   const resetAnalysis = useCallback(() => {
@@ -122,5 +149,6 @@ export function useOptimization({
     runAnalysis,
     applyFix,
     resetAnalysis,
+    markAsOptimized,
   };
 }

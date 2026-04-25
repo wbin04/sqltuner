@@ -1,19 +1,13 @@
 import json
-import asyncio
 import logging
 import re
 import time
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-import httpx
 import sqlglot
 from app.core.config import settings
 from app.core.constants import (APP_CONFIG_KEY_LLM_URL,
-                                LLM_HTTP_CONNECT_TIMEOUT,
-                                LLM_HTTP_POOL_TIMEOUT, LLM_HTTP_WRITE_TIMEOUT,
                                 LLM_REQUEST_TIMEOUT, LLM_URL_CACHE_TTL)
-from app.core.exceptions import LLMServiceError
 from app.core.prompts import (SCHEMA_CLARIFICATION_SYSTEM_PROMPT,
                               SCHEMA_GENERATION_SYSTEM_PROMPT,
                               SCHEMA_PHASE1_SYSTEM_PROMPT,
@@ -25,6 +19,8 @@ from app.core.prompts import (SCHEMA_CLARIFICATION_SYSTEM_PROMPT,
                               get_sql_optimization_prompt)
 
 from app.repositories.config_repository import config_repository
+from app.services.llm_backends import OllamaBackend, GroqBackend
+from app.services.llm_backends.base import BaseLLMBackend
 from sqlglot import exp as sqlglot_exp
 
 
@@ -34,47 +30,34 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class OllamaPayload:
-    model: str
-    prompt: str
-    system_prompt: Optional[str] = None
-    temperature: float = 0.1
-    num_ctx: int = 4096
-    num_predict: int = 1024
-    json_mode: bool = False
-
-    def to_dict(self) -> Dict[str, Any]:
-        payload = {
-            "model": self.model,
-            "prompt": self.prompt,
-            "stream": False,
-            "keep_alive": "60m",
-            "options": {
-                "temperature": self.temperature,
-                "num_ctx": self.num_ctx,
-                "num_predict": self.num_predict,
-            },
-        }
-
-        if self.system_prompt:
-            payload["system"] = self.system_prompt
-
-        if self.json_mode:
-            payload["format"] = "json"
-
-        return payload
-
-
 class LLMService:
     def __init__(self) -> None:
         self.base_url: str = settings.OLLAMA_BASE_URL
-        self.coder_model: str = settings.MODEL_NAME
-        self.chat_model: str = settings.MODEL_CHAT_NAME
         self.timeout: int = LLM_REQUEST_TIMEOUT
         self._url_cache: Optional[str] = None
         self._cache_timestamp: float = 0
         self._cache_ttl: int = LLM_URL_CACHE_TTL
+
+        # Select backend + models based on LLM_SERVICE config
+        service = settings.LLM_SERVICE.lower()
+        if service == "groq":
+            self._backend: BaseLLMBackend = GroqBackend(
+                api_key=settings.GROQ_API_KEY
+            )
+            self.coder_model: str = settings.GROQ_MODEL_NAME
+            self.chat_model: str = settings.GROQ_CHAT_MODEL_NAME
+            logger.info(
+                "[LLM] Using Groq backend — coder=%s, chat=%s",
+                self.coder_model, self.chat_model,
+            )
+        else:
+            self._backend = OllamaBackend(base_url=self.base_url)
+            self.coder_model = settings.MODEL_NAME
+            self.chat_model = settings.MODEL_CHAT_NAME
+            logger.info(
+                "[LLM] Using Ollama backend — coder=%s, chat=%s",
+                self.coder_model, self.chat_model,
+            )
 
     @staticmethod
     def _extract_json_object(text: str) -> str:
@@ -147,30 +130,17 @@ class LLMService:
         json_mode: bool = True,
         num_ctx: int = 2048,
     ) -> str:
-        url = self._build_api_url()
-        payload_config = OllamaPayload(
+        return await self._backend.call(
             model=self.chat_model,
             prompt=prompt,
             system_prompt=system_prompt,
             temperature=0.1,
+            max_tokens=max_tokens,
             num_ctx=num_ctx,
-            num_predict=max_tokens,
             json_mode=json_mode,
+            keep_alive="120m",
+            read_timeout=read_timeout,
         )
-        payload = payload_config.to_dict()
-        payload["keep_alive"] = "120m"
-
-        timeout_config = httpx.Timeout(
-            connect=LLM_HTTP_CONNECT_TIMEOUT,
-            read=read_timeout,
-            write=LLM_HTTP_WRITE_TIMEOUT,
-            pool=LLM_HTTP_POOL_TIMEOUT,
-        )
-
-        async with httpx.AsyncClient(timeout=timeout_config) as client:
-            response = await client.post(url, json=payload)
-            response.raise_for_status()
-            return response.json().get("response", "").strip()
 
     async def generate_schema_two_phase(
         self,
@@ -353,6 +323,9 @@ class LLMService:
             self.base_url = new_url.strip().rstrip('/')
             self._url_cache = self.base_url
             self._cache_timestamp = time.time()
+            # Propagate to Ollama backend if active
+            if isinstance(self._backend, OllamaBackend):
+                self._backend.base_url = self.base_url
             logger.info(f"[LLM] Base URL updated to: {self.base_url}")
 
     async def fetch_and_update_url_from_db(
@@ -379,64 +352,6 @@ class LLMService:
                 f"using default"
             )
 
-    def _create_timeout_config(self) -> httpx.Timeout:
-        return httpx.Timeout(
-            connect=LLM_HTTP_CONNECT_TIMEOUT,
-            read=float(self.timeout),
-            write=LLM_HTTP_WRITE_TIMEOUT,
-            pool=LLM_HTTP_POOL_TIMEOUT
-        )
-
-    def _build_api_url(self, endpoint: str = "generate") -> str:
-        return f"{self.base_url}/api/{endpoint}"
-
-    async def _make_ollama_request(
-        self, payload: Dict[str, Any], url: str
-    ) -> str:
-        timeout_config = self._create_timeout_config()
-
-        async with httpx.AsyncClient(timeout=timeout_config) as client:
-            try:
-                response = await client.post(url, json=payload)
-                response.raise_for_status()
-                result = response.json().get("response", "").strip()
-                logger.info(
-                    f"[LLM] Ollama response received, length={len(result)}"
-                )
-                return result
-
-            except httpx.ConnectError as e:
-                error_msg = (
-                    f"Cannot connect to Ollama at {url}. Is Ollama running? "
-                    f"Error: {str(e)}"
-                )
-                logger.error(f"[LLM] {error_msg}")
-                raise LLMServiceError(f"Ollama Connection Error: {error_msg}")
-
-            except httpx.TimeoutException as e:
-                error_msg = (
-                    f"Ollama request timed out after {self.timeout}s. "
-                    f"Error: {str(e)}"
-                )
-                logger.error(f"[LLM] {error_msg}")
-                raise LLMServiceError(f"Ollama Timeout Error: {error_msg}")
-
-            except httpx.HTTPStatusError as e:
-                error_msg = (
-                    f"Ollama returned HTTP {e.response.status_code}: "
-                    f"{e.response.text}"
-                )
-                logger.error(f"[LLM] {error_msg}")
-                raise LLMServiceError(f"Ollama HTTP Error: {error_msg}")
-
-            except Exception as e:
-                error_msg = (
-                    f"Unexpected error calling Ollama: {type(e).__name__}: "
-                    f"{str(e)}"
-                )
-                logger.error(f"[LLM] {error_msg}")
-                raise LLMServiceError(f"Ollama API Error: {error_msg}")
-
     async def _call_ollama(
         self,
         model: str,
@@ -446,23 +361,14 @@ class LLMService:
         max_tokens: Optional[int] = None,
         json_mode: bool = False,
     ) -> str:
-        url = self._build_api_url()
-
-        payload_config = OllamaPayload(
+        return await self._backend.call(
             model=model,
             prompt=prompt,
             system_prompt=system_prompt,
             temperature=temperature,
-            num_predict=max_tokens or 512,
+            max_tokens=max_tokens or 512,
             json_mode=json_mode,
         )
-
-        if json_mode:
-            logger.info("[LLM] JSON mode enabled")
-
-        logger.info(f"[LLM] Calling Ollama at {url} with model={model}")
-
-        return await self._make_ollama_request(payload_config.to_dict(), url)
 
     async def generate(
         self,
@@ -487,26 +393,19 @@ class LLMService:
         temperature: float = 0.3,
         max_tokens: int = 2048
     ) -> str:
-        url = self._build_api_url()
-
-        payload_config = OllamaPayload(
+        logger.info(
+            "[CHAT] Calling LLM with model=%s, predict=%s",
+            self.chat_model, max_tokens,
+        )
+        return await self._backend.call(
             model=self.chat_model,
             prompt=prompt,
             system_prompt=system_prompt,
             temperature=temperature,
+            max_tokens=max_tokens,
             num_ctx=2048,
-            num_predict=max_tokens,
+            keep_alive="120m",
         )
-
-        payload = payload_config.to_dict()
-        payload["keep_alive"] = "120m"
-
-        logger.info(
-            f"[CHAT] Calling Ollama with ctx={payload['options']['num_ctx']}, "
-            f"predict={max_tokens}"
-        )
-
-        return await self._make_ollama_request(payload, url)
 
     async def chat_schema_design(
         self,
@@ -720,22 +619,21 @@ class LLMService:
         sql_query: str,
         schema_text: str,
         detected_issues: str = "",
-    ) -> OllamaPayload:
+    ) -> Dict[str, Any]:
         user_prompt = get_sql_optimization_prompt(
             sql_query=sql_query,
             schema_text=schema_text,
             detected_issues=detected_issues,
         )
-
-        return OllamaPayload(
-            model=self.coder_model,
-            prompt=user_prompt,
-            system_prompt=SQL_OPTIMIZATION_SYSTEM_PROMPT,
-            temperature=0.1,
-            num_ctx=2048,
-            num_predict=2048,
-            json_mode=True,
-        )
+        return {
+            "model": self.coder_model,
+            "prompt": user_prompt,
+            "system_prompt": SQL_OPTIMIZATION_SYSTEM_PROMPT,
+            "temperature": 0.1,
+            "num_ctx": 2048,
+            "max_tokens": 2048,
+            "json_mode": True,
+        }
 
     def _clean_json_response(self, raw_response: str) -> str:
         return re.sub(r"```json|```", "", raw_response).strip()
@@ -774,10 +672,16 @@ class LLMService:
             }
 
     def _validate_index_suggestion(
-        self, index_suggestion: Optional[str], used_tables: List[str]
+        self, index_suggestion: Any, used_tables: List[str]
     ) -> tuple[Optional[str], str]:
         if not index_suggestion or not used_tables:
-            return index_suggestion, ""
+            return None, ""
+
+        # Handle cases where the LLM returns an array of index suggestions
+        if isinstance(index_suggestion, list):
+            index_suggestion = "\n".join(str(idx) for idx in index_suggestion)
+        elif not isinstance(index_suggestion, str):
+            index_suggestion = str(index_suggestion)
 
         index_table_pattern = r"\bON\s+([a-zA-Z0-9_]+)"
         index_table_matches = re.findall(
@@ -819,32 +723,36 @@ class LLMService:
                 for i in static_issues
             )
 
-        payload_config = self._create_optimization_payload(
+        opt_payload = self._create_optimization_payload(
             sql_query,
             schema_text,
             issues_text,
         )
 
-        system_len = len(payload_config.system_prompt or "")
-        prompt_len = len(payload_config.prompt)
-        prompt_size = system_len + prompt_len
-        logger.info(f"[OPTIMIZE] Total prompt: {prompt_size:,} bytes")
+        system_len = len(opt_payload["system_prompt"] or "")
+        prompt_len = len(opt_payload["prompt"])
+        logger.info(f"[OPTIMIZE] Total prompt: {system_len + prompt_len:,} bytes")
 
         llm_start = time.time()
-        url = self._build_api_url()
-        payload = payload_config.to_dict()
-        payload["keep_alive"] = "120m"
 
         logger.info(
-            "[OPTIMIZE] Calling Ollama with ctx=%s, predict=%s",
-            payload["options"]["num_ctx"],
-            payload["options"]["num_predict"],
+            "[OPTIMIZE] Calling LLM with model=%s, max_tokens=%s",
+            opt_payload["model"], opt_payload["max_tokens"],
         )
 
         try:
-            raw_response = await self._make_ollama_request(payload, url)
+            raw_response = await self._backend.call(
+                model=opt_payload["model"],
+                prompt=opt_payload["prompt"],
+                system_prompt=opt_payload["system_prompt"],
+                temperature=opt_payload["temperature"],
+                max_tokens=opt_payload["max_tokens"],
+                num_ctx=opt_payload["num_ctx"],
+                json_mode=opt_payload["json_mode"],
+                keep_alive="120m",
+            )
         except Exception as exc:
-            logger.error(f"[OPTIMIZE] Ollama API error: {str(exc)}")
+            logger.error(f"[OPTIMIZE] LLM API error: {str(exc)}")
             raise
 
         llm_duration = time.time() - llm_start
@@ -859,7 +767,7 @@ class LLMService:
             used_tables
         )
 
-        reasoning = "Analyzed with Qwen model" + rejection_note
+        reasoning = f"Analyzed with {self.coder_model}" + rejection_note
 
         return {
             "optimized_sql": parsed_result["optimized_sql"].strip(),
@@ -883,21 +791,16 @@ class LLMService:
     ) -> Dict[str, Any]:
         prompt = get_schema_clarification_prompt(user_description)
 
-        payload_config = OllamaPayload(
-            model=self.chat_model,
-            prompt=prompt,
-            system_prompt=SCHEMA_CLARIFICATION_SYSTEM_PROMPT,
-            temperature=0.2,
-            num_ctx=2048,
-            num_predict=512,
-            json_mode=True,
-        )
-
-        url = self._build_api_url()
-        payload = payload_config.to_dict()
-
         try:
-            raw = await self._make_ollama_request(payload, url)
+            raw = await self._backend.call(
+                model=self.chat_model,
+                prompt=prompt,
+                system_prompt=SCHEMA_CLARIFICATION_SYSTEM_PROMPT,
+                temperature=0.2,
+                max_tokens=512,
+                num_ctx=2048,
+                json_mode=True,
+            )
             clean = re.sub(r"```json|```", "", raw).strip()
             result = json.loads(self._extract_json_object(clean))
             logger.info(
@@ -917,20 +820,6 @@ class LLMService:
     ) -> Dict[str, Any]:
         prompt = get_schema_generation_prompt(user_description, clarifications)
 
-        payload_config = OllamaPayload(
-            model=self.chat_model,
-            prompt=prompt,
-            system_prompt=SCHEMA_GENERATION_SYSTEM_PROMPT,
-            temperature=0.1,
-            num_ctx=3072,
-            num_predict=2500,
-            json_mode=True,
-        )
-
-        url = self._build_api_url()
-        payload = payload_config.to_dict()
-        payload["keep_alive"] = "120m"
-
         logger.info(
             "[SCHEMA-GEN] Generating schema for: %s...",
             user_description[:80],
@@ -938,7 +827,16 @@ class LLMService:
 
         raw = ""
         try:
-            raw = await self._make_ollama_request(payload, url)
+            raw = await self._backend.call(
+                model=self.chat_model,
+                prompt=prompt,
+                system_prompt=SCHEMA_GENERATION_SYSTEM_PROMPT,
+                temperature=0.1,
+                max_tokens=2500,
+                num_ctx=3072,
+                json_mode=True,
+                keep_alive="120m",
+            )
             clean = re.sub(r"```(?:json)?\s*", "", raw)
             clean = re.sub(r"```", "", clean).strip()
 
@@ -1043,44 +941,19 @@ class LLMService:
         }
 
     async def check_health(self) -> bool:
-        try:
-            url = self._build_api_url("tags")
-            async with httpx.AsyncClient(timeout=10) as client:
-                response = await client.get(url)
-                response.raise_for_status()
-                data = response.json()
-
-                models = data.get("models", [])
-                model_names = [m.get("name") for m in models]
-                has_coder = self.coder_model in model_names
-                has_chat = self.chat_model in model_names
-                return has_coder and has_chat
-
-        except Exception:
-            return False
+        return await self._backend.check_health(
+            coder_model=self.coder_model,
+            chat_model=self.chat_model,
+        )
 
     async def warmup_models(self) -> None:
         try:
             logger.info("[LLM-WARMUP] Starting model warm-up...")
-
-            await self.chat(
-                prompt="Hi",
-                system_prompt="You are a SQL expert",
-                max_tokens=50
+            await self._backend.warmup(
+                coder_model=self.coder_model,
+                chat_model=self.chat_model,
             )
-            logger.info(
-                f"[LLM-WARMUP] Warmed up chat model: {self.chat_model}"
-            )
-
-            await self.optimize_sql(
-                sql_query="SELECT * FROM test", db_schema='{"tables": []}'
-            )
-            logger.info(
-                f"[LLM-WARMUP] Warmed up coder model: {self.coder_model}"
-            )
-
             logger.info("[LLM-WARMUP] Model warm-up completed successfully")
-
         except Exception as e:
             logger.warning(f"[LLM-WARMUP] Failed to warm up models: {str(e)}")
 
