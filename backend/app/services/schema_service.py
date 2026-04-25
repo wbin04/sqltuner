@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -16,11 +17,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 
+# True chỉ khi backend chạy bên trong Docker container
+_RUNNING_IN_DOCKER = os.environ.get("RUNNING_IN_DOCKER", "false").lower() == "true"
+
+
 class SchemaService:
 
     @staticmethod
     def _resolve_docker_host(host: str) -> str:
-        if host in LOCALHOSTS:
+        """Chuyển localhost → host.docker.internal CHỈ khi chạy trong Docker."""
+        if _RUNNING_IN_DOCKER and host in LOCALHOSTS:
             return 'host.docker.internal'
         return host
 
