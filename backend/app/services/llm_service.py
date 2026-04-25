@@ -13,10 +13,12 @@ from app.core.prompts import (SCHEMA_CLARIFICATION_SYSTEM_PROMPT,
                               SCHEMA_PHASE1_SYSTEM_PROMPT,
                               SCHEMA_PHASE2_SYSTEM_PROMPT,
                               SQL_OPTIMIZATION_SYSTEM_PROMPT,
+                              SQL_VERIFICATION_SYSTEM_PROMPT,
                               get_schema_clarification_prompt,
                               get_schema_generation_prompt,
                               get_sql_explanation_prompt,
-                              get_sql_optimization_prompt)
+                              get_sql_optimization_prompt,
+                              get_sql_verification_prompt)
 
 from app.repositories.config_repository import config_repository
 from app.services.llm_backends import OllamaBackend, GroqBackend
@@ -723,20 +725,77 @@ class LLMService:
                 for i in static_issues
             )
 
+        # ── Pass 1: Rewrite ──
+        logger.info("[OPTIMIZE] === Pass 1: Rewrite ===")
+        pass1_result = await self._run_optimization_pass(
+            sql_query, schema_text, issues_text, used_tables
+        )
+
+        pass1_sql = pass1_result["optimized_sql"].strip()
+        pass1_changed = pass1_sql.lower().strip() != sql_query.lower().strip()
+
+        if not pass1_changed:
+            logger.info("[OPTIMIZE] Pass 1 made no changes — skipping Pass 2")
+            return pass1_result
+
+        # ── Pass 2: Verify & fix remaining issues ──
+        logger.info("[OPTIMIZE] === Pass 2: Verify ===")
+        pass2_result = await self._run_verification_pass(
+            pass1_sql, sql_query, schema_text, used_tables
+        )
+
+        # Merge results: use Pass 2 SQL but combine changes from both passes
+        all_changes = list(pass1_result.get("changes_made", []))
+        pass2_changes = pass2_result.get("changes_made", [])
+        if pass2_changes:
+            all_changes.extend(
+                f"[Pass 2] {c}" for c in pass2_changes
+            )
+
+        # Use the better index suggestion (prefer Pass 2 if it produced one)
+        final_index = (
+            pass2_result.get("index_suggestion")
+            or pass1_result.get("index_suggestion")
+        )
+
+        # Combine explanations
+        pass1_explanation = pass1_result.get("explanation", "").strip()
+        pass2_explanation = pass2_result.get("explanation", "").strip()
+        if pass2_explanation and pass2_explanation != pass1_explanation:
+            combined_explanation = f"{pass1_explanation} | Verification: {pass2_explanation}"
+        else:
+            combined_explanation = pass1_explanation
+
+        return {
+            "optimized_sql": pass2_result["optimized_sql"].strip(),
+            "index_suggestion": final_index,
+            "rewrite_type": pass2_result.get("rewrite_type")
+                if pass2_result.get("rewrite_type") != "none"
+                else pass1_result.get("rewrite_type", "none"),
+            "changes_made": all_changes,
+            "explanation": combined_explanation,
+            "reasoning": f"2-pass analysis with {self.coder_model}",
+        }
+
+    async def _run_optimization_pass(
+        self,
+        sql_query: str,
+        schema_text: str,
+        issues_text: str,
+        used_tables: List[str],
+    ) -> Dict[str, Any]:
+        """Pass 1: Rewrite SQL based on the ANALYSIS CHECKLIST."""
         opt_payload = self._create_optimization_payload(
-            sql_query,
-            schema_text,
-            issues_text,
+            sql_query, schema_text, issues_text,
         )
 
         system_len = len(opt_payload["system_prompt"] or "")
         prompt_len = len(opt_payload["prompt"])
-        logger.info(f"[OPTIMIZE] Total prompt: {system_len + prompt_len:,} bytes")
+        logger.info(f"[OPTIMIZE-P1] Prompt: {system_len + prompt_len:,} bytes")
 
         llm_start = time.time()
-
         logger.info(
-            "[OPTIMIZE] Calling LLM with model=%s, max_tokens=%s",
+            "[OPTIMIZE-P1] Calling LLM model=%s, max_tokens=%s",
             opt_payload["model"], opt_payload["max_tokens"],
         )
 
@@ -752,30 +811,85 @@ class LLMService:
                 keep_alive="120m",
             )
         except Exception as exc:
-            logger.error(f"[OPTIMIZE] LLM API error: {str(exc)}")
+            logger.error(f"[OPTIMIZE-P1] LLM API error: {str(exc)}")
             raise
 
-        llm_duration = time.time() - llm_start
-        logger.info(f"[OPTIMIZE] LLM took: {llm_duration:.2f}s")
-        logger.info(f"[OPTIMIZE] Raw LLM response: {raw_response}")
+        logger.info(f"[OPTIMIZE-P1] LLM took: {time.time() - llm_start:.2f}s")
+        logger.info(f"[OPTIMIZE-P1] Raw response: {raw_response}")
 
-        parsed_result = self._parse_optimization_response(
-            raw_response, sql_query
-        )
+        parsed = self._parse_optimization_response(raw_response, sql_query)
         index_suggestion, rejection_note = self._validate_index_suggestion(
-            parsed_result["index_suggestion"],
-            used_tables
+            parsed["index_suggestion"], used_tables
         )
-
-        reasoning = f"Analyzed with {self.coder_model}" + rejection_note
+        if rejection_note:
+            logger.info(f"[OPTIMIZE-P1] Index rejection: {rejection_note}")
 
         return {
-            "optimized_sql": parsed_result["optimized_sql"].strip(),
+            "optimized_sql": parsed["optimized_sql"].strip(),
             "index_suggestion": index_suggestion,
-            "rewrite_type": parsed_result.get("rewrite_type", "none"),
-            "changes_made": parsed_result.get("changes_made", []),
-            "explanation": parsed_result["explanation"].strip(),
-            "reasoning": reasoning
+            "rewrite_type": parsed.get("rewrite_type", "none"),
+            "changes_made": parsed.get("changes_made", []),
+            "explanation": parsed.get("explanation", "").strip(),
+        }
+
+    async def _run_verification_pass(
+        self,
+        optimized_sql: str,
+        original_sql: str,
+        schema_text: str,
+        used_tables: List[str],
+    ) -> Dict[str, Any]:
+        """Pass 2: Verify rewritten SQL against checklist, fix remaining issues."""
+        verify_prompt = get_sql_verification_prompt(
+            optimized_sql=optimized_sql,
+            original_sql=original_sql,
+            schema_text=schema_text,
+        )
+
+        prompt_len = len(verify_prompt) + len(SQL_VERIFICATION_SYSTEM_PROMPT)
+        logger.info(f"[OPTIMIZE-P2] Prompt: {prompt_len:,} bytes")
+
+        llm_start = time.time()
+        logger.info("[OPTIMIZE-P2] Calling LLM for verification...")
+
+        try:
+            raw_response = await self._backend.call(
+                model=self.coder_model,
+                prompt=verify_prompt,
+                system_prompt=SQL_VERIFICATION_SYSTEM_PROMPT,
+                temperature=0.1,
+                max_tokens=2048,
+                num_ctx=2048,
+                json_mode=True,
+                keep_alive="120m",
+            )
+        except Exception as exc:
+            logger.warning(f"[OPTIMIZE-P2] Verification LLM failed: {exc}")
+            # If verification fails, return Pass 1 result unchanged
+            return {
+                "optimized_sql": optimized_sql,
+                "index_suggestion": None,
+                "rewrite_type": "none",
+                "changes_made": [],
+                "explanation": "Verification pass skipped due to LLM error",
+            }
+
+        logger.info(f"[OPTIMIZE-P2] LLM took: {time.time() - llm_start:.2f}s")
+        logger.info(f"[OPTIMIZE-P2] Raw response: {raw_response}")
+
+        parsed = self._parse_optimization_response(raw_response, optimized_sql)
+        index_suggestion, rejection_note = self._validate_index_suggestion(
+            parsed["index_suggestion"], used_tables
+        )
+        if rejection_note:
+            logger.info(f"[OPTIMIZE-P2] Index rejection: {rejection_note}")
+
+        return {
+            "optimized_sql": parsed["optimized_sql"].strip(),
+            "index_suggestion": index_suggestion,
+            "rewrite_type": parsed.get("rewrite_type", "none"),
+            "changes_made": parsed.get("changes_made", []),
+            "explanation": parsed.get("explanation", "").strip(),
         }
 
     async def explain_query(self, sql_query: str) -> str:
