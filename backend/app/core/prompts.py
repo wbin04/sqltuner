@@ -718,6 +718,12 @@ If there is a conflict between what the user asks in text and the SQL logic prov
    [THE FINAL CORRECTED SQL QUERY IN {dialect.upper()} SYNTAX]
    ```
 
+### DATA TYPES & SAMPLE DATA (CRITICAL):
+- The schema provided below includes actual sample data for each table.
+- DO NOT rely solely on column names or declared types to infer the data format.
+- Look at the `Sample values` to see how data is actually stored (e.g., if a VARCHAR column contains "Còn hàng" or "Hết hàng", use string comparison. If a BOOLEAN contains "1" or "0", cast it appropriately).
+- Always format your query conditions to match the actual sample data.
+
 ### CONSTRAINTS:
 - **SPEED IS PRIORITY.** Keep text under 40 words.
 - **ALWAYS** include the SQL block at the end.
@@ -762,6 +768,12 @@ def format_schema_for_llm(schema_dict: dict) -> str:
                 else:
                     cols_str = str(idx_cols)
                 lines.append(f"  - {idx_name}({cols_str})")
+
+        sample_data = table.get("sample_data", [])
+        if sample_data:
+            lines.append(f"Sample values (actual data from DB, up to 5 rows):")
+            for row in sample_data[:5]:
+                lines.append(f"  {row}")
 
     return "\n".join(lines)
 
@@ -926,4 +938,45 @@ Your task is to generate optimized, runnable SQL queries based on the user's req
 2. You can also provide a brief explanation of the query before or after the markdown block.
 3. Ensure the syntax strictly follows {dialect} conventions.
 4. Use the exact table and column names provided in the schema.
+5. Pay close attention to the Sample Values in the schema (if provided). Use them to understand the actual data format (e.g. if a column contains "Còn hàng", compare as string; if boolean contains "1", use that).
+"""
+
+SQL_FIX_SYSTEM_PROMPT = """
+You are a SQL debugging expert for {dialect}.
+Your task is to fix a SQL query that failed during execution.
+
+CRITICAL RULES:
+- Read the error message carefully to understand the root cause
+- Read the sample data carefully — actual column values reveal the true data type/format
+- DO NOT assume data types from column names. Always verify from sample data.
+- If a column is declared VARCHAR but sample shows "Còn hàng"/"Hết hàng", compare as string
+- If a column is declared BOOLEAN but sample shows "1"/"0", cast appropriately
+- Fix ONLY what the error requires — do not rewrite unrelated parts of the query
+- Always output the fixed SQL in a ```sql code block
+- After the code block, explain in 1-2 sentences what was wrong and what you changed
+"""
+
+def get_sql_fix_system_prompt(dialect: str) -> str:
+    return SQL_FIX_SYSTEM_PROMPT.format(dialect=dialect)
+
+
+def get_sql_fix_prompt(
+    original_sql: str,
+    error_message: str,
+    schema_with_samples: str,
+    user_hint: str = "",
+) -> str:
+    hint_section = f"\nUser hint: {user_hint}\n" if user_hint.strip() else ""
+    return f"""SQL that failed:
+```sql
+{original_sql}
+```
+
+Execution error:
+{error_message}
+
+{hint_section}
+{schema_with_samples}
+
+Fix the SQL based on the error and actual sample data above.
 """

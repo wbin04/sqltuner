@@ -55,8 +55,8 @@ export function EditorPage() {
   }, [editorLogic.activeConversationId, conversationId, navigate, workspaceId]);
 
   // Handlers that integrate with editor logic
-  const handleSendMessage = (content: string, chatMode?: 'chat' | 'check' | 'gen') => {
-    editorLogic.handleSendMessage(content, chatMode);
+  const handleSendMessage = (content: string, chatMode?: 'chat' | 'check' | 'gen' | 'fix', errorMessage?: string, originalSql?: string) => {
+    editorLogic.handleSendMessage(content, chatMode, errorMessage, originalSql);
   };
 
   const handleExecute = async (sql: string) => {

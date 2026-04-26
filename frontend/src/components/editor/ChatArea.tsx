@@ -25,7 +25,7 @@ interface Message {
 
 interface ChatAreaProps {
   messages: Message[];
-  onSendMessage: (content: string, mode?: 'chat' | 'check' | 'gen') => void;
+  onSendMessage: (content: string, mode?: 'chat' | 'check' | 'gen' | 'fix', error_message?: string, original_sql?: string) => void;
   onExecute: (sql: string) => void;
   onOptimize: (sql: string) => void;
   onExplain: (sql: string) => void;
@@ -62,11 +62,12 @@ export function ChatArea({
   isOptimizing = false,
 }: ChatAreaProps) {
   const [internalInputValue, setInternalInputValue] = useState('');
-  const [chatMode, setChatMode] = useState<'chat' | 'check' | 'gen'>('chat');
+  const [chatMode, setChatMode] = useState<'chat' | 'check' | 'gen' | 'fix'>('chat');
+  const [errorInput, setErrorInput] = useState('');
   const handleExplainAction = (_messageId: string, sql: string) => {
     if (onExplain) onExplain(sql);
   };
-  
+
   // Use external input value if provided, otherwise use internal
   const inputValue = externalInputValue !== undefined ? externalInputValue : internalInputValue;
   const setInputValue = onUpdateInput || setInternalInputValue;
@@ -89,7 +90,7 @@ export function ChatArea({
       const maxHeight = 200; // Maximum height in pixels (about 8-10 lines)
       const scrollHeight = textarea.scrollHeight;
       textarea.style.height = Math.min(scrollHeight, maxHeight) + 'px';
-      
+
       // Add overflow if content exceeds max height
       textarea.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden';
     }
@@ -98,7 +99,13 @@ export function ChatArea({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (inputValue.trim() && !isLoading) {
-      onSendMessage(inputValue.trim(), chatMode);
+      if (chatMode === 'fix') {
+        const lastSql = [...messages].reverse().find(m => m.sql_generated)?.sql_generated;
+        onSendMessage(inputValue.trim(), 'fix', errorInput.trim() || undefined, lastSql);
+        setErrorInput('');
+      } else {
+        onSendMessage(inputValue.trim(), chatMode);
+      }
       setInputValue('');
     }
   };
@@ -197,7 +204,7 @@ export function ChatArea({
                           </p>
                         )}
                       </div>
-                      
+
                       {/* Timestamp Column on the right */}
                       <div className="text-[11px] text-text-muted-DEFAULT dark:text-text-muted-dark opacity-60 mb-2 whitespace-nowrap flex-shrink-0">
                         {format(new Date(message.created_at), 'HH:mm:ss')}
@@ -210,7 +217,7 @@ export function ChatArea({
                     <div className="max-w-3xl">
                       <ClarificationBlock
                         questions={pendingClarification.questions}
-                        onSubmit={onSubmitClarification || (() => {})}
+                        onSubmit={onSubmitClarification || (() => { })}
                         isLoading={isLoading}
                       />
                     </div>
@@ -250,7 +257,7 @@ export function ChatArea({
                     <div className="max-w-3xl">
                       <SchemaBlock
                         schema={message.schema_generated}
-                        onApplyToSandbox={onApplySchemaToSandbox || (() => {})}
+                        onApplyToSandbox={onApplySchemaToSandbox || (() => { })}
                         isSimulationWorkspace={isSimulationWorkspace}
                       />
                     </div>
@@ -274,7 +281,7 @@ export function ChatArea({
           <div className="flex gap-3 items-end">
             <select
               value={chatMode}
-              onChange={(e) => setChatMode(e.target.value as 'chat' | 'check' | 'gen')}
+              onChange={(e) => setChatMode(e.target.value as 'chat' | 'check' | 'gen' | 'fix')}
               title="Select chat mode"
               className={cn(
                 'px-3 py-3 rounded-lg flex-shrink-0',
@@ -288,12 +295,21 @@ export function ChatArea({
               <option value="chat">Chat</option>
               <option value="check">Check</option>
               <option value="gen">Gen</option>
+              <option value="fix">Fix</option>
             </select>
             <textarea
               ref={textareaRef}
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
-              placeholder="Ask me anything about your database..."
+              placeholder={
+                chatMode === 'fix'
+                  ? 'Describe the issue, or just send...'
+                  : chatMode === 'gen'
+                    ? 'Describe the database system you want to build...'
+                    : chatMode === 'check'
+                      ? 'Paste SQL to validate syntax...'
+                      : 'Ask me anything about your database...'
+              }
               className={cn(
                 'flex-1 px-4 py-3 rounded-lg resize-none',
                 'bg-background-light dark:bg-background-dark',

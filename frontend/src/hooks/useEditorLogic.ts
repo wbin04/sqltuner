@@ -83,8 +83,10 @@ export function useEditorLogic({ connectionId, initialConversationId }: UseEdito
   const sendMessageMutation = useMutation({
     mutationFn: (payload: {
       message: string;
-      chat_mode?: 'chat' | 'check' | 'gen';
+      chat_mode?: 'chat' | 'check' | 'gen' | 'fix';
       clarification_answers?: Array<{ q: string; answer: string }>;
+      error_message?: string;
+      original_sql?: string;
     }) =>
       chatService.sendMessage({
         connection_id: connectionId,
@@ -92,11 +94,15 @@ export function useEditorLogic({ connectionId, initialConversationId }: UseEdito
         message: payload.message,
         chat_mode: payload.chat_mode,
         clarification_answers: payload.clarification_answers,
+        error_message: payload.error_message,
+        original_sql: payload.original_sql,
       }),
     onMutate: async (payload: {
       message: string;
-      chat_mode?: 'chat' | 'check' | 'gen';
+      chat_mode?: 'chat' | 'check' | 'gen' | 'fix';
       clarification_answers?: Array<{ q: string; answer: string }>;
+      error_message?: string;
+      original_sql?: string;
     }) => {
       // Capture send time before mutation
       const sentAt = new Date().toISOString();
@@ -225,7 +231,12 @@ export function useEditorLogic({ connectionId, initialConversationId }: UseEdito
 
   // Handlers
   const handleSendMessage = useCallback(
-    async (message: string, chat_mode?: 'chat' | 'check' | 'gen') => {
+    async (
+      message: string,
+      chat_mode?: 'chat' | 'check' | 'gen' | 'fix',
+      error_message?: string,
+      original_sql?: string
+    ) => {
       const lastAssistantMsg = [...fetchedMessages]
         .reverse()
         .find((msg) => msg.role === 'assistant');
@@ -248,7 +259,7 @@ export function useEditorLogic({ connectionId, initialConversationId }: UseEdito
         return;
       }
 
-      await sendMessageMutation.mutateAsync({ message, chat_mode: chat_mode || 'chat' });
+      await sendMessageMutation.mutateAsync({ message, chat_mode: chat_mode || 'chat', error_message, original_sql });
     },
     [fetchedMessages, pendingClarification, sendMessageMutation]
   );

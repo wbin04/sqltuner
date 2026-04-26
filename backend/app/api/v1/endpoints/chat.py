@@ -24,6 +24,8 @@ from app.core.prompts import (
     get_chat_generate_sql_system_prompt,
     get_chat_schema_design_prompt,
     get_schema_clarification_prompt,
+    get_sql_fix_system_prompt,
+    get_sql_fix_prompt,
 )
 from app.db.session import get_db
 from app.models.models import ChatRole, User
@@ -89,6 +91,12 @@ def _format_tables_detailed(tables: list) -> str:
                 ref_table = fk.get("ref_table", fk.get("referenced_table", ""))
                 ref_col = fk.get("ref_column", fk.get("referenced_column", ""))
                 lines.append(f"    - {fk_col} -> {ref_table}.{ref_col}")
+                
+        sample_data = table.get("sample_data", [])
+        if sample_data:
+            lines.append("  Sample Values:")
+            for row in sample_data[:5]:
+                lines.append(f"    {row}")
     return "\n".join(lines)
 
 
@@ -106,7 +114,38 @@ def _format_tables_compact(tables: list) -> str:
                 for fk in fks
             ]
             fk_info = f" | FK: {', '.join(fk_parts)}"
+        
         lines.append(f"- {table_name}({', '.join(col_names)}){fk_info}")
+        
+        sample_data = table.get("sample_data", [])
+        if sample_data:
+            lines.append(f"  Samples: {json.dumps(sample_data[:2], ensure_ascii=False)}")
+            
+    return "\n".join(lines)
+
+
+def _extract_tables_from_sql(sql: str, all_tables: list) -> list:
+    """Extract tables mentioned in SQL and return their full schema+sample."""
+    sql_lower = sql.lower()
+    return [t for t in all_tables if t.get("name", "").lower() in sql_lower]
+
+
+def _format_tables_with_samples(tables: list) -> str:
+    lines = ["Schema with actual sample data:"]
+    for table in tables:
+        name = table.get("name", "")
+        columns = table.get("columns", [])
+        lines.append(f"\nTable: {name}")
+        lines.append("Columns:")
+        for col in columns:
+            col_type = col.get("type") or col.get("data_type", "unknown")
+            lines.append(f"  - {col.get('name')}: {col_type}")
+
+        sample_data = table.get("sample_data", [])
+        if sample_data:
+            lines.append(f"Sample values (actual data from DB, up to 5 rows):")
+            for row in sample_data[:5]:
+                lines.append(f"  {row}")
     return "\n".join(lines)
 
 
@@ -259,6 +298,55 @@ async def _handle_check_mode(
         logger.info("[CHECK] LLM fix took %.2fs", time.time() - t0)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"LLM service error: {str(e)}")
+
+    fixed_sql = _extract_sql_block(llm_response)
+    await _save_assistant_message(db, conversation_id, llm_response, sql_generated=fixed_sql)
+    return ChatCompletionResponse(
+        conversation_id=conversation_id,
+        role="assistant",
+        content=llm_response,
+        sql_generated=fixed_sql,
+        is_schema_design=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# FIX MODE
+# ---------------------------------------------------------------------------
+
+async def _handle_fix_mode(
+    request: ChatCompletionRequest,
+    connection,
+    conversation_id: UUID,
+    db: AsyncSession,
+) -> ChatCompletionResponse:
+
+    original_sql = request.original_sql or _strip_sql_markdown(request.message)
+    error_message = request.error_message or ""
+    db_type_value = connection.db_type.value if connection.db_type else "postgresql"
+
+    # 1. Xác định bảng nào liên quan từ SQL
+    all_tables = connection.meta_schema.get("tables", []) if connection.meta_schema else []
+    mentioned_tables = _extract_tables_from_sql(original_sql, all_tables)
+
+    # 2. Build schema + sample data chỉ cho các bảng liên quan
+    fix_schema_text = _format_tables_with_samples(mentioned_tables)
+
+    # 3. Gọi LLM với prompt fix chuyên biệt
+    system_prompt = get_sql_fix_system_prompt(db_type_value)
+    user_prompt = get_sql_fix_prompt(
+        original_sql=original_sql,
+        error_message=error_message,
+        schema_with_samples=fix_schema_text,
+        user_hint=request.message,
+    )
+
+    llm_response = await llm_service.chat(
+        prompt=user_prompt,
+        system_prompt=system_prompt,
+        temperature=0.1,
+        max_tokens=1024,
+    )
 
     fixed_sql = _extract_sql_block(llm_response)
     await _save_assistant_message(db, conversation_id, llm_response, sql_generated=fixed_sql)
@@ -505,6 +593,9 @@ async def chat_completion(
 
     if chat_mode == "gen":
         return await _handle_gen_mode(request, conversation_id, db)
+
+    if chat_mode == "fix":
+        return await _handle_fix_mode(request, connection, conversation_id, db)
 
     # Default: "chat"
     return await _handle_chat_mode(request, connection, conversation_id, db)
