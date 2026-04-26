@@ -235,8 +235,8 @@ export function OptimizationModal({
               </div>
             </div>
           ) : (
-            <div className="h-full">
-              <div className="font-mono text-sm">
+            <div className="h-full overflow-x-auto">
+              <div className="font-mono text-sm w-max min-w-full">
                 {/* Unified Diff View with SQL Formatting & Context */}
                 {(() => {
                   let formattedOriginal = originalSql;
@@ -311,7 +311,7 @@ export function OptimizationModal({
                         </span>
 
                         {/* Code content */}
-                        <span className="flex-1 whitespace-pre-wrap break-all font-mono text-sm leading-6">
+                        <span className="flex-1 whitespace-pre font-mono text-sm leading-6 pr-4">
                           {line.content || ' '}
                         </span>
                       </div>

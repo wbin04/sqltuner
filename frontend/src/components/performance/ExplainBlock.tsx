@@ -43,7 +43,7 @@ function MySQLExplainTable({ columns, rows }: { columns: string[]; rows: Record<
     );
 
   return (
-    <div className="overflow-x-auto">
+    <div className="w-max min-w-full">
       <table className="w-full text-xs border-collapse font-mono">
         <thead>
           <tr className="border-b border-border-DEFAULT dark:border-border-dark">
@@ -98,7 +98,7 @@ function MySQLExplainTable({ columns, rows }: { columns: string[]; rows: Record<
 function MySQLAnalyzeTree({ rows }: { rows: Record<string, any>[] }) {
   const lines = rows.map((r) => String(r['Plan'] ?? Object.values(r)[0] ?? ''));
   return (
-    <div className="overflow-x-auto bg-[#1e1e1e] p-4 rounded font-mono text-xs text-[#d4d4d4]">
+    <div className="bg-[#1e1e1e] p-4 rounded font-mono text-xs text-[#d4d4d4] w-max min-w-full">
       {lines.map((line, i) => (
         <div
           key={i}
@@ -118,7 +118,7 @@ function MySQLAnalyzeTree({ rows }: { rows: Record<string, any>[] }) {
 function PostgresExplainTree({ rows }: { rows: Record<string, any>[] }) {
   const lines = rows.map((r) => String(r['QUERY PLAN'] ?? Object.values(r)[0] ?? ''));
   return (
-    <div className="overflow-x-auto bg-[#1e1e1e] p-4 rounded font-mono text-xs text-[#d4d4d4] space-y-0.5">
+    <div className="bg-[#1e1e1e] p-4 rounded font-mono text-xs text-[#d4d4d4] space-y-0.5 w-max min-w-full">
       {lines.map((line, i) => (
         <div
           key={i}
@@ -163,7 +163,7 @@ function SQLiteQueryPlanTable({ rows }: { rows: Record<string, any>[] }) {
         <p className="text-xs text-text-muted-DEFAULT dark:text-text-muted-dark mb-2 font-semibold uppercase tracking-wide">
           Query Plan Steps
         </p>
-        <div className="overflow-x-auto">
+        <div className="w-max min-w-full">
           <table className="w-full text-xs border-collapse font-mono">
             <thead>
               <tr className="border-b border-border-DEFAULT dark:border-border-dark">
@@ -348,7 +348,7 @@ export function ExplainBlock({ isOpen, result, isLoading, onClose }: ExplainBloc
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
       <div
         className={cn(
-          'relative w-full max-w-4xl max-h-[85vh] rounded-xl shadow-2xl overflow-hidden',
+          'relative w-full max-w-[90vw] max-h-[85vh] rounded-xl shadow-2xl overflow-hidden',
           'bg-white dark:bg-surface-dark',
           'border border-gray-200 dark:border-border-dark',
           'flex flex-col'
