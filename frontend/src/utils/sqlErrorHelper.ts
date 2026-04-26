@@ -73,6 +73,17 @@ export function getSQLErrorSuggestion(error: any): SQLErrorSuggestion | null {
     };
   }
   
+  // Undefined function or operator
+  if ((errorMsg.includes('function') || errorMsg.includes('operator')) && errorMsg.includes('does not exist')) {
+    return {
+      title: '💡 Function/Operator Not Found',
+      description: `The function or operator might not be supported in this database type (e.g. SQLite vs PostgreSQL) or argument types are mismatched. Check:`,
+      example: `-- 1. Are you using a database-specific function? (e.g. YEAR() vs EXTRACT(YEAR FROM ...))
+-- 2. Are argument types correct? You might need to cast explicit types (e.g. value::integer)
+-- 3. Verify function name spelling`,
+    };
+  }
+  
   // Syntax error
   if (errorMsg.includes('syntax error')) {
     return {

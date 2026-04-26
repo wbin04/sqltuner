@@ -6,7 +6,7 @@ import traceback
 from app.api.v1.endpoints.auth import get_current_user
 from app.core.config import settings
 from app.core.constants import SQL_CONNECTION_TIMEOUT, SQL_EXECUTION_TIMEOUT
-from app.core.exceptions import ExecutionError, ValidationError
+from app.core.exceptions import ExecutionError, ValidationError, format_db_error
 from app.core.security import decrypt_password
 from app.db.session import get_db
 from app.models.models import DBType, User
@@ -101,7 +101,7 @@ async def run_sandbox_execution(
             max_rows=settings.SANDBOX_MAX_ROWS,
         )
     except Exception as e:
-        raise HTTPException(500, detail=str(e))
+        raise HTTPException(500, detail=format_db_error(e))
 
 
 @router.post("/execute", response_model=SQLExecuteResponse)
@@ -273,9 +273,12 @@ async def execute_sql(
             )
 
         logger.info(
-            "[LIVE] Falling back to sandbox execution due to error"
+            "[LIVE] Query execution failed. Returning error to user."
         )
-        return await run_sandbox_execution(connection, request, db)
+        raise HTTPException(
+            status_code=500,
+            detail=format_db_error(e)
+        )
 
 
 
@@ -434,7 +437,7 @@ async def explain_sql_plan(
             logger.error(f"[SANDBOX EXPLAIN ERROR]: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Sandbox EXPLAIN error: {str(e)}"
+                detail=f"Sandbox EXPLAIN error: {format_db_error(e)}"
             )
 
     engine = None
@@ -475,7 +478,7 @@ async def explain_sql_plan(
         logger.error(f"[EXPLAIN ERROR]: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"EXPLAIN error: {str(e)}"
+            detail=f"EXPLAIN error: {format_db_error(e)}"
         )
     finally:
         if engine:
