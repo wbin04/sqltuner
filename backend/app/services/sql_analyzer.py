@@ -30,6 +30,8 @@ class SqlAntiPatternDetector:
         issues += self._check_or_conditions(parsed)
         issues += self._check_implicit_type_conversion(parsed)
         issues += self._check_distinct_overuse(parsed)
+        issues += self._check_correlated_subquery(parsed)
+        issues += self._check_cte_group_by_non_key(parsed)
 
         return issues
 
@@ -179,6 +181,113 @@ class SqlAntiPatternDetector:
                 )
             ]
         return []
+
+    def _check_correlated_subquery(self, parsed) -> List[SqlIssue]:
+        """Detect correlated subqueries — subqueries that reference outer aliases.
+
+        Pattern: WHERE col = (SELECT MIN/MAX(...) FROM t WHERE t.x = outer.x)
+        These execute once per outer row and should be replaced with
+        ROW_NUMBER() / DISTINCT ON window functions.
+        """
+        issues = []
+
+        for subquery in parsed.find_all(exp.Subquery):
+            # Skip subqueries that are used as CTE definitions
+            if isinstance(subquery.parent, exp.CTE):
+                continue
+
+            # Collect all column references inside the subquery
+            inner_select = subquery.find(exp.Select)
+            if not inner_select:
+                continue
+
+            # Collect tables explicitly referenced inside the subquery
+            inner_tables = set()
+            for table in inner_select.find_all(exp.Table):
+                if table.alias:
+                    inner_tables.add(table.alias.lower())
+                if table.name:
+                    inner_tables.add(table.name.lower())
+
+            # Check WHERE conditions inside the subquery for outer references
+            where_clause = inner_select.find(exp.Where)
+            if not where_clause:
+                continue
+
+            for col in where_clause.find_all(exp.Column):
+                col_table = (col.table or "").lower()
+                if col_table and col_table not in inner_tables:
+                    # This column references an outer alias → correlated
+                    issues.append(
+                        SqlIssue(
+                            type="correlated_subquery",
+                            severity="high",
+                            message=(
+                                f"Correlated subquery references outer alias "
+                                f"'{col_table}' — executes once per outer row"
+                            ),
+                            suggestion=(
+                                "Rewrite using ROW_NUMBER() OVER "
+                                "(PARTITION BY ... ORDER BY ...) or "
+                                "DISTINCT ON to avoid N-per-row execution"
+                            ),
+                        )
+                    )
+                    break  # One issue per subquery is enough
+
+        return issues
+
+    def _check_cte_group_by_non_key(self, parsed) -> List[SqlIssue]:
+        """Detect CTEs where GROUP BY includes non-partition columns alongside
+        aggregate functions (MAX, MIN, SUM, etc.).
+
+        Pattern: WITH x AS (SELECT a, b, MAX(c) FROM t GROUP BY a, b)
+        If 'b' is not the partition key and multiple values of 'b' can share
+        the same 'a', the CTE produces multiple rows per 'a' — causing
+        duplicate rows when JOINed back to the main query.
+        """
+        issues = []
+
+        for cte in parsed.find_all(exp.CTE):
+            cte_select = cte.find(exp.Select)
+            if not cte_select:
+                continue
+
+            # Check if the CTE uses aggregate functions
+            has_agg = bool(
+                list(cte_select.find_all(exp.Max))
+                or list(cte_select.find_all(exp.Min))
+            )
+            if not has_agg:
+                continue
+
+            # Check GROUP BY clause
+            group_by = cte_select.find(exp.Group)
+            if not group_by:
+                continue
+
+            group_cols = list(group_by.find_all(exp.Column))
+            if len(group_cols) > 1:
+                col_names = [c.name for c in group_cols]
+                cte_name = cte.alias or "unknown"
+                issues.append(
+                    SqlIssue(
+                        type="cte_group_by_non_key",
+                        severity="high",
+                        message=(
+                            f"CTE '{cte_name}' uses GROUP BY ({', '.join(col_names)}) "
+                            f"with MAX/MIN — may produce multiple rows per "
+                            f"partition key when JOINed"
+                        ),
+                        suggestion=(
+                            "Replace GROUP BY + MAX/MIN with "
+                            "DISTINCT ON (partition_key) ORDER BY sort_col DESC/ASC "
+                            "to guarantee exactly one row per partition key"
+                        ),
+                    )
+                )
+
+        return issues
 
 
 sql_analyzer = SqlAntiPatternDetector()

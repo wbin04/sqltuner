@@ -13,11 +13,13 @@ from app.core.prompts import (SCHEMA_CLARIFICATION_SYSTEM_PROMPT,
                               SCHEMA_PHASE1_SYSTEM_PROMPT,
                               SCHEMA_PHASE2_SYSTEM_PROMPT,
                               SQL_OPTIMIZATION_SYSTEM_PROMPT,
+                              SQL_TARGETED_FIX_SYSTEM_PROMPT,
                               SQL_VERIFICATION_SYSTEM_PROMPT,
                               get_schema_clarification_prompt,
                               get_schema_generation_prompt,
                               get_sql_explanation_prompt,
                               get_sql_optimization_prompt,
+                              get_sql_targeted_fix_prompt,
                               get_sql_verification_prompt)
 
 from app.repositories.config_repository import config_repository
@@ -766,15 +768,60 @@ class LLMService:
         else:
             combined_explanation = pass1_explanation
 
+        final_sql = pass2_result["optimized_sql"].strip()
+        final_rewrite_type = (
+            pass2_result.get("rewrite_type")
+            if pass2_result.get("rewrite_type") != "none"
+            else pass1_result.get("rewrite_type", "none")
+        )
+
+        # ── Pass 3: Targeted fix for remaining structural issues ──
+        remaining = self._detect_structural_issues(final_sql)
+        if remaining:
+            issue_types = [i.type for i in remaining]
+            logger.info(
+                "[OPTIMIZE] === Pass 3: Targeted fix for %d remaining issue(s): %s ===",
+                len(remaining), issue_types,
+            )
+            pass3_result = await self._run_targeted_fix_pass(
+                final_sql, schema_text, remaining, used_tables
+            )
+            pass3_sql = pass3_result["optimized_sql"].strip()
+            pass3_changed = pass3_sql.lower().strip() != final_sql.lower().strip()
+
+            if pass3_changed:
+                final_sql = pass3_sql
+                final_rewrite_type = "multiple"
+
+                pass3_changes = pass3_result.get("changes_made", [])
+                if pass3_changes:
+                    all_changes.extend(
+                        f"[Pass 3] {c}" for c in pass3_changes
+                    )
+
+                final_index = (
+                    pass3_result.get("index_suggestion")
+                    or final_index
+                )
+
+                pass3_explanation = pass3_result.get("explanation", "").strip()
+                if pass3_explanation:
+                    combined_explanation += f" | Targeted fix: {pass3_explanation}"
+
+                logger.info("[OPTIMIZE] Pass 3 applied %d fix(es)", len(pass3_changes))
+            else:
+                logger.info("[OPTIMIZE] Pass 3 made no changes")
+        else:
+            logger.info("[OPTIMIZE] No structural issues remain after Pass 2 — skipping Pass 3")
+
+        num_passes = 3 if remaining else 2
         return {
-            "optimized_sql": pass2_result["optimized_sql"].strip(),
+            "optimized_sql": final_sql,
             "index_suggestion": final_index,
-            "rewrite_type": pass2_result.get("rewrite_type")
-                if pass2_result.get("rewrite_type") != "none"
-                else pass1_result.get("rewrite_type", "none"),
+            "rewrite_type": final_rewrite_type,
             "changes_made": all_changes,
             "explanation": combined_explanation,
-            "reasoning": f"2-pass analysis with {self.coder_model}",
+            "reasoning": f"{num_passes}-pass analysis with {self.coder_model}",
         }
 
     async def _run_optimization_pass(
@@ -883,6 +930,94 @@ class LLMService:
         )
         if rejection_note:
             logger.info(f"[OPTIMIZE-P2] Index rejection: {rejection_note}")
+
+        return {
+            "optimized_sql": parsed["optimized_sql"].strip(),
+            "index_suggestion": index_suggestion,
+            "rewrite_type": parsed.get("rewrite_type", "none"),
+            "changes_made": parsed.get("changes_made", []),
+            "explanation": parsed.get("explanation", "").strip(),
+        }
+
+    # ── Issue types that warrant a targeted Pass 3 ──
+    _TARGETED_FIX_TYPES = {
+        "correlated_subquery",
+        "cte_group_by_non_key",
+        "in_subquery",
+        "function_on_column",
+    }
+
+    def _detect_structural_issues(self, sql: str) -> list:
+        """Re-run static analysis and filter for structural issues
+        that the LLM may have missed in the full-query context."""
+        from app.services.sql_analyzer import sql_analyzer
+
+        all_issues = sql_analyzer.detect(sql)
+        structural = [
+            i for i in all_issues if i.type in self._TARGETED_FIX_TYPES
+        ]
+        if structural:
+            logger.info(
+                "[OPTIMIZE-P3] Detected %d structural issue(s): %s",
+                len(structural),
+                [(i.type, i.severity) for i in structural],
+            )
+        return structural
+
+    async def _run_targeted_fix_pass(
+        self,
+        sql_query: str,
+        schema_text: str,
+        remaining_issues: list,
+        used_tables: List[str],
+    ) -> Dict[str, Any]:
+        """Pass 3: Targeted fix — send only the specific remaining issues
+        to the LLM with a focused prompt, narrowing its attention."""
+        targeted_prompt = get_sql_targeted_fix_prompt(
+            sql_query=sql_query,
+            remaining_issues=remaining_issues,
+            schema_text=schema_text,
+        )
+
+        prompt_len = len(targeted_prompt) + len(SQL_TARGETED_FIX_SYSTEM_PROMPT)
+        logger.info(f"[OPTIMIZE-P3] Prompt: {prompt_len:,} bytes")
+
+        llm_start = time.time()
+        logger.info(
+            "[OPTIMIZE-P3] Calling LLM for targeted fix (%d issues)...",
+            len(remaining_issues),
+        )
+
+        try:
+            raw_response = await self._backend.call(
+                model=self.coder_model,
+                prompt=targeted_prompt,
+                system_prompt=SQL_TARGETED_FIX_SYSTEM_PROMPT,
+                temperature=0.1,
+                max_tokens=2048,
+                num_ctx=2048,
+                json_mode=True,
+                keep_alive="120m",
+            )
+        except Exception as exc:
+            logger.warning(f"[OPTIMIZE-P3] Targeted fix LLM failed: {exc}")
+            return {
+                "optimized_sql": sql_query,
+                "index_suggestion": None,
+                "rewrite_type": "none",
+                "changes_made": [],
+                "explanation": "Targeted fix pass skipped due to LLM error",
+            }
+
+        logger.info(f"[OPTIMIZE-P3] LLM took: {time.time() - llm_start:.2f}s")
+        logger.info(f"[OPTIMIZE-P3] Raw response: {raw_response}")
+
+        parsed = self._parse_optimization_response(raw_response, sql_query)
+        index_suggestion, rejection_note = self._validate_index_suggestion(
+            parsed["index_suggestion"], used_tables
+        )
+        if rejection_note:
+            logger.info(f"[OPTIMIZE-P3] Index rejection: {rejection_note}")
 
         return {
             "optimized_sql": parsed["optimized_sql"].strip(),
