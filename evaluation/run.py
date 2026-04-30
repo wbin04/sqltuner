@@ -494,23 +494,65 @@ def _extract_sql(text: str) -> Optional[str]:
 
 # ── 4.1 Execution Accuracy (EX)
 
-def execute_sql_on_sqlite(db_path: str, sql: str) -> Optional[List[Tuple]]:
+def execute_sql_on_sqlite(
+    db_path: str, sql: str
+) -> Tuple[Optional[List[Tuple]], Optional[str]]:
+    """
+    Chạy SQL trên SQLite.
+    Trả về (rows, None) nếu thành công, (None, error_msg) nếu lỗi.
+    rows=[] là kết quả hợp lệ nhưng rỗng — khác với None (lỗi thực thi).
+    """
     try:
         conn = sqlite3.connect(db_path, timeout=10)
         conn.execute("PRAGMA query_only = ON")
         rows = conn.execute(sql).fetchall()
         conn.close()
-        return sorted([tuple(str(v) if v is not None else "" for v in row) for row in rows])
-    except Exception:
-        return None
+        normalized = sorted(
+            [tuple(str(v) if v is not None else "" for v in row) for row in rows]
+        )
+        return normalized, None
+    except Exception as e:
+        return None, str(e)
 
 
 def execution_accuracy(pred_sql: str, gold_sql: str, db_path: str) -> int:
-    pred = execute_sql_on_sqlite(db_path, pred_sql)
-    gold = execute_sql_on_sqlite(db_path, gold_sql)
-    if pred is None or gold is None:
-        return 0
-    return 1 if pred == gold else 0
+    """Backward-compat wrapper — trả về 0/1."""
+    score, _ = execution_accuracy_with_reason(pred_sql, gold_sql, db_path)
+    return score
+
+
+def execution_accuracy_with_reason(
+    pred_sql: str, gold_sql: str, db_path: str
+) -> Tuple[int, Optional[str]]:
+    """
+    Trả về (score, fail_reason).
+    fail_reason là None khi đúng, hoặc một trong các giá trị:
+      - "pred_sql_error: <msg>"  — câu pred bị lỗi syntax/table not found
+      - "gold_sql_error: <msg>"  — câu gold bị lỗi (hiếm)
+      - "empty_result"           — pred trả về rỗng, gold có dữ liệu
+      - "extra_result"           — pred trả về dữ liệu, gold rỗng
+      - "row_count_mismatch"     — số row khác nhau
+      - "value_mismatch"         — số row bằng nhau nhưng giá trị khác
+    """
+    pred_rows, pred_err = execute_sql_on_sqlite(db_path, pred_sql)
+    gold_rows, gold_err = execute_sql_on_sqlite(db_path, gold_sql)
+
+    if gold_err:
+        return 0, f"gold_sql_error: {gold_err}"
+    if pred_err:
+        return 0, f"pred_sql_error: {pred_err}"
+
+    if pred_rows == gold_rows:
+        return 1, None
+
+    # Phân loại nguyên nhân cụ thể
+    if not pred_rows and gold_rows:
+        return 0, "empty_result"
+    if pred_rows and not gold_rows:
+        return 0, "extra_result"
+    if len(pred_rows) != len(gold_rows):
+        return 0, f"row_count_mismatch (pred={len(pred_rows)}, gold={len(gold_rows)})"
+    return 0, "value_mismatch"
 
 
 # ── 4.2 Exact Match (EM)
@@ -699,18 +741,20 @@ def run_evaluation(client, use_offline: bool) -> Dict:
         table_names  = table_info.get("table_names_original", [])
         column_names = [c for _, c in table_info.get("column_names_original", [])]
 
+        ex_score, ex_reason = execution_accuracy_with_reason(pred_sql, gold_sql, db_path)
+
         results.append({
             "db_id":            db_id,
             "question":         question,
             "gold_sql":         gold_sql,
             "pred_sql":         pred_sql,
             "em":               exact_match(pred_sql, gold_sql),
-            "ex":               execution_accuracy(pred_sql, gold_sql, db_path),
+            "ex":               ex_score,
             "sl":               schema_linkage_accuracy(pred_sql, gold_sql, table_names, column_names),
             "hardness":         final_hardness,
             "complexity_score": complexity_score,
             "latency_s":        latency,
-            "error":            None,
+            "error":            ex_reason,   # None nếu đúng, mô tả lý do nếu sai
         })
 
     return _aggregate(results, errors)
