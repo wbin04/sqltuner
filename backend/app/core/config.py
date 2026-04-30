@@ -15,9 +15,18 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = "sqltuner"
     DATABASE_URL: Optional[str] = None
 
+    # LLM Service mode: "ollama" (local) or "groq" (cloud)
+    LLM_SERVICE: str = "groq"
+
+    # Ollama settings (used when LLM_SERVICE=ollama)
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     MODEL_NAME: str = "qwen2.5:3b"
     MODEL_CHAT_NAME: str = "qwen2.5:3b"
+
+    # Groq settings (used when LLM_SERVICE=groq)
+    GROQ_API_KEY: str = ""
+    GROQ_MODEL_NAME: str = "meta-llama/llama-4-scout-17b-16e-instruct"
+    GROQ_CHAT_MODEL_NAME: str = "meta-llama/llama-4-scout-17b-16e-instruct"
 
     BACKEND_CORS_ORIGINS: Union[str, List[str]] = "http://localhost:5173"
 

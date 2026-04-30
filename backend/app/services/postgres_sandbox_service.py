@@ -154,7 +154,10 @@ class PostgresSandboxService:
             if not col.get("is_nullable", True):
                 col_def += " NOT NULL"
             if col.get("default") is not None:
-                col_def += f" DEFAULT {col['default']}"
+                default_val = col['default']
+                # Skip sequence defaults since sandbox doesn't create sequences
+                if not (isinstance(default_val, str) and 'nextval' in default_val.lower()):
+                    col_def += f" DEFAULT {default_val}"
             col_defs.append(col_def)
             if col.get("is_pk"):
                 pk_cols.append(col_name_lower)

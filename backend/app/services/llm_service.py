@@ -1,30 +1,30 @@
 import json
-import asyncio
 import logging
 import re
 import time
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-import httpx
 import sqlglot
 from app.core.config import settings
 from app.core.constants import (APP_CONFIG_KEY_LLM_URL,
-                                LLM_HTTP_CONNECT_TIMEOUT,
-                                LLM_HTTP_POOL_TIMEOUT, LLM_HTTP_WRITE_TIMEOUT,
                                 LLM_REQUEST_TIMEOUT, LLM_URL_CACHE_TTL)
-from app.core.exceptions import LLMServiceError
 from app.core.prompts import (SCHEMA_CLARIFICATION_SYSTEM_PROMPT,
                               SCHEMA_GENERATION_SYSTEM_PROMPT,
                               SCHEMA_PHASE1_SYSTEM_PROMPT,
                               SCHEMA_PHASE2_SYSTEM_PROMPT,
                               SQL_OPTIMIZATION_SYSTEM_PROMPT,
+                              SQL_TARGETED_FIX_SYSTEM_PROMPT,
+                              SQL_VERIFICATION_SYSTEM_PROMPT,
                               get_schema_clarification_prompt,
                               get_schema_generation_prompt,
                               get_sql_explanation_prompt,
-                              get_sql_optimization_prompt)
+                              get_sql_optimization_prompt,
+                              get_sql_targeted_fix_prompt,
+                              get_sql_verification_prompt)
 
 from app.repositories.config_repository import config_repository
+from app.services.llm_backends import OllamaBackend, GroqBackend
+from app.services.llm_backends.base import BaseLLMBackend
 from sqlglot import exp as sqlglot_exp
 
 
@@ -34,47 +34,34 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class OllamaPayload:
-    model: str
-    prompt: str
-    system_prompt: Optional[str] = None
-    temperature: float = 0.1
-    num_ctx: int = 4096
-    num_predict: int = 1024
-    json_mode: bool = False
-
-    def to_dict(self) -> Dict[str, Any]:
-        payload = {
-            "model": self.model,
-            "prompt": self.prompt,
-            "stream": False,
-            "keep_alive": "60m",
-            "options": {
-                "temperature": self.temperature,
-                "num_ctx": self.num_ctx,
-                "num_predict": self.num_predict,
-            },
-        }
-
-        if self.system_prompt:
-            payload["system"] = self.system_prompt
-
-        if self.json_mode:
-            payload["format"] = "json"
-
-        return payload
-
-
 class LLMService:
     def __init__(self) -> None:
         self.base_url: str = settings.OLLAMA_BASE_URL
-        self.coder_model: str = settings.MODEL_NAME
-        self.chat_model: str = settings.MODEL_CHAT_NAME
         self.timeout: int = LLM_REQUEST_TIMEOUT
         self._url_cache: Optional[str] = None
         self._cache_timestamp: float = 0
         self._cache_ttl: int = LLM_URL_CACHE_TTL
+
+        # Select backend + models based on LLM_SERVICE config
+        service = settings.LLM_SERVICE.lower()
+        if service == "groq":
+            self._backend: BaseLLMBackend = GroqBackend(
+                api_key=settings.GROQ_API_KEY
+            )
+            self.coder_model: str = settings.GROQ_MODEL_NAME
+            self.chat_model: str = settings.GROQ_CHAT_MODEL_NAME
+            logger.info(
+                "[LLM] Using Groq backend — coder=%s, chat=%s",
+                self.coder_model, self.chat_model,
+            )
+        else:
+            self._backend = OllamaBackend(base_url=self.base_url)
+            self.coder_model = settings.MODEL_NAME
+            self.chat_model = settings.MODEL_CHAT_NAME
+            logger.info(
+                "[LLM] Using Ollama backend — coder=%s, chat=%s",
+                self.coder_model, self.chat_model,
+            )
 
     @staticmethod
     def _extract_json_object(text: str) -> str:
@@ -147,30 +134,17 @@ class LLMService:
         json_mode: bool = True,
         num_ctx: int = 2048,
     ) -> str:
-        url = self._build_api_url()
-        payload_config = OllamaPayload(
+        return await self._backend.call(
             model=self.chat_model,
             prompt=prompt,
             system_prompt=system_prompt,
             temperature=0.1,
+            max_tokens=max_tokens,
             num_ctx=num_ctx,
-            num_predict=max_tokens,
             json_mode=json_mode,
+            keep_alive="120m",
+            read_timeout=read_timeout,
         )
-        payload = payload_config.to_dict()
-        payload["keep_alive"] = "120m"
-
-        timeout_config = httpx.Timeout(
-            connect=LLM_HTTP_CONNECT_TIMEOUT,
-            read=read_timeout,
-            write=LLM_HTTP_WRITE_TIMEOUT,
-            pool=LLM_HTTP_POOL_TIMEOUT,
-        )
-
-        async with httpx.AsyncClient(timeout=timeout_config) as client:
-            response = await client.post(url, json=payload)
-            response.raise_for_status()
-            return response.json().get("response", "").strip()
 
     async def generate_schema_two_phase(
         self,
@@ -353,6 +327,9 @@ class LLMService:
             self.base_url = new_url.strip().rstrip('/')
             self._url_cache = self.base_url
             self._cache_timestamp = time.time()
+            # Propagate to Ollama backend if active
+            if isinstance(self._backend, OllamaBackend):
+                self._backend.base_url = self.base_url
             logger.info(f"[LLM] Base URL updated to: {self.base_url}")
 
     async def fetch_and_update_url_from_db(
@@ -379,64 +356,6 @@ class LLMService:
                 f"using default"
             )
 
-    def _create_timeout_config(self) -> httpx.Timeout:
-        return httpx.Timeout(
-            connect=LLM_HTTP_CONNECT_TIMEOUT,
-            read=float(self.timeout),
-            write=LLM_HTTP_WRITE_TIMEOUT,
-            pool=LLM_HTTP_POOL_TIMEOUT
-        )
-
-    def _build_api_url(self, endpoint: str = "generate") -> str:
-        return f"{self.base_url}/api/{endpoint}"
-
-    async def _make_ollama_request(
-        self, payload: Dict[str, Any], url: str
-    ) -> str:
-        timeout_config = self._create_timeout_config()
-
-        async with httpx.AsyncClient(timeout=timeout_config) as client:
-            try:
-                response = await client.post(url, json=payload)
-                response.raise_for_status()
-                result = response.json().get("response", "").strip()
-                logger.info(
-                    f"[LLM] Ollama response received, length={len(result)}"
-                )
-                return result
-
-            except httpx.ConnectError as e:
-                error_msg = (
-                    f"Cannot connect to Ollama at {url}. Is Ollama running? "
-                    f"Error: {str(e)}"
-                )
-                logger.error(f"[LLM] {error_msg}")
-                raise LLMServiceError(f"Ollama Connection Error: {error_msg}")
-
-            except httpx.TimeoutException as e:
-                error_msg = (
-                    f"Ollama request timed out after {self.timeout}s. "
-                    f"Error: {str(e)}"
-                )
-                logger.error(f"[LLM] {error_msg}")
-                raise LLMServiceError(f"Ollama Timeout Error: {error_msg}")
-
-            except httpx.HTTPStatusError as e:
-                error_msg = (
-                    f"Ollama returned HTTP {e.response.status_code}: "
-                    f"{e.response.text}"
-                )
-                logger.error(f"[LLM] {error_msg}")
-                raise LLMServiceError(f"Ollama HTTP Error: {error_msg}")
-
-            except Exception as e:
-                error_msg = (
-                    f"Unexpected error calling Ollama: {type(e).__name__}: "
-                    f"{str(e)}"
-                )
-                logger.error(f"[LLM] {error_msg}")
-                raise LLMServiceError(f"Ollama API Error: {error_msg}")
-
     async def _call_ollama(
         self,
         model: str,
@@ -446,23 +365,14 @@ class LLMService:
         max_tokens: Optional[int] = None,
         json_mode: bool = False,
     ) -> str:
-        url = self._build_api_url()
-
-        payload_config = OllamaPayload(
+        return await self._backend.call(
             model=model,
             prompt=prompt,
             system_prompt=system_prompt,
             temperature=temperature,
-            num_predict=max_tokens or 512,
+            max_tokens=max_tokens or 512,
             json_mode=json_mode,
         )
-
-        if json_mode:
-            logger.info("[LLM] JSON mode enabled")
-
-        logger.info(f"[LLM] Calling Ollama at {url} with model={model}")
-
-        return await self._make_ollama_request(payload_config.to_dict(), url)
 
     async def generate(
         self,
@@ -487,26 +397,19 @@ class LLMService:
         temperature: float = 0.3,
         max_tokens: int = 2048
     ) -> str:
-        url = self._build_api_url()
-
-        payload_config = OllamaPayload(
+        logger.info(
+            "[CHAT] Calling LLM with model=%s, predict=%s",
+            self.chat_model, max_tokens,
+        )
+        return await self._backend.call(
             model=self.chat_model,
             prompt=prompt,
             system_prompt=system_prompt,
             temperature=temperature,
+            max_tokens=max_tokens,
             num_ctx=2048,
-            num_predict=max_tokens,
+            keep_alive="120m",
         )
-
-        payload = payload_config.to_dict()
-        payload["keep_alive"] = "120m"
-
-        logger.info(
-            f"[CHAT] Calling Ollama with ctx={payload['options']['num_ctx']}, "
-            f"predict={max_tokens}"
-        )
-
-        return await self._make_ollama_request(payload, url)
 
     async def chat_schema_design(
         self,
@@ -720,22 +623,21 @@ class LLMService:
         sql_query: str,
         schema_text: str,
         detected_issues: str = "",
-    ) -> OllamaPayload:
+    ) -> Dict[str, Any]:
         user_prompt = get_sql_optimization_prompt(
             sql_query=sql_query,
             schema_text=schema_text,
             detected_issues=detected_issues,
         )
-
-        return OllamaPayload(
-            model=self.coder_model,
-            prompt=user_prompt,
-            system_prompt=SQL_OPTIMIZATION_SYSTEM_PROMPT,
-            temperature=0.1,
-            num_ctx=2048,
-            num_predict=2048,
-            json_mode=True,
-        )
+        return {
+            "model": self.coder_model,
+            "prompt": user_prompt,
+            "system_prompt": SQL_OPTIMIZATION_SYSTEM_PROMPT,
+            "temperature": 0.1,
+            "num_ctx": 2048,
+            "max_tokens": 2048,
+            "json_mode": True,
+        }
 
     def _clean_json_response(self, raw_response: str) -> str:
         return re.sub(r"```json|```", "", raw_response).strip()
@@ -774,10 +676,16 @@ class LLMService:
             }
 
     def _validate_index_suggestion(
-        self, index_suggestion: Optional[str], used_tables: List[str]
+        self, index_suggestion: Any, used_tables: List[str]
     ) -> tuple[Optional[str], str]:
         if not index_suggestion or not used_tables:
-            return index_suggestion, ""
+            return None, ""
+
+        # Handle cases where the LLM returns an array of index suggestions
+        if isinstance(index_suggestion, list):
+            index_suggestion = "\n".join(str(idx) for idx in index_suggestion)
+        elif not isinstance(index_suggestion, str):
+            index_suggestion = str(index_suggestion)
 
         index_table_pattern = r"\bON\s+([a-zA-Z0-9_]+)"
         index_table_matches = re.findall(
@@ -819,55 +727,304 @@ class LLMService:
                 for i in static_issues
             )
 
-        payload_config = self._create_optimization_payload(
-            sql_query,
-            schema_text,
-            issues_text,
+        # ── Pass 1: Rewrite ──
+        logger.info("[OPTIMIZE] === Pass 1: Rewrite ===")
+        pass1_result = await self._run_optimization_pass(
+            sql_query, schema_text, issues_text, used_tables
         )
 
-        system_len = len(payload_config.system_prompt or "")
-        prompt_len = len(payload_config.prompt)
-        prompt_size = system_len + prompt_len
-        logger.info(f"[OPTIMIZE] Total prompt: {prompt_size:,} bytes")
+        pass1_sql = pass1_result["optimized_sql"].strip()
+        pass1_changed = pass1_sql.lower().strip() != sql_query.lower().strip()
+
+        if not pass1_changed:
+            logger.info("[OPTIMIZE] Pass 1 made no changes — skipping Pass 2")
+            return pass1_result
+
+        # ── Pass 2: Verify & fix remaining issues ──
+        logger.info("[OPTIMIZE] === Pass 2: Verify ===")
+        pass2_result = await self._run_verification_pass(
+            pass1_sql, sql_query, schema_text, used_tables
+        )
+
+        # Merge results: use Pass 2 SQL but combine changes from both passes
+        all_changes = list(pass1_result.get("changes_made", []))
+        pass2_changes = pass2_result.get("changes_made", [])
+        if pass2_changes:
+            all_changes.extend(
+                f"[Pass 2] {c}" for c in pass2_changes
+            )
+
+        # Use the better index suggestion (prefer Pass 2 if it produced one)
+        final_index = (
+            pass2_result.get("index_suggestion")
+            or pass1_result.get("index_suggestion")
+        )
+
+        # Combine explanations
+        pass1_explanation = pass1_result.get("explanation", "").strip()
+        pass2_explanation = pass2_result.get("explanation", "").strip()
+        if pass2_explanation and pass2_explanation != pass1_explanation:
+            combined_explanation = f"{pass1_explanation} | Verification: {pass2_explanation}"
+        else:
+            combined_explanation = pass1_explanation
+
+        final_sql = pass2_result["optimized_sql"].strip()
+        final_rewrite_type = (
+            pass2_result.get("rewrite_type")
+            if pass2_result.get("rewrite_type") != "none"
+            else pass1_result.get("rewrite_type", "none")
+        )
+
+        # ── Pass 3: Targeted fix for remaining structural issues ──
+        remaining = self._detect_structural_issues(final_sql)
+        if remaining:
+            issue_types = [i.type for i in remaining]
+            logger.info(
+                "[OPTIMIZE] === Pass 3: Targeted fix for %d remaining issue(s): %s ===",
+                len(remaining), issue_types,
+            )
+            pass3_result = await self._run_targeted_fix_pass(
+                final_sql, schema_text, remaining, used_tables
+            )
+            pass3_sql = pass3_result["optimized_sql"].strip()
+            pass3_changed = pass3_sql.lower().strip() != final_sql.lower().strip()
+
+            if pass3_changed:
+                final_sql = pass3_sql
+                final_rewrite_type = "multiple"
+
+                pass3_changes = pass3_result.get("changes_made", [])
+                if pass3_changes:
+                    all_changes.extend(
+                        f"[Pass 3] {c}" for c in pass3_changes
+                    )
+
+                final_index = (
+                    pass3_result.get("index_suggestion")
+                    or final_index
+                )
+
+                pass3_explanation = pass3_result.get("explanation", "").strip()
+                if pass3_explanation:
+                    combined_explanation += f" | Targeted fix: {pass3_explanation}"
+
+                logger.info("[OPTIMIZE] Pass 3 applied %d fix(es)", len(pass3_changes))
+            else:
+                logger.info("[OPTIMIZE] Pass 3 made no changes")
+        else:
+            logger.info("[OPTIMIZE] No structural issues remain after Pass 2 — skipping Pass 3")
+
+        num_passes = 3 if remaining else 2
+        return {
+            "optimized_sql": final_sql,
+            "index_suggestion": final_index,
+            "rewrite_type": final_rewrite_type,
+            "changes_made": all_changes,
+            "explanation": combined_explanation,
+            "reasoning": f"{num_passes}-pass analysis with {self.coder_model}",
+        }
+
+    async def _run_optimization_pass(
+        self,
+        sql_query: str,
+        schema_text: str,
+        issues_text: str,
+        used_tables: List[str],
+    ) -> Dict[str, Any]:
+        """Pass 1: Rewrite SQL based on the ANALYSIS CHECKLIST."""
+        opt_payload = self._create_optimization_payload(
+            sql_query, schema_text, issues_text,
+        )
+
+        system_len = len(opt_payload["system_prompt"] or "")
+        prompt_len = len(opt_payload["prompt"])
+        logger.info(f"[OPTIMIZE-P1] Prompt: {system_len + prompt_len:,} bytes")
 
         llm_start = time.time()
-        url = self._build_api_url()
-        payload = payload_config.to_dict()
-        payload["keep_alive"] = "120m"
-
         logger.info(
-            "[OPTIMIZE] Calling Ollama with ctx=%s, predict=%s",
-            payload["options"]["num_ctx"],
-            payload["options"]["num_predict"],
+            "[OPTIMIZE-P1] Calling LLM model=%s, max_tokens=%s",
+            opt_payload["model"], opt_payload["max_tokens"],
         )
 
         try:
-            raw_response = await self._make_ollama_request(payload, url)
+            raw_response = await self._backend.call(
+                model=opt_payload["model"],
+                prompt=opt_payload["prompt"],
+                system_prompt=opt_payload["system_prompt"],
+                temperature=opt_payload["temperature"],
+                max_tokens=opt_payload["max_tokens"],
+                num_ctx=opt_payload["num_ctx"],
+                json_mode=opt_payload["json_mode"],
+                keep_alive="120m",
+            )
         except Exception as exc:
-            logger.error(f"[OPTIMIZE] Ollama API error: {str(exc)}")
+            logger.error(f"[OPTIMIZE-P1] LLM API error: {str(exc)}")
             raise
 
-        llm_duration = time.time() - llm_start
-        logger.info(f"[OPTIMIZE] LLM took: {llm_duration:.2f}s")
-        logger.info(f"[OPTIMIZE] Raw LLM response: {raw_response}")
+        logger.info(f"[OPTIMIZE-P1] LLM took: {time.time() - llm_start:.2f}s")
+        logger.info(f"[OPTIMIZE-P1] Raw response: {raw_response}")
 
-        parsed_result = self._parse_optimization_response(
-            raw_response, sql_query
-        )
+        parsed = self._parse_optimization_response(raw_response, sql_query)
         index_suggestion, rejection_note = self._validate_index_suggestion(
-            parsed_result["index_suggestion"],
-            used_tables
+            parsed["index_suggestion"], used_tables
         )
-
-        reasoning = "Analyzed with Qwen model" + rejection_note
+        if rejection_note:
+            logger.info(f"[OPTIMIZE-P1] Index rejection: {rejection_note}")
 
         return {
-            "optimized_sql": parsed_result["optimized_sql"].strip(),
+            "optimized_sql": parsed["optimized_sql"].strip(),
             "index_suggestion": index_suggestion,
-            "rewrite_type": parsed_result.get("rewrite_type", "none"),
-            "changes_made": parsed_result.get("changes_made", []),
-            "explanation": parsed_result["explanation"].strip(),
-            "reasoning": reasoning
+            "rewrite_type": parsed.get("rewrite_type", "none"),
+            "changes_made": parsed.get("changes_made", []),
+            "explanation": parsed.get("explanation", "").strip(),
+        }
+
+    async def _run_verification_pass(
+        self,
+        optimized_sql: str,
+        original_sql: str,
+        schema_text: str,
+        used_tables: List[str],
+    ) -> Dict[str, Any]:
+        """Pass 2: Verify rewritten SQL against checklist, fix remaining issues."""
+        verify_prompt = get_sql_verification_prompt(
+            optimized_sql=optimized_sql,
+            original_sql=original_sql,
+            schema_text=schema_text,
+        )
+
+        prompt_len = len(verify_prompt) + len(SQL_VERIFICATION_SYSTEM_PROMPT)
+        logger.info(f"[OPTIMIZE-P2] Prompt: {prompt_len:,} bytes")
+
+        llm_start = time.time()
+        logger.info("[OPTIMIZE-P2] Calling LLM for verification...")
+
+        try:
+            raw_response = await self._backend.call(
+                model=self.coder_model,
+                prompt=verify_prompt,
+                system_prompt=SQL_VERIFICATION_SYSTEM_PROMPT,
+                temperature=0.1,
+                max_tokens=2048,
+                num_ctx=2048,
+                json_mode=True,
+                keep_alive="120m",
+            )
+        except Exception as exc:
+            logger.warning(f"[OPTIMIZE-P2] Verification LLM failed: {exc}")
+            # If verification fails, return Pass 1 result unchanged
+            return {
+                "optimized_sql": optimized_sql,
+                "index_suggestion": None,
+                "rewrite_type": "none",
+                "changes_made": [],
+                "explanation": "Verification pass skipped due to LLM error",
+            }
+
+        logger.info(f"[OPTIMIZE-P2] LLM took: {time.time() - llm_start:.2f}s")
+        logger.info(f"[OPTIMIZE-P2] Raw response: {raw_response}")
+
+        parsed = self._parse_optimization_response(raw_response, optimized_sql)
+        index_suggestion, rejection_note = self._validate_index_suggestion(
+            parsed["index_suggestion"], used_tables
+        )
+        if rejection_note:
+            logger.info(f"[OPTIMIZE-P2] Index rejection: {rejection_note}")
+
+        return {
+            "optimized_sql": parsed["optimized_sql"].strip(),
+            "index_suggestion": index_suggestion,
+            "rewrite_type": parsed.get("rewrite_type", "none"),
+            "changes_made": parsed.get("changes_made", []),
+            "explanation": parsed.get("explanation", "").strip(),
+        }
+
+    # ── Issue types that warrant a targeted Pass 3 ──
+    _TARGETED_FIX_TYPES = {
+        "correlated_subquery",
+        "cte_group_by_non_key",
+        "in_subquery",
+        "function_on_column",
+    }
+
+    def _detect_structural_issues(self, sql: str) -> list:
+        """Re-run static analysis and filter for structural issues
+        that the LLM may have missed in the full-query context."""
+        from app.services.sql_analyzer import sql_analyzer
+
+        all_issues = sql_analyzer.detect(sql)
+        structural = [
+            i for i in all_issues if i.type in self._TARGETED_FIX_TYPES
+        ]
+        if structural:
+            logger.info(
+                "[OPTIMIZE-P3] Detected %d structural issue(s): %s",
+                len(structural),
+                [(i.type, i.severity) for i in structural],
+            )
+        return structural
+
+    async def _run_targeted_fix_pass(
+        self,
+        sql_query: str,
+        schema_text: str,
+        remaining_issues: list,
+        used_tables: List[str],
+    ) -> Dict[str, Any]:
+        """Pass 3: Targeted fix — send only the specific remaining issues
+        to the LLM with a focused prompt, narrowing its attention."""
+        targeted_prompt = get_sql_targeted_fix_prompt(
+            sql_query=sql_query,
+            remaining_issues=remaining_issues,
+            schema_text=schema_text,
+        )
+
+        prompt_len = len(targeted_prompt) + len(SQL_TARGETED_FIX_SYSTEM_PROMPT)
+        logger.info(f"[OPTIMIZE-P3] Prompt: {prompt_len:,} bytes")
+
+        llm_start = time.time()
+        logger.info(
+            "[OPTIMIZE-P3] Calling LLM for targeted fix (%d issues)...",
+            len(remaining_issues),
+        )
+
+        try:
+            raw_response = await self._backend.call(
+                model=self.coder_model,
+                prompt=targeted_prompt,
+                system_prompt=SQL_TARGETED_FIX_SYSTEM_PROMPT,
+                temperature=0.1,
+                max_tokens=2048,
+                num_ctx=2048,
+                json_mode=True,
+                keep_alive="120m",
+            )
+        except Exception as exc:
+            logger.warning(f"[OPTIMIZE-P3] Targeted fix LLM failed: {exc}")
+            return {
+                "optimized_sql": sql_query,
+                "index_suggestion": None,
+                "rewrite_type": "none",
+                "changes_made": [],
+                "explanation": "Targeted fix pass skipped due to LLM error",
+            }
+
+        logger.info(f"[OPTIMIZE-P3] LLM took: {time.time() - llm_start:.2f}s")
+        logger.info(f"[OPTIMIZE-P3] Raw response: {raw_response}")
+
+        parsed = self._parse_optimization_response(raw_response, sql_query)
+        index_suggestion, rejection_note = self._validate_index_suggestion(
+            parsed["index_suggestion"], used_tables
+        )
+        if rejection_note:
+            logger.info(f"[OPTIMIZE-P3] Index rejection: {rejection_note}")
+
+        return {
+            "optimized_sql": parsed["optimized_sql"].strip(),
+            "index_suggestion": index_suggestion,
+            "rewrite_type": parsed.get("rewrite_type", "none"),
+            "changes_made": parsed.get("changes_made", []),
+            "explanation": parsed.get("explanation", "").strip(),
         }
 
     async def explain_query(self, sql_query: str) -> str:
@@ -883,21 +1040,16 @@ class LLMService:
     ) -> Dict[str, Any]:
         prompt = get_schema_clarification_prompt(user_description)
 
-        payload_config = OllamaPayload(
-            model=self.chat_model,
-            prompt=prompt,
-            system_prompt=SCHEMA_CLARIFICATION_SYSTEM_PROMPT,
-            temperature=0.2,
-            num_ctx=2048,
-            num_predict=512,
-            json_mode=True,
-        )
-
-        url = self._build_api_url()
-        payload = payload_config.to_dict()
-
         try:
-            raw = await self._make_ollama_request(payload, url)
+            raw = await self._backend.call(
+                model=self.chat_model,
+                prompt=prompt,
+                system_prompt=SCHEMA_CLARIFICATION_SYSTEM_PROMPT,
+                temperature=0.2,
+                max_tokens=512,
+                num_ctx=2048,
+                json_mode=True,
+            )
             clean = re.sub(r"```json|```", "", raw).strip()
             result = json.loads(self._extract_json_object(clean))
             logger.info(
@@ -917,20 +1069,6 @@ class LLMService:
     ) -> Dict[str, Any]:
         prompt = get_schema_generation_prompt(user_description, clarifications)
 
-        payload_config = OllamaPayload(
-            model=self.chat_model,
-            prompt=prompt,
-            system_prompt=SCHEMA_GENERATION_SYSTEM_PROMPT,
-            temperature=0.1,
-            num_ctx=3072,
-            num_predict=2500,
-            json_mode=True,
-        )
-
-        url = self._build_api_url()
-        payload = payload_config.to_dict()
-        payload["keep_alive"] = "120m"
-
         logger.info(
             "[SCHEMA-GEN] Generating schema for: %s...",
             user_description[:80],
@@ -938,7 +1076,16 @@ class LLMService:
 
         raw = ""
         try:
-            raw = await self._make_ollama_request(payload, url)
+            raw = await self._backend.call(
+                model=self.chat_model,
+                prompt=prompt,
+                system_prompt=SCHEMA_GENERATION_SYSTEM_PROMPT,
+                temperature=0.1,
+                max_tokens=2500,
+                num_ctx=3072,
+                json_mode=True,
+                keep_alive="120m",
+            )
             clean = re.sub(r"```(?:json)?\s*", "", raw)
             clean = re.sub(r"```", "", clean).strip()
 
@@ -1043,44 +1190,19 @@ class LLMService:
         }
 
     async def check_health(self) -> bool:
-        try:
-            url = self._build_api_url("tags")
-            async with httpx.AsyncClient(timeout=10) as client:
-                response = await client.get(url)
-                response.raise_for_status()
-                data = response.json()
-
-                models = data.get("models", [])
-                model_names = [m.get("name") for m in models]
-                has_coder = self.coder_model in model_names
-                has_chat = self.chat_model in model_names
-                return has_coder and has_chat
-
-        except Exception:
-            return False
+        return await self._backend.check_health(
+            coder_model=self.coder_model,
+            chat_model=self.chat_model,
+        )
 
     async def warmup_models(self) -> None:
         try:
             logger.info("[LLM-WARMUP] Starting model warm-up...")
-
-            await self.chat(
-                prompt="Hi",
-                system_prompt="You are a SQL expert",
-                max_tokens=50
+            await self._backend.warmup(
+                coder_model=self.coder_model,
+                chat_model=self.chat_model,
             )
-            logger.info(
-                f"[LLM-WARMUP] Warmed up chat model: {self.chat_model}"
-            )
-
-            await self.optimize_sql(
-                sql_query="SELECT * FROM test", db_schema='{"tables": []}'
-            )
-            logger.info(
-                f"[LLM-WARMUP] Warmed up coder model: {self.coder_model}"
-            )
-
             logger.info("[LLM-WARMUP] Model warm-up completed successfully")
-
         except Exception as e:
             logger.warning(f"[LLM-WARMUP] Failed to warm up models: {str(e)}")
 

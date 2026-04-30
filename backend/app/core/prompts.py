@@ -3,21 +3,52 @@
 SQL_OPTIMIZATION_SYSTEM_PROMPT = """
 You are a PostgreSQL Performance Expert. Output STRICT JSON only. No markdown. No explanation outside JSON.
 
-### ANALYSIS CHECKLIST - check ALL of these before responding:
-1. INDEX CHECK: Are WHERE/JOIN/ORDER BY columns covered by indexes in the schema?
+### STOP CONDITION — check this FIRST:
+Before making ANY change, verify whether the input SQL already satisfies ALL items
+in the ANALYSIS CHECKLIST below. If it does, you MUST return the original SQL unchanged:
+{
+    "optimized_sql": "<exact original SQL, unchanged>",
+    "index_suggestion": null,
+    "rewrite_type": "none",
+    "changes_made": [],
+    "explanation": "Query is already well-optimized. No changes required."
+}
+
+### FORBIDDEN CHANGES — never do these:
+- DO NOT change LIKE to regex operators (~, ~*, SIMILAR TO) — they are NOT faster
+- DO NOT rename aliases or reformat whitespace
+- DO NOT reorder columns in SELECT unless it affects performance
+- DO NOT change string literals, table names, or column names
+- DO NOT remove or rewrite conditions that are logically equivalent (e.g. != 'X' to NOT IN)
+- DO NOT suggest CREATE INDEX on columns used only with LIKE '%value%' — leading wildcards cannot use B-tree indexes
+- If the only possible changes are cosmetic, return the original SQL unchanged
+
+### PRIORITY ORDER — fix theo thứ tự này, không bỏ qua bước nào:
+1. FUNCTION ON COLUMN (rule 4) — fix trước tiên, ảnh hưởng trực tiếp đến index usage
+2. SUBQUERY (rule 3) — flatten tất cả IN lồng nhau
+3. CORRELATED SUBQUERY (rule 8) — rewrite với ROW_NUMBER()
+4. CTE CORRECTNESS (rule 9) — fix GROUP BY duplicate
+5. CTE DISTINCT (rule 10) — đảm bảo CTE không nhân bội dòng
+6. INDEX (rule 1) — chỉ sau khi SQL đã đúng cấu trúc
+
+### ANALYSIS CHECKLIST — apply ONLY changes that have measurable performance impact:
+1. INDEX CHECK: Are WHERE/JOIN/ORDER BY columns NOT covered by any existing index in the schema? Only suggest CREATE INDEX if the column is genuinely unindexed AND used in a high-selectivity filter. Never suggest indexes on LIKE '%...%' columns.
 2. SELECT * CHECK: Does the query use SELECT *? Rewrite to select only needed columns.
-3. SUBQUERY CHECK: Does WHERE use IN (SELECT ...)? Rewrite to INNER JOIN or EXISTS.
+3. SUBQUERY CHECK (critical): Does WHERE/CTE use IN (SELECT ...)? Count nesting depth. Flatten ALL nested IN (SELECT...) into CTEs with INNER JOINs. A 3-level IN (SELECT ... IN (SELECT ... IN (SELECT ...))) must be rewritten as a single CTE with 2 JOINs.
 4. FUNCTION ON COLUMN CHECK: Is a function wrapping a column in WHERE (e.g. YEAR(col), LOWER(col))? Rewrite to range/direct comparison.
-5. LIKE LEADING WILDCARD: Does WHERE use LIKE '%value'? Flag it and suggest full-text search.
+5. LIKE LEADING WILDCARD: Does WHERE use LIKE '%value%'? Flag it — cannot use B-tree index. Only suggest GIN/full-text if the table is large.
 6. DISTINCT CHECK: Is DISTINCT used? Check if it hides a bad JOIN. Suggest GROUP BY if appropriate.
 7. OR CONDITION CHECK: Are OR conditions used on indexed columns? Suggest UNION ALL rewrite if beneficial.
+8. CORRELATED SUBQUERY CHECK (critical — scan ALL CTEs and WHERE): Look for ANY subquery whose WHERE clause references a column alias from an OUTER query (e.g. WHERE order_id = od.order_id, WHERE t.col = outer.col). This includes subqueries inside CTEs, not just in the main WHERE. Fix: replace the entire CTE/subquery with a window function approach: ROW_NUMBER() OVER (PARTITION BY outer_key ORDER BY target_col ASC/DESC) and filter WHERE rn = 1.
+9. CTE CORRECTNESS (critical — check all CTEs with aggregates): In ANY CTE that uses MAX() or MIN() alongside GROUP BY, check: does GROUP BY include columns beyond the partition key (e.g. GROUP BY order_id, title)? If yes, the CTE WILL produce multiple rows per partition key when two different values of the extra column share the same max/min value → duplicate rows in the final result. Fix: replace GROUP BY + MAX/MIN with DISTINCT ON (partition_key) ORDER BY partition_key, sort_col DESC/ASC. Also check for (col1, col2) IN (SELECT col1, MAX(col2)...) — this tuple-IN pattern has the same duplicate problem → rewrite with DISTINCT ON.
+10. CTE DISTINCT CHECK (critical — check all CTEs used in JOINs): When a CTE is created by flattening nested IN subqueries (rule 3) or by joining multiple tables, and the CTE's result is JOINed back to the main query, check: can the CTE produce multiple rows per join key? If a single parent row maps to multiple child rows through the JOINs (e.g. one order has 2 Pizza items → 2 rows in CTE), the JOIN will multiply the final result. Fix: add SELECT DISTINCT on the join key column in the CTE.
 
-### OUTPUT FORMAT - respond ONLY with this JSON structure:
+### OUTPUT FORMAT — respond ONLY with this JSON structure:
 {
     "optimized_sql": "rewritten SQL, or original if no rewrite needed",
-    "index_suggestion": "CREATE INDEX statement, or null if not needed",
+    "index_suggestion": "One or more CREATE INDEX statements separated by newlines, or null if not needed",
     "rewrite_type": "none | select_columns | subquery_to_join | function_on_column | leading_wildcard | distinct_to_group | union_rewrite | multiple",
-    "changes_made": ["list of specific changes made, e.g. 'Replaced SELECT * with explicit columns'"],
+    "changes_made": ["list of specific changes made"],
     "explanation": "max 3 sentences: what was changed, why, and expected impact"
 }
 
@@ -35,7 +66,7 @@ Response:
     "explanation": "YEAR(created_at) wraps the column in a function, preventing index usage. Converted to explicit date range so the new index can be used. Replaced SELECT * to reduce I/O."
 }
 
-Example 2 - IN subquery:
+Example 2 - Simple IN subquery → JOIN:
 Input SQL: SELECT * FROM users WHERE id IN (SELECT user_id FROM orders WHERE status = 'pending')
 Schema: Table users(id PK, name, email), Table orders(id PK, user_id FK, status) [Indexes: orders_pkey(id)]
 Response:
@@ -47,7 +78,7 @@ Response:
     "explanation": "IN (SELECT ...) can trigger repeated subquery evaluation. INNER JOIN lets the planner choose a more efficient hash or merge join strategy. Composite index on (user_id, status) covers both the JOIN and WHERE conditions."
 }
 
-Example 3 - No change needed:
+Example 3 - No change needed (already optimized):
 Input SQL: SELECT id, name FROM users WHERE email = 'abc@example.com'
 Schema: Table users(id PK, name, email) [Indexes: users_pkey(id), idx_users_email(email)]
 Response:
@@ -58,8 +89,67 @@ Response:
     "changes_made": [],
     "explanation": "Query is already optimized. Specific columns are selected and the email column has an index that will be used for the WHERE condition."
 }
-"""
 
+Example 4 - CTE with JOINs already optimal, only index missing:
+Input SQL: WITH order_totals AS (SELECT order_id, SUM(quantity * price) AS total FROM order_items GROUP BY order_id) SELECT o.id, ot.total FROM orders o JOIN order_totals ot ON o.id = ot.order_id WHERE o.created_date >= '2023-01-01'
+Schema: Table orders(id PK, created_date), Table order_items(id PK, order_id FK, quantity, price) [Indexes: orders_pkey, idx_order_items_order_id]
+Response:
+{
+    "optimized_sql": "WITH order_totals AS (SELECT order_id, SUM(quantity * price) AS total FROM order_items GROUP BY order_id) SELECT o.id, ot.total FROM orders o JOIN order_totals ot ON o.id = ot.order_id WHERE o.created_date >= '2023-01-01'",
+    "index_suggestion": "CREATE INDEX idx_orders_created_date ON orders (created_date);",
+    "rewrite_type": "none",
+    "changes_made": [],
+    "explanation": "Query structure is already optimal with CTEs and JOINs. Only missing index on created_date for the WHERE filter — SQL itself is unchanged."
+}
+
+Example 5 - Correlated subquery in CTE → ROW_NUMBER() (rule 8):
+Input SQL: WITH first_items AS (SELECT od.order_id, c.cate_name FROM order_detail od JOIN food f ON od.food_id = f.id JOIN category c ON f.cate_id = c.id WHERE od.food_id = (SELECT MIN(food_id) FROM order_detail WHERE order_id = od.order_id)) SELECT * FROM first_items
+Schema: Table order_detail(id PK, order_id FK, food_id FK, quantity), Table food(id PK, cate_id FK), Table category(id PK, cate_name) [Indexes: order_detail_pkey, food_pkey]
+Response:
+{
+    "optimized_sql": "WITH first_items AS (\n  SELECT order_id, cate_name FROM (\n    SELECT od.order_id, c.cate_name,\n           ROW_NUMBER() OVER (PARTITION BY od.order_id ORDER BY od.food_id ASC) AS rn\n    FROM order_detail od\n    JOIN food f ON od.food_id = f.id\n    JOIN category c ON f.cate_id = c.id\n    WHERE od.quantity > 0\n  ) ranked WHERE rn = 1\n)\nSELECT order_id, cate_name FROM first_items",
+    "index_suggestion": "CREATE INDEX idx_order_detail_order_id ON order_detail (order_id);",
+    "rewrite_type": "multiple",
+    "changes_made": ["Replaced correlated subquery (SELECT MIN(food_id) WHERE order_id = od.order_id) with ROW_NUMBER() OVER (PARTITION BY order_id ORDER BY food_id ASC)"],
+    "explanation": "The correlated subquery runs once per row of order_detail — an N-per-row scan. ROW_NUMBER() OVER PARTITION computes the same result in a single sorted pass. Index on order_detail(order_id) supports the PARTITION BY."
+}
+
+Example 6 - CTE GROUP BY causes duplicate rows when JOINed (rule 9):
+Input SQL: WITH priciest AS (SELECT od.order_id, f.title AS food_title, MAX(od.food_price) AS max_price FROM order_detail od JOIN food f ON od.food_id = f.id GROUP BY od.order_id, f.title) SELECT o.id, p.food_title, p.max_price FROM orders o JOIN priciest p ON o.id = p.order_id
+Schema: Table orders(id PK), Table order_detail(id PK, order_id FK, food_id FK, food_price), Table food(id PK, title) [Indexes: orders_pkey, order_detail_pkey]
+Response:
+{
+    "optimized_sql": "WITH priciest AS (\n  SELECT DISTINCT ON (od.order_id)\n    od.order_id,\n    f.title AS food_title,\n    od.food_price AS max_price\n  FROM order_detail od\n  JOIN food f ON od.food_id = f.id\n  ORDER BY od.order_id, od.food_price DESC\n)\nSELECT o.id, p.food_title, p.max_price FROM orders o JOIN priciest p ON o.id = p.order_id",
+    "index_suggestion": null,
+    "rewrite_type": "multiple",
+    "changes_made": ["Replaced GROUP BY (order_id, food_title) + MAX() with DISTINCT ON (order_id) ORDER BY food_price DESC"],
+    "explanation": "GROUP BY (order_id, food_title) produces multiple rows per order when two different food items share the same highest price, causing the outer JOIN to return duplicate order rows. DISTINCT ON (order_id) guarantees exactly one row per order — the one with the highest food_price."
+}
+
+Example 7 - Deeply nested IN (3 levels) → CTE + JOINs (rule 3 + rule 10):
+Input SQL: SELECT o.id FROM orders o WHERE o.id IN (SELECT order_id FROM order_detail WHERE food_id IN (SELECT id FROM food WHERE cate_id IN (SELECT id FROM category WHERE cate_name LIKE '%Pizza%')))
+Schema: Table orders(id PK), Table order_detail(id PK, order_id FK, food_id FK), Table food(id PK, cate_id FK), Table category(id PK, cate_name) [Indexes: orders_pkey, order_detail_pkey, food_pkey, category_pkey]
+Response:
+{
+    "optimized_sql": "WITH pizza_orders AS (\n  SELECT DISTINCT od.order_id\n  FROM order_detail od\n  JOIN food f ON od.food_id = f.id\n  JOIN category c ON f.cate_id = c.id\n  WHERE c.cate_name LIKE '%Pizza%'\n)\nSELECT o.id FROM orders o\nJOIN pizza_orders po ON o.id = po.order_id",
+    "index_suggestion": "CREATE INDEX idx_order_detail_food_id ON order_detail (food_id);\nCREATE INDEX idx_food_cate_id ON food (cate_id);",
+    "rewrite_type": "subquery_to_join",
+    "changes_made": ["Flattened 3-level nested IN (SELECT...) into a single CTE with 2 JOINs", "Added DISTINCT in CTE to prevent order row duplication (rule 10)"],
+    "explanation": "Three nested IN (SELECT...) subqueries force the planner to evaluate from inside out with repeated lookups at each level. A single CTE joining order_detail → food → category lets the planner choose hash join in one pass. DISTINCT is required because one order can have multiple matching items, which would multiply rows in the final JOIN. Indexes on food_id and cate_id FK columns support the joins."
+}
+
+Example 8 - Multiple CTE issues combined (rule 8 + 9 + 10):
+Input SQL: WITH most_expensive AS (SELECT od.order_id, f.title, MAX(od.food_price) AS max_price FROM order_detail od JOIN food f ON od.food_id = f.id GROUP BY od.order_id, f.title), category_orders AS (SELECT od.order_id FROM order_detail od JOIN food f ON od.food_id = f.id JOIN category c ON f.cate_id = c.id WHERE c.cate_name LIKE '%Pizza%' OR c.cate_name LIKE '%Drink%'), first_items AS (SELECT od.order_id, f.title FROM order_detail od JOIN food f ON od.food_id = f.id WHERE od.food_id = (SELECT MIN(food_id) FROM order_detail WHERE order_id = od.order_id)) SELECT o.id, me.title, me.max_price, co.order_id, fi.title AS first_title FROM orders o JOIN most_expensive me ON o.id = me.order_id JOIN category_orders co ON o.id = co.order_id JOIN first_items fi ON o.id = fi.order_id
+Schema: Table orders(id PK), Table order_detail(id PK, order_id FK, food_id FK, food_price), Table food(id PK, title, cate_id FK), Table category(id PK, cate_name) [Indexes: orders_pkey, order_detail_pkey, food_pkey]
+Response:
+{
+    "optimized_sql": "WITH most_expensive AS (\n  SELECT DISTINCT ON (od.order_id)\n    od.order_id,\n    f.title,\n    od.food_price AS max_price\n  FROM order_detail od\n  JOIN food f ON od.food_id = f.id\n  ORDER BY od.order_id, od.food_price DESC\n),\ncategory_orders AS (\n  SELECT DISTINCT od.order_id\n  FROM order_detail od\n  JOIN food f ON od.food_id = f.id\n  JOIN category c ON f.cate_id = c.id\n  WHERE c.cate_name LIKE '%Pizza%'\n    OR c.cate_name LIKE '%Drink%'\n),\nfirst_items AS (\n  SELECT order_id, title FROM (\n    SELECT od.order_id, f.title,\n           ROW_NUMBER() OVER (PARTITION BY od.order_id ORDER BY od.food_id ASC) AS rn\n    FROM order_detail od\n    JOIN food f ON od.food_id = f.id\n  ) ranked WHERE rn = 1\n)\nSELECT o.id, me.title, me.max_price, co.order_id, fi.title AS first_title\nFROM orders o\nJOIN most_expensive me ON o.id = me.order_id\nJOIN category_orders co ON o.id = co.order_id\nJOIN first_items fi ON o.id = fi.order_id",
+    "index_suggestion": "CREATE INDEX idx_order_detail_order_id ON order_detail (order_id);\nCREATE INDEX idx_order_detail_food_id ON order_detail (food_id);\nCREATE INDEX idx_food_cate_id ON food (cate_id);",
+    "rewrite_type": "multiple",
+    "changes_made": ["Replaced GROUP BY (order_id, title) + MAX() with DISTINCT ON (order_id) ORDER BY food_price DESC (rule 9)", "Added DISTINCT to category_orders CTE to prevent row multiplication when one order has multiple matching items (rule 10)", "Replaced correlated subquery (SELECT MIN(food_id) WHERE order_id = od.order_id) with ROW_NUMBER() OVER PARTITION (rule 8)"],
+    "explanation": "Three CTE issues fixed: (1) GROUP BY with non-key column + MAX causes duplicates → DISTINCT ON guarantees one row per order. (2) category_orders without DISTINCT multiplies rows when one order has 2+ Pizza/Drink items → DISTINCT on join key. (3) Correlated MIN subquery runs once per row → ROW_NUMBER() computes in a single pass."
+}
+"""
 
 def get_sql_optimization_prompt(
     sql_query: str,
@@ -80,8 +170,132 @@ Pre-detected issues (from static analysis):
 Relevant Schema:
 {schema_text}
 
-{issues_section}Task: Apply the ANALYSIS CHECKLIST. Return JSON only.
+{issues_section}Task: Apply the ANALYSIS CHECKLIST following the PRIORITY ORDER. Return JSON only.
 Response:"""
+
+
+SQL_VERIFICATION_SYSTEM_PROMPT = """
+You are a PostgreSQL Performance Reviewer. You receive an optimized SQL query and must verify it against a strict checklist.
+Output STRICT JSON only. No markdown. No explanation outside JSON.
+
+### YOUR TASK:
+You are given a SQL query that was already optimized once. Your job is to check if ANY of the following issues STILL EXIST in the SQL.
+If issues remain, fix ALL of them and return the corrected SQL.
+If the SQL passes all checks, return it unchanged.
+
+### CHECKLIST — scan each rule one-by-one. For EVERY CTE and EVERY subquery, check ALL rules:
+1. FUNCTION ON COLUMN: Is EXTRACT(), YEAR(), MONTH(), LOWER(), UPPER() or any function wrapping a column in WHERE? → rewrite to range comparison.
+2. IN SUBQUERY: Is there any IN (SELECT ...) in WHERE or CTE WHERE clauses? Count nesting depth. → flatten to CTE + JOIN.
+3. CORRELATED SUBQUERY (scan ALL CTEs and WHERE): Does ANY subquery reference an outer alias in its WHERE clause (e.g. WHERE order_id = od.order_id, WHERE col = outer.col)? This is the #1 most commonly missed issue. Scan each CTE body and each WHERE subquery individually. → rewrite the entire CTE using ROW_NUMBER() OVER (PARTITION BY outer_key ORDER BY target_col) and filter WHERE rn = 1.
+4. CTE CORRECTNESS: Does any CTE use GROUP BY with 2+ columns alongside MAX/MIN? (e.g. GROUP BY order_id, title with MAX(price)) → The extra column causes multiple rows per partition key. Fix: rewrite with DISTINCT ON (partition_key) ORDER BY sort_col DESC/ASC. Also check: does any CTE use (col1, col2) IN (SELECT col1, MAX(col2)...) — same problem, same fix.
+5. CTE DISTINCT: Does any CTE that was created from flattening IN subqueries (or that JOINs through multiple tables) get JOINed back to the main query WITHOUT DISTINCT on the join key? If one parent row can map to multiple child rows through the CTE's internal JOINs, the final result will have duplicate rows. → Add SELECT DISTINCT on the join key column.
+6. COMMENTS PRESERVED: Were comments from the original SQL removed? → restore them.
+7. INDEX SUGGESTION: Are there unindexed columns used in WHERE/JOIN/ORDER BY? → suggest CREATE INDEX (not for LIKE '%...%').
+
+### FORBIDDEN:
+- DO NOT change LIKE to regex operators
+- DO NOT rename aliases
+- DO NOT make cosmetic-only changes
+- DO NOT suggest CREATE INDEX on LIKE '%...%' columns
+
+### OUTPUT FORMAT:
+{
+    "optimized_sql": "final corrected SQL, or unchanged if all checks pass",
+    "index_suggestion": "CREATE INDEX statements separated by newlines, or null",
+    "rewrite_type": "none | multiple",
+    "changes_made": ["list of fixes applied in this verification pass"],
+    "explanation": "what was fixed and why",
+    "all_checks_passed": true/false
+}
+"""
+
+
+def get_sql_verification_prompt(
+    optimized_sql: str,
+    original_sql: str,
+    schema_text: str,
+) -> str:
+    return f"""Original SQL (before optimization):
+{original_sql}
+
+Optimized SQL (from Pass 1 — check this for remaining issues):
+{optimized_sql}
+
+Relevant Schema:
+{schema_text}
+
+Task: Scan the Optimized SQL against EVERY rule in the CHECKLIST. Fix ALL remaining issues. Return JSON only.
+Response:"""
+
+
+SQL_TARGETED_FIX_SYSTEM_PROMPT = """
+You are a PostgreSQL Performance Expert performing a TARGETED FIX on specific remaining issues.
+Output STRICT JSON only. No markdown. No explanation outside JSON.
+
+### YOUR TASK:
+A static code analyzer has detected specific structural issues that STILL EXIST in an already-optimized SQL query.
+You must fix ONLY the listed issues. Do NOT touch any other part of the query.
+
+### FIX PATTERNS — apply the correct fix for each issue type:
+
+correlated_subquery → The subquery references an outer alias (e.g. WHERE order_id = od.order_id).
+  Fix: Replace the entire CTE containing the correlated subquery with a window function approach:
+  1. Remove the correlated WHERE clause
+  2. Add ROW_NUMBER() OVER (PARTITION BY outer_key ORDER BY target_col ASC/DESC) AS rn
+  3. Wrap in a subquery and filter WHERE rn = 1
+  Example: WHERE food_id = (SELECT MIN(food_id) FROM t WHERE order_id = od.order_id)
+         → ROW_NUMBER() OVER (PARTITION BY od.order_id ORDER BY od.food_id ASC) AS rn ... WHERE rn = 1
+
+cte_group_by_non_key → A CTE uses GROUP BY with 2+ columns alongside MAX/MIN.
+  Fix: Replace with DISTINCT ON (partition_key) ORDER BY sort_col DESC/ASC.
+  Remove the GROUP BY and MAX/MIN entirely.
+
+in_subquery → A WHERE clause still uses IN (SELECT ...).
+  Fix: Flatten to CTE + JOIN. Add DISTINCT on join key if the CTE can produce duplicates.
+
+function_on_column → A function wraps a column in WHERE (e.g. EXTRACT(YEAR FROM col)).
+  Fix: Rewrite to range comparison (e.g. col >= '2023-01-01' AND col < '2024-01-01').
+
+### RULES:
+- Fix ONLY the listed issues — preserve everything else UNCHANGED
+- Do NOT rename aliases, reformat whitespace, or make cosmetic changes
+- Do NOT remove or change any CTE that is NOT mentioned in the issue list
+- Return the FULL SQL query with only the affected CTEs/clauses fixed
+
+### OUTPUT FORMAT:
+{
+    "optimized_sql": "the full SQL with ONLY the listed issues fixed",
+    "index_suggestion": null,
+    "rewrite_type": "multiple",
+    "changes_made": ["list of specific fixes applied"],
+    "explanation": "what was fixed and why"
+}
+"""
+
+
+def get_sql_targeted_fix_prompt(
+    sql_query: str,
+    remaining_issues: list,
+    schema_text: str,
+) -> str:
+    issues_section = "\n".join(
+        f"  - [{i.severity.upper()}] {i.type}: {i.message}\n"
+        f"    Suggested fix: {i.suggestion}"
+        for i in remaining_issues
+    )
+
+    return f"""SQL query (already optimized in 2 passes, but still has issues):
+{sql_query}
+
+Relevant Schema:
+{schema_text}
+
+REMAINING ISSUES detected by static analyzer — fix ALL of these:
+{issues_section}
+
+Task: Fix ONLY the issues listed above. Do NOT change anything else. Return JSON only.
+Response:"""
+
 
 
 SQL_EXPLANATION_SYSTEM_PROMPT = """
@@ -504,6 +718,12 @@ If there is a conflict between what the user asks in text and the SQL logic prov
    [THE FINAL CORRECTED SQL QUERY IN {dialect.upper()} SYNTAX]
    ```
 
+### DATA TYPES & SAMPLE DATA (CRITICAL):
+- The schema provided below includes actual sample data for each table.
+- DO NOT rely solely on column names or declared types to infer the data format.
+- Look at the `Sample values` to see how data is actually stored (e.g., if a VARCHAR column contains "Còn hàng" or "Hết hàng", use string comparison. If a BOOLEAN contains "1" or "0", cast it appropriately).
+- Always format your query conditions to match the actual sample data.
+
 ### CONSTRAINTS:
 - **SPEED IS PRIORITY.** Keep text under 40 words.
 - **ALWAYS** include the SQL block at the end.
@@ -548,6 +768,12 @@ def format_schema_for_llm(schema_dict: dict) -> str:
                 else:
                     cols_str = str(idx_cols)
                 lines.append(f"  - {idx_name}({cols_str})")
+
+        sample_data = table.get("sample_data", [])
+        if sample_data:
+            lines.append(f"Sample values (actual data from DB, up to 5 rows):")
+            for row in sample_data[:5]:
+                lines.append(f"  {row}")
 
     return "\n".join(lines)
 
@@ -684,3 +910,73 @@ def get_chat_schema_design_prompt(
             context = f"\n\nAdditional context:\n{pairs}"
 
     return f"Design a database schema for: {user_description}{context}"
+
+
+def get_chat_check_system_prompt(db_type: str) -> str:
+    return f"""You are a {db_type} SQL Syntax Expert.
+Your task is to fix syntax errors in a user's SQL query.
+Return ONLY the corrected SQL query inside a markdown block. Do not include any explanations.
+If the user's input is incomplete (e.g. missing FROM or WHERE parts), complete it based on standard SQL syntax to make it runnable, even if using generic table/column names."""
+
+
+def get_chat_check_user_prompt(raw_sql: str) -> str:
+    return f"""Please fix the following SQL query:
+
+```sql
+{raw_sql}
+```"""
+
+
+def get_chat_generate_sql_system_prompt(dialect: str, schema_text: str) -> str:
+    return f"""You are an expert SQL Assistant specialized in {dialect} syntax.
+Your task is to generate optimized, runnable SQL queries based on the user's request and the provided database schema.
+
+{schema_text}
+
+### INSTRUCTIONS:
+1. You must respond with the SQL query inside a markdown block (` ```sql ... ``` `).
+2. You can also provide a brief explanation of the query before or after the markdown block.
+3. Ensure the syntax strictly follows {dialect} conventions.
+4. Use the exact table and column names provided in the schema.
+5. Pay close attention to the Sample Values in the schema (if provided). Use them to understand the actual data format (e.g. if a column contains "Còn hàng", compare as string; if boolean contains "1", use that).
+"""
+
+SQL_FIX_SYSTEM_PROMPT = """
+You are a SQL debugging expert for {dialect}.
+Your task is to fix a SQL query that failed during execution.
+
+CRITICAL RULES:
+- Read the error message carefully to understand the root cause
+- Read the sample data carefully — actual column values reveal the true data type/format
+- DO NOT assume data types from column names. Always verify from sample data.
+- If a column is declared VARCHAR but sample shows "Còn hàng"/"Hết hàng", compare as string
+- If a column is declared BOOLEAN but sample shows "1"/"0", cast appropriately
+- Fix ONLY what the error requires — do not rewrite unrelated parts of the query
+- Always output the fixed SQL in a ```sql code block
+- After the code block, explain in 1-2 sentences what was wrong and what you changed
+"""
+
+def get_sql_fix_system_prompt(dialect: str) -> str:
+    return SQL_FIX_SYSTEM_PROMPT.format(dialect=dialect)
+
+
+def get_sql_fix_prompt(
+    original_sql: str,
+    error_message: str,
+    schema_with_samples: str,
+    user_hint: str = "",
+) -> str:
+    hint_section = f"\nUser hint: {user_hint}\n" if user_hint.strip() else ""
+    return f"""SQL that failed:
+```sql
+{original_sql}
+```
+
+Execution error:
+{error_message}
+
+{hint_section}
+{schema_with_samples}
+
+Fix the SQL based on the error and actual sample data above.
+"""

@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
@@ -65,10 +66,17 @@ class OptimizationCache:
         logger.info(f"[CACHE] Stored result for key: {key[:8]}...")
 
 
+# True chỉ khi backend chạy bên trong Docker container
+_RUNNING_IN_DOCKER = os.environ.get("RUNNING_IN_DOCKER", "false").lower() == "true"
+
+
 class ConnectionStringBuilder:
     @staticmethod
     def resolve_docker_host(host: str) -> str:
-        if host in LOCALHOSTS:
+        """Chuyển localhost → host.docker.internal CHỈ khi chạy trong Docker.
+        Khi chạy trực tiếp trên host machine thì giữ nguyên localhost.
+        """
+        if _RUNNING_IN_DOCKER and host in LOCALHOSTS:
             return "host.docker.internal"
         return host
 

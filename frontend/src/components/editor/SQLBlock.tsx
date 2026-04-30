@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Play, Zap, FileText, Copy, Check, AlignLeft, Loader2, Edit2, X, Save } from 'lucide-react';
+import { Play, Zap, FileText, Copy, Check, AlignLeft, Loader2, Edit2, X, Save, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { formatSql } from '../../utils/sqlFormatter';
 import { chatService } from '../../services/chatService';
@@ -30,6 +30,7 @@ export function SQLBlock({
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editSqlValue, setEditSqlValue] = useState(displaySql);
   const [isSaving, setIsSaving] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Auto-format SQL whenever it changes from backend/props
@@ -44,7 +45,7 @@ export function SQLBlock({
       textareaRef.current.style.height = 'auto';
       textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
     }
-  }, [displaySql]);
+  }, [displaySql, isExpanded]);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(displaySql);
@@ -85,9 +86,9 @@ export function SQLBlock({
   };
 
   return (
-    <div className="rounded-lg border border-border dark:border-border-dark overflow-hidden bg-background dark:bg-background-dark relative">
+    <div className="rounded-lg border border-border dark:border-border-dark bg-background dark:bg-background-dark relative flex flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2 bg-surface dark:bg-surface-dark border-b border-border dark:border-border-dark">
+      <div className="sticky top-0 z-20 flex items-center justify-between px-4 py-2 bg-surface dark:bg-surface-dark border-b border-border dark:border-border-dark rounded-t-[7px]">
         <div className="flex items-center gap-2">
           <FileText className="w-4 h-4 text-primary dark:text-primary-dark" />
           <span className="text-sm font-medium text-text-main-DEFAULT dark:text-text-main-dark">Generated SQL</span>
@@ -134,7 +135,7 @@ export function SQLBlock({
       </div>
 
       {/* SQL Code - Editable Textarea */}
-      <div className="p-4 bg-background dark:bg-background-dark">
+      <div className="p-4 bg-background dark:bg-background-dark relative">
         <textarea
           ref={textareaRef}
           value={displaySql}
@@ -144,15 +145,42 @@ export function SQLBlock({
             'bg-transparent text-text-main-DEFAULT dark:text-text-main-dark',
             'focus:outline-none focus:ring-0',
             'border-0 p-0',
-            'selection:bg-primary/20 selection:text-primary dark:selection:bg-primary-dark/30 dark:selection:text-primary-dark'
+            'selection:bg-primary/20 selection:text-primary dark:selection:bg-primary-dark/30 dark:selection:text-primary-dark',
+            !isExpanded && 'max-h-[300px]'
           )}
           spellCheck={false}
           style={{ minHeight: '100px' }}
         />
+        
+        {!isExpanded && textareaRef.current && textareaRef.current.scrollHeight > 300 && (
+          <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-background dark:from-background-dark to-transparent pointer-events-none" />
+        )}
       </div>
 
+      {/* Expand/Collapse Toggle */}
+      {textareaRef.current && textareaRef.current.scrollHeight > 300 && (
+        <div className="flex justify-center -mt-3 relative z-10 pb-3">
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="flex items-center gap-1 px-3 py-1 text-xs font-medium rounded-full bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-text-muted-DEFAULT dark:text-text-muted-dark hover:text-text-main-DEFAULT dark:hover:text-text-main-dark transition-colors shadow-sm"
+          >
+            {isExpanded ? (
+              <>
+                <ChevronUp className="w-3 h-3" />
+                Show Less
+              </>
+            ) : (
+              <>
+                <ChevronDown className="w-3 h-3" />
+                Show More
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
       {/* Action Bar */}
-      <div className="flex items-center gap-2 px-4 py-3 bg-surface dark:bg-surface-dark border-t border-border dark:border-border-dark">
+      <div className="sticky bottom-0 z-20 flex items-center gap-2 px-4 py-3 bg-surface dark:bg-surface-dark border-t border-border dark:border-border-dark rounded-b-[7px]">
         {onExecute && (
           <button
             onClick={() => onExecute(displaySql)}

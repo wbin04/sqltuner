@@ -13,6 +13,23 @@ class ChatCompletionRequest(BaseModel):
         default=None,
         description="Answers from clarification step: [{q: str, answer: str}]"
     )
+    chat_mode: Literal["chat", "check", "gen", "fix"] = Field(
+        default="chat",
+        description=(
+            "chat: generate SQL from natural language. "
+            "check: validate/fix SQL syntax — bypasses LLM if already valid. "
+            "gen: design database schema. "
+            "fix: fix execution error using sample data."
+        )
+    )
+    error_message: Optional[str] = Field(
+        None,
+        description="Error from SQL execution — used in fix mode"
+    )
+    original_sql: Optional[str] = Field(
+        None,
+        description="The SQL that failed — used in fix mode"
+    )
 
 
 class ChatCompletionResponse(BaseModel):
