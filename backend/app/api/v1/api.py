@@ -1,9 +1,21 @@
-from app.api.v1.endpoints import (auth, chat, connections, db_inspector,
-                                  history, schema_generator, simulation, sql,
-                                  tasks)
+from app.api.v1.endpoints import (admin, auth, chat, connections,
+                                  db_inspector, evaluation, history,
+                                  schema_generator, simulation, sql, tasks)
 from fastapi import APIRouter
 
 api_router = APIRouter()
+
+api_router.include_router(
+    admin.router,
+    prefix="/admin",
+    tags=["admin"]
+)
+
+api_router.include_router(
+    evaluation.router,
+    prefix="/evaluation",
+    tags=["evaluation"]
+)
 
 api_router.include_router(
     auth.router,

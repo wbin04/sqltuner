@@ -29,3 +29,6 @@ migrations/
 
 # Backup
 *.zip
+
+# Evaluation
+eval_results.json

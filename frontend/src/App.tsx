@@ -12,11 +12,13 @@ import { HistoryPage } from './pages/user/HistoryPage';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { FeedbackReview } from './pages/admin/FeedbackReview';
 import { UserManagement } from './pages/admin/UserManagement';
+import { ConnectionsManagement } from './pages/admin/ConnectionsManagement';
+import { EvaluationPage } from './pages/admin/EvaluationPage';
 import { SchemaEditor } from './pages/user/TableEditor';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
-type AdminPage = 'dashboard' | 'users' | 'feedback' | 'connections' | 'settings';
+type AdminPage = 'dashboard' | 'users' | 'feedback' | 'connections' | 'evaluation' | 'settings';
 
 function LoginRoute() {
   const { isAuthenticated, user } = useAuth();
@@ -89,12 +91,15 @@ function AppContent() {
       case 'feedback':
         return <FeedbackReview />;
       case 'connections':
+        return <ConnectionsManagement />;
+      case 'evaluation':
+        return <EvaluationPage />;
       case 'settings':
         return (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
               <h2 className="text-2xl font-bold text-text-main-DEFAULT dark:text-text-main-dark mb-2">
-                {currentAdminPage.charAt(0).toUpperCase() + currentAdminPage.slice(1)}
+                System Config
               </h2>
               <p className="text-text-muted-DEFAULT dark:text-text-muted-dark">Coming soon...</p>
             </div>

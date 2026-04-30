@@ -330,12 +330,12 @@ class SystemAPIClient:
                     f"{self.base_url}/api/v1/connections/{conn_id}/import-sql",
                     files={"file": (f"{db_id}.sqlite", f, "application/octet-stream")},
                     cookies=self.cookies,
-                    timeout=30,
+                    timeout=(10, 120),
                 )
             upload_resp.raise_for_status()
         except Exception as e:
             print(f"  [WARN] Upload schema thất bại cho {db_id}: {e}")
-            # Xoá connection vừa tạo để tránh orphan
+            # Xoá connection vừa tạo để tránh orphans
             try:
                 self._delete(f"/api/v1/connections/{conn_id}")
                 self._created_connections.remove(conn_id)
@@ -694,77 +694,85 @@ def run_evaluation(client, use_offline: bool) -> Dict:
     dev_data = dev_data[:Config.LIMIT]
 
     results, errors = [], []
+    interrupted = False
     iterator = tqdm(dev_data, desc="Evaluating") if HAS_TQDM else dev_data
 
-    for item in iterator:
-        question = item["question"]
-        gold_sql = item["query"]
-        db_id    = item["db_id"]
-        hardness = item.get("query_complexity", "unknown")
-        db_path  = get_db_path(spider_dir, db_id)
-        table_info = tables_map.get(db_id, {})
+    try:
+        for item in iterator:
+            question = item["question"]
+            gold_sql = item["query"]
+            db_id    = item["db_id"]
+            hardness = item.get("query_complexity", "unknown")
+            db_path  = get_db_path(spider_dir, db_id)
+            table_info = tables_map.get(db_id, {})
 
-        if not os.path.exists(db_path):
-            errors.append({"db_id": db_id, "error": "DB file not found"})
-            continue
+            if not os.path.exists(db_path):
+                errors.append({"db_id": db_id, "error": "DB file not found"})
+                continue
 
-        meta_schema = build_meta_schema_from_spider(table_info, db_path)
+            meta_schema = build_meta_schema_from_spider(table_info, db_path)
 
-        t0 = time.time()
-        if use_offline:
-            # Offline: truyền meta_schema trực tiếp vào LLM
-            pred_sql = client.generate_sql(question, meta_schema)
-        else:
-            # API mode: truyền db_id + db_path để client tự lấy/tạo
-            # connection đúng cho DB này (per-DB connection management)
-            pred_sql = client.generate_sql(
-                question, meta_schema,
-                db_id=db_id, db_path=db_path,
-            )
-        latency = time.time() - t0
+            t0 = time.time()
+            if use_offline:
+                # Offline: truyền meta_schema trực tiếp vào LLM
+                pred_sql = client.generate_sql(question, meta_schema)
+            else:
+                # API mode: truyền db_id + db_path để client tự lấy/tạo
+                # connection đúng cho DB này (per-DB connection management)
+                pred_sql = client.generate_sql(
+                    question, meta_schema,
+                    db_id=db_id, db_path=db_path,
+                )
+            latency = time.time() - t0
 
-        complexity_score, computed_hardness = sql_complexity_score(gold_sql)
-        final_hardness = hardness if hardness != "unknown" else computed_hardness
+            complexity_score, computed_hardness = sql_complexity_score(gold_sql)
+            final_hardness = hardness if hardness != "unknown" else computed_hardness
 
-        if not pred_sql:
+            if not pred_sql:
+                results.append({
+                    "db_id": db_id, "question": question,
+                    "gold_sql": gold_sql, "pred_sql": None,
+                    "em": 0, "ex": 0, "sl": 0.0,
+                    "hardness": final_hardness,
+                    "complexity_score": complexity_score,
+                    "latency_s": latency,
+                    "error": "no_sql_generated",
+                })
+                continue
+
+            table_names  = table_info.get("table_names_original", [])
+            column_names = [c for _, c in table_info.get("column_names_original", [])]
+
+            ex_score, ex_reason = execution_accuracy_with_reason(pred_sql, gold_sql, db_path)
+
             results.append({
-                "db_id": db_id, "question": question,
-                "gold_sql": gold_sql, "pred_sql": None,
-                "em": 0, "ex": 0, "sl": 0.0,
-                "hardness": final_hardness,
+                "db_id":            db_id,
+                "question":         question,
+                "gold_sql":         gold_sql,
+                "pred_sql":         pred_sql,
+                "em":               exact_match(pred_sql, gold_sql),
+                "ex":               ex_score,
+                "sl":               schema_linkage_accuracy(pred_sql, gold_sql, table_names, column_names),
+                "hardness":         final_hardness,
                 "complexity_score": complexity_score,
-                "latency_s": latency,
-                "error": "no_sql_generated",
+                "latency_s":        latency,
+                "error":            ex_reason,
             })
-            continue
 
-        table_names  = table_info.get("table_names_original", [])
-        column_names = [c for _, c in table_info.get("column_names_original", [])]
+    except KeyboardInterrupt:
+        interrupted = True
+        print(f"\n\n[INFO] Đã nhận Ctrl+C — dừng sau {len(results)} mẫu đã xử lý.")
+        print("[INFO] Đang tổng hợp và lưu kết quả partial...")
 
-        ex_score, ex_reason = execution_accuracy_with_reason(pred_sql, gold_sql, db_path)
-
-        results.append({
-            "db_id":            db_id,
-            "question":         question,
-            "gold_sql":         gold_sql,
-            "pred_sql":         pred_sql,
-            "em":               exact_match(pred_sql, gold_sql),
-            "ex":               ex_score,
-            "sl":               schema_linkage_accuracy(pred_sql, gold_sql, table_names, column_names),
-            "hardness":         final_hardness,
-            "complexity_score": complexity_score,
-            "latency_s":        latency,
-            "error":            ex_reason,   # None nếu đúng, mô tả lý do nếu sai
-        })
-
-    return _aggregate(results, errors)
+    return _aggregate(results, errors, interrupted=interrupted)
 
 
 # ─────────────────────────────────────────────
 # 6. AGGREGATION & REPORT
 # ─────────────────────────────────────────────
 
-def _aggregate(results: List[Dict], errors: List[Dict]) -> Dict:
+def _aggregate(results: List[Dict], errors: List[Dict],
+               interrupted: bool = False) -> Dict:
     total = len(results)
     if total == 0:
         return {"total_evaluated": 0, "errors": errors}
@@ -780,6 +788,7 @@ def _aggregate(results: List[Dict], errors: List[Dict]) -> Dict:
 
     return {
         "timestamp":        datetime.now().isoformat(),
+        "interrupted":      interrupted,          # True nếu bị Ctrl+C
         "config": {
             "spider_dir":   Config.SPIDER_DIR,
             "mode":         Config.MODE,
