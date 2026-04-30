@@ -11,6 +11,7 @@ import re
 import time
 from datetime import datetime, timezone
 from functools import lru_cache
+from app.core.config import settings
 from typing import Any, Dict, Optional
 from uuid import UUID
 
@@ -47,19 +48,65 @@ SCHEMA_DESIGN_MIN_WORDS_FOR_DIRECT_GENERATE = 12
 # Schema formatting helpers
 # ---------------------------------------------------------------------------
 
-@lru_cache(maxsize=128)
 def _cached_format_schema(schema_json: str, limit_tables: int, mentioned_table_names: tuple) -> str:
+    """Format schema for LLM prompt.
+    Cached with lru_cache only when ENABLE_QUERY_CACHE=True (opt-in).
+    Default (False): always rebuild so the LLM receives the freshest schema.
+    """
     meta_schema = json.loads(schema_json)
     all_tables = meta_schema.get("tables", [])
     mentioned_tables = None
     if mentioned_table_names:
-        mentioned_tables = [t for t in all_tables if t.get("name") in mentioned_table_names]
+        names_lower = {n.lower() for n in mentioned_table_names}
+        mentioned_tables = [t for t in all_tables if t.get("name", "").lower() in names_lower]
     return format_schema_for_prompt(meta_schema, limit_tables, mentioned_tables)
+
+
+if settings.ENABLE_QUERY_CACHE:
+    _cached_format_schema = lru_cache(maxsize=128)(_cached_format_schema)
 
 
 def extract_mentioned_tables(message: str, all_tables: list) -> list:
     message_lower = message.lower()
     return [t for t in all_tables if t.get("name", "").lower() in message_lower]
+
+
+def _expand_tables_by_fk(seed_tables: list, all_tables: list) -> list:
+    """BFS từ seed_tables theo FK (2 chiều) để kéo toàn bộ bảng liên quan.
+
+    Ví dụ: seed=[student] → discover has_pet (FK → student) → discover pets (FK → has_pet)
+    Đảm bảo LLM luôn thấy đủ schema kể cả khi bảng trung gian không được đề cập.
+    """
+    if not seed_tables:
+        return []
+
+    table_by_name = {t.get("name", "").lower(): t for t in all_tables}
+    visited: set = set()
+    queue = list(seed_tables)
+
+    while queue:
+        table = queue.pop(0)
+        tname = table.get("name", "").lower()
+        if tname in visited:
+            continue
+        visited.add(tname)
+
+        # Outgoing FKs: bảng này trỏ tới bảng nào
+        for fk in table.get("foreign_keys", []):
+            ref = fk.get("ref_table", "").lower()
+            if ref and ref not in visited and ref in table_by_name:
+                queue.append(table_by_name[ref])
+
+        # Incoming FKs: bảng nào trỏ vào bảng này
+        for t in all_tables:
+            if t.get("name", "").lower() in visited:
+                continue
+            for fk in t.get("foreign_keys", []):
+                if fk.get("ref_table", "").lower() == tname:
+                    queue.append(t)
+                    break
+
+    return [t for t in all_tables if t.get("name", "").lower() in visited]
 
 
 def format_schema_for_prompt(meta_schema: dict, limit_tables: int = 10, mentioned_tables: list = None) -> str:
@@ -374,7 +421,19 @@ async def _handle_chat_mode(
 
     # Build schema context
     all_tables = connection.meta_schema.get("tables", []) if connection.meta_schema else []
+
+    # Step 1: find tables directly mentioned by name in the message
     mentioned_tables = extract_mentioned_tables(message, all_tables)
+
+    # Step 2: BFS-expand via FK relationships (both directions) so join tables
+    # like has_pet / bridge tables are included even if not named in the question.
+    if mentioned_tables:
+        mentioned_tables = _expand_tables_by_fk(mentioned_tables, all_tables)
+        logger.info(
+            "[CHAT] schema tables after FK expansion: %s",
+            [t.get('name') for t in mentioned_tables],
+        )
+
     schema_json = json.dumps(connection.meta_schema or {})
     mentioned_names = tuple(sorted([t.get("name") for t in mentioned_tables])) if mentioned_tables else ()
     schema_text = _cached_format_schema(schema_json, 10, mentioned_names)

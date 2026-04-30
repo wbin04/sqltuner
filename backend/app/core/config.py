@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     COOKIE_REFRESH_TOKEN_NAME: str = "refresh_token"
 
     ENABLE_DATABASE: bool = True
+    # Cache mode: False (default) = always fresh — no SQLAlchemy compiled-query cache,
+    # no LRU schema cache. True = keep both caches for better throughput.
+    ENABLE_QUERY_CACHE: bool = False
 
     SANDBOX_MAX_ROWS: int = 10000
     RESULT_MAX_ROWS: int = 100
