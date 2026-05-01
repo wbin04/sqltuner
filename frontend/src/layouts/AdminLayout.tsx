@@ -12,10 +12,11 @@ interface AdminLayoutProps {
 
 export function AdminLayout({ children, currentPage, onNavigate, onLogout }: AdminLayoutProps) {
   const menuItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+    { id: 'evaluation', label: 'Evaluation Dashboard', icon: FlaskConical },
     { id: 'users', label: 'User Management', icon: Users },
     { id: 'connections', label: 'DB Connections', icon: Database },
-    { id: 'evaluation', label: 'Query Evaluation', icon: FlaskConical },
+    // add here
     { id: 'feedback', label: 'AI Training (RLHF)', icon: Brain },
     { id: 'settings', label: 'System Config', icon: Settings },
   ];

@@ -30,7 +30,7 @@ export function AdminDashboard() {
       <div className="p-6 flex items-center justify-center h-full">
         <div className="flex flex-col items-center gap-3">
           <RefreshCw className="w-8 h-8 text-primary dark:text-primary-dark animate-spin" />
-          <p className="text-text-muted-DEFAULT dark:text-text-muted-dark">Loading dashboard...</p>
+          <p className="text-text-muted-DEFAULT dark:text-text-muted-dark">Loading overview...</p>
         </div>
       </div>
     );

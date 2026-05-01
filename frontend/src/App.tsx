@@ -18,7 +18,7 @@ import { SchemaEditor } from './pages/user/TableEditor';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
-type AdminPage = 'dashboard' | 'users' | 'feedback' | 'connections' | 'evaluation' | 'settings';
+type AdminPage = 'overview' | 'users' | 'feedback' | 'connections' | 'evaluation' | 'settings';
 
 function LoginRoute() {
   const { isAuthenticated, user } = useAuth();
@@ -26,7 +26,7 @@ function LoginRoute() {
 
   if (isAuthenticated) {
     if (location.pathname === '/login') {
-      return <Navigate to={user?.role === 'admin' ? '/admin' : '/workspaces'} replace />;
+      return <Navigate to={user?.role === 'admin' ? '/admin' : '/overview'} replace />;
     }
     return null;
   }
@@ -35,7 +35,7 @@ function LoginRoute() {
 }
 
 function AppContent() {
-  const [currentAdminPage, setCurrentAdminPage] = useState<AdminPage>('dashboard');
+  const [currentAdminPage, setCurrentAdminPage] = useState<AdminPage>('overview');
   const { isAuthenticated, isLoading, logout, user } = useAuth();
 
   const ProtectedUserLayout = () => {
@@ -69,7 +69,7 @@ function AppContent() {
     }
     // Check if user is admin
     if (user?.role !== 'admin') {
-      return <Navigate to="/workspaces" replace />;
+      return <Navigate to="/overview" replace />;
     }
     return (
       <AdminLayout 
@@ -84,7 +84,7 @@ function AppContent() {
 
   const renderAdminPage = () => {
     switch (currentAdminPage) {
-      case 'dashboard':
+      case 'overview':
         return <AdminDashboard />;
       case 'users':
         return <UserManagement />;
@@ -119,7 +119,7 @@ function AppContent() {
       
       {/* User Routes */}
       <Route element={<ProtectedUserLayout />}>
-        <Route path="/dashboard" element={<DashboardHome />} />
+        <Route path="/overview" element={<DashboardHome />} />
         <Route path="/workspaces" element={<WorkspacesPage />} />
         <Route path="/history" element={<HistoryPage />} />
         <Route path="/settings" element={
@@ -160,7 +160,7 @@ function AppContent() {
         )
       } />
 
-      <Route path="/" element={<Navigate to="/workspaces" replace />} />
+      <Route path="/" element={<Navigate to="/overview" replace />} />
     </Routes>
   );
 }

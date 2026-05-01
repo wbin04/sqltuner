@@ -24,7 +24,7 @@ interface MenuItem {
 }
 
 const menuItems: MenuItem[] = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, path: '/' },
+  { id: 'overview', label: 'Overview', icon: LayoutDashboard, path: '/overview' },
   { id: 'workspaces', label: 'Workspaces', icon: Database, path: '/workspaces' },
   { id: 'history', label: 'History', icon: FileText, path: '/history' },
   { id: 'settings', label: 'Settings', icon: Settings, path: '/settings' },
