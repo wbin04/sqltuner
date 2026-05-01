@@ -1,4 +1,4 @@
-from app.api.v1.endpoints import (admin, auth, chat, connections,
+from app.api.v1.endpoints import (admin, admin_eval, auth, chat, connections,
                                   db_inspector, evaluation, history,
                                   schema_generator, simulation, sql, tasks)
 from fastapi import APIRouter
@@ -9,6 +9,12 @@ api_router.include_router(
     admin.router,
     prefix="/admin",
     tags=["admin"]
+)
+
+api_router.include_router(
+    admin_eval.router,
+    prefix="/admin-eval",
+    tags=["admin-eval"]
 )
 
 api_router.include_router(

@@ -372,7 +372,7 @@ export function EditorPage() {
                         </div>
 
                         {/* Show SQL suggestion for common errors */}
-                        {(() => {
+                        {/* {(() => {
                           const suggestion = getSQLErrorSuggestion(editorLogic.executeError);
                           if (!suggestion) return null;
 
@@ -389,7 +389,7 @@ export function EditorPage() {
                               </pre>
                             </div>
                           );
-                        })()}
+                        })()} */}
                       </div>
                     </div>
                   </div>

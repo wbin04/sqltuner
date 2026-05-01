@@ -14,11 +14,12 @@ import { FeedbackReview } from './pages/admin/FeedbackReview';
 import { UserManagement } from './pages/admin/UserManagement';
 import { ConnectionsManagement } from './pages/admin/ConnectionsManagement';
 import { EvaluationPage } from './pages/admin/EvaluationPage';
+import { AdminEvalPage } from './pages/admin/AdminEvalPage';
 import { SchemaEditor } from './pages/user/TableEditor';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
-type AdminPage = 'overview' | 'users' | 'feedback' | 'connections' | 'evaluation' | 'settings';
+type AdminPage = 'overview' | 'users' | 'feedback' | 'connections' | 'evaluation' | 'eval-runner' | 'settings';
 
 function LoginRoute() {
   const { isAuthenticated, user } = useAuth();
@@ -94,6 +95,8 @@ function AppContent() {
         return <ConnectionsManagement />;
       case 'evaluation':
         return <EvaluationPage />;
+      case 'eval-runner':
+        return <AdminEvalPage />;
       case 'settings':
         return (
           <div className="flex items-center justify-center h-full">

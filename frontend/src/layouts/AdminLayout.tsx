@@ -1,5 +1,5 @@
 import { ReactNode } from 'react';
-import { LayoutDashboard, Users, Brain, Database, Settings, LogOut, FlaskConical } from 'lucide-react';
+import { LayoutDashboard, Users, Brain, Database, Settings, LogOut, FlaskConical, PlayCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ThemeToggle } from '../components/ui/ThemeToggle';
 
@@ -16,7 +16,7 @@ export function AdminLayout({ children, currentPage, onNavigate, onLogout }: Adm
     { id: 'evaluation', label: 'Evaluation Dashboard', icon: FlaskConical },
     { id: 'users', label: 'User Management', icon: Users },
     { id: 'connections', label: 'DB Connections', icon: Database },
-    // add here
+    { id: 'eval-runner', label: 'Evaluation Runner', icon: PlayCircle },
     { id: 'feedback', label: 'AI Training (RLHF)', icon: Brain },
     { id: 'settings', label: 'System Config', icon: Settings },
   ];

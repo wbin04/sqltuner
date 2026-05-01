@@ -65,6 +65,11 @@ class Settings(BaseSettings):
     SANDBOX_MAX_ROWS: int = 10000
     RESULT_MAX_ROWS: int = 100
 
+    # Spider evaluation dataset directory
+    SPIDER_DIR: str = "E:/spider/spider_data"
+    # Admin evaluation output directory (relative to project root)
+    ADMIN_EVAL_DIR: str = ""  # Auto-resolved to <PROJECT_ROOT>/evaluation/admin_eval
+
     # Cloud Tasks Configuration
     ENVIRONMENT: str = "local"  # "local" hoặc "production"
     GCP_PROJECT_ID: Optional[str] = None
