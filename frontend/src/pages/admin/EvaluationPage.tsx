@@ -56,7 +56,7 @@ export function EvaluationPage() {
         <div className="flex items-center gap-4">
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="text-3xl font-bold text-text-main-DEFAULT dark:text-text-main-dark">Query Evaluation</h1>
+              <h1 className="text-3xl font-bold text-text-main-DEFAULT dark:text-text-main-dark">Evaluation Dashboard</h1>
               {data.interrupted && (
                 <span className="px-2 py-1 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 text-xs font-bold rounded flex items-center gap-1 border border-amber-200 dark:border-amber-800/50">
                   <AlertCircle className="w-3 h-3" />
@@ -118,10 +118,11 @@ function OverviewTab({ data }: { data: EvalResults }) {
   const failCount = total_evaluated - passCount;
 
   const metricCards = [
-    { label: 'Exact Match', value: overall['EM (%)'], color: 'text-blue-600 dark:text-blue-400' },
-    { label: 'Execution Accuracy', value: overall['EX (%)'], color: 'text-emerald-600 dark:text-emerald-400' },
-    { label: 'Schema Linkage', value: overall['SL (%)'], color: 'text-cyan-600 dark:text-cyan-400' },
-    { label: 'Avg Latency', value: overall.avg_latency_s, unit: 's', color: 'text-orange-600 dark:text-orange-400' },
+    { label: 'Exact Match', value: overall?.['EM (%)'] ?? 0, color: 'text-blue-600 dark:text-blue-400' },
+    { label: 'Execution Accuracy', value: overall?.['EX (%)'] ?? 0, color: 'text-emerald-600 dark:text-emerald-400' },
+    { label: 'Schema Linkage', value: overall?.['SL_Linkage (%)'] ?? overall?.['SL (%)'] ?? 0, color: 'text-cyan-600 dark:text-cyan-400' },
+    { label: 'Soft Label', value: overall?.['SL (Soft Label %)'] ?? 0, color: 'text-purple-600 dark:text-purple-400' },
+    { label: 'Avg Latency', value: overall?.avg_latency_s ?? 0, unit: 's', color: 'text-orange-600 dark:text-orange-400' },
   ];
 
   const hardnessData = ['easy', 'medium', 'hard', 'extra_hard']
@@ -148,12 +149,12 @@ function OverviewTab({ data }: { data: EvalResults }) {
       </div>
 
       {/* Metric Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         {metricCards.map(m => (
           <div key={m.label} className="bg-surface-light dark:bg-surface-dark rounded-xl border border-border-DEFAULT dark:border-border-dark p-5">
             <p className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark mb-2">{m.label}</p>
             <p className={cn('text-3xl font-bold', m.color)}>
-              {m.unit ? m.value.toFixed(3) : m.value.toFixed(1)}<span className="text-lg ml-1">{m.unit || '%'}</span>
+              {(m.value || 0).toFixed(m.unit ? 3 : 1)}<span className="text-lg ml-1">{m.unit || '%'}</span>
             </p>
           </div>
         ))}
@@ -227,9 +228,9 @@ function OverviewTab({ data }: { data: EvalResults }) {
               <tr key={h.name} className="hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark">
                 <td className="px-6 py-3 text-sm font-medium text-text-main-DEFAULT dark:text-text-main-dark capitalize">{h.name.replace('_', ' ')}</td>
                 <td className="px-6 py-3 text-sm text-text-muted-DEFAULT dark:text-text-muted-dark">{h.count}</td>
-                <td className="px-6 py-3 text-sm font-medium text-blue-600 dark:text-blue-400">{h.EM.toFixed(1)}%</td>
-                <td className="px-6 py-3 text-sm font-medium text-emerald-600 dark:text-emerald-400">{h.EX.toFixed(1)}%</td>
-                <td className="px-6 py-3 text-sm font-medium text-cyan-600 dark:text-cyan-400">{h.SL.toFixed(1)}%</td>
+                <td className="px-6 py-3 text-sm font-medium text-blue-600 dark:text-blue-400">{(h.EM || 0).toFixed(1)}%</td>
+                <td className="px-6 py-3 text-sm font-medium text-emerald-600 dark:text-emerald-400">{(h.EX || 0).toFixed(1)}%</td>
+                <td className="px-6 py-3 text-sm font-medium text-cyan-600 dark:text-cyan-400">{(h.SL || 0).toFixed(1)}%</td>
               </tr>
             ))}
           </tbody>

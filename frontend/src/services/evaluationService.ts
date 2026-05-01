@@ -3,7 +3,9 @@ import api from '../lib/axios';
 export interface EvalOverall {
   'EM (%)': number;
   'EX (%)': number;
-  'SL (%)': number;
+  'SL (%)'?: number;
+  'SL (Soft Label %)'?: number;
+  'SL_Linkage (%)'?: number;
   avg_latency_s: number;
 }
 
