@@ -3,6 +3,17 @@
  * Type definitions for SQL optimization feature
  */
 
+export interface StatsComparison {
+  metric_type: 'execution_time' | 'planner_cost';
+  original_time_ms: number | null;
+  optimized_time_ms: number | null;
+  improvement_percent: number;
+  speedup_factor: number | null;
+  // backward compat
+  old_cost?: number | null;
+  new_cost?: number | null;
+}
+
 export interface OptimizationAnalysis {
   original_cost: number | null;
   bottlenecks: string[];
@@ -11,11 +22,7 @@ export interface OptimizationAnalysis {
   explanation: string;
   rewrite_type?: string | null;
   changes_made?: string[];
-  stats_comparison?: {
-    old_cost: number;
-    new_cost: number;
-    improvement_percent: number;
-  };
+  stats_comparison?: StatsComparison;
 }
 
 export interface OptimizationRequest {
@@ -32,7 +39,7 @@ export interface OptimizationResponse {
   rewrite_type?: string | null;
   changes_made?: string[];
   bottlenecks?: string[];
-  stats_comparison?: Record<string, unknown> | null;
+  stats_comparison?: StatsComparison | null;
   query_log_id?: string | null;
 }
 

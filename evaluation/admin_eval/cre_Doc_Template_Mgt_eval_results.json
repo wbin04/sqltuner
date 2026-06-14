@@ -1,0 +1,171 @@
+{
+  "timestamp": "2026-06-30T20:29:24.071049",
+  "total_evaluated": 10,
+  "total_errors": 0,
+  "overall": {
+    "EM (%)": 60.0,
+    "EX (%)": 100.0,
+    "SL (Soft Label %)": 100.0,
+    "SL_Linkage (%)": 100.0,
+    "avg_latency_s": 13.405
+  },
+  "by_hardness": {
+    "easy": {
+      "count": 10,
+      "em": 60.0,
+      "ex": 100.0,
+      "sl": 100.0
+    }
+  },
+  "detailed_results": [
+    {
+      "db_id": "cre_Doc_Template_Mgt",
+      "question": "How many documents do we have?",
+      "gold_sql": "SELECT count(*) FROM Documents",
+      "pred_sql": "SELECT count(*) FROM Documents;",
+      "em": 1,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "easy",
+      "complexity_score": 0.3,
+      "latency_s": 12.851340532302856,
+      "error": null
+    },
+    {
+      "db_id": "cre_Doc_Template_Mgt",
+      "question": "Count the number of documents.",
+      "gold_sql": "SELECT count(*) FROM Documents",
+      "pred_sql": "SELECT count(*) FROM Documents;",
+      "em": 1,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "easy",
+      "complexity_score": 0.3,
+      "latency_s": 13.172354221343994,
+      "error": null
+    },
+    {
+      "db_id": "cre_Doc_Template_Mgt",
+      "question": "List document IDs, document names, and document descriptions for all documents.",
+      "gold_sql": "SELECT document_id ,  document_name ,  document_description FROM Documents",
+      "pred_sql": "SELECT\n  Document_ID,\n  Document_Name,\n  Document_Description\nFROM Documents;",
+      "em": 1,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "easy",
+      "complexity_score": 0.0,
+      "latency_s": 12.873086929321289,
+      "error": null
+    },
+    {
+      "db_id": "cre_Doc_Template_Mgt",
+      "question": "What are the ids, names, and descriptions for all documents?",
+      "gold_sql": "SELECT document_id ,  document_name ,  document_description FROM Documents",
+      "pred_sql": "SELECT\n  Document_ID,\n  Document_Name,\n  Document_Description\nFROM Documents;",
+      "em": 1,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "easy",
+      "complexity_score": 0.0,
+      "latency_s": 14.374851942062378,
+      "error": null
+    },
+    {
+      "db_id": "cre_Doc_Template_Mgt",
+      "question": "What is the document name and template id for document with description with the letter 'w' in it?",
+      "gold_sql": "SELECT document_name ,  template_id FROM Documents WHERE Document_Description LIKE \"%w%\"",
+      "pred_sql": "SELECT\n  Document_Name,\n  Template_ID\nFROM Documents\nWHERE\n  Document_Description LIKE '%w%';",
+      "em": 0,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "easy",
+      "complexity_score": 0.0,
+      "latency_s": 13.749391555786133,
+      "error": null
+    },
+    {
+      "db_id": "cre_Doc_Template_Mgt",
+      "question": "Return the names and template ids for documents that contain the letter w in their description.",
+      "gold_sql": "SELECT document_name ,  template_id FROM Documents WHERE Document_Description LIKE \"%w%\"",
+      "pred_sql": "SELECT\n  Document_Name,\n  Template_ID\nFROM Documents\nWHERE Document_Description LIKE '%w%';",
+      "em": 0,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "easy",
+      "complexity_score": 0.0,
+      "latency_s": 13.447105884552002,
+      "error": null
+    },
+    {
+      "db_id": "cre_Doc_Template_Mgt",
+      "question": "What is the document id, template id and description for document named \"Robbin CV\"?",
+      "gold_sql": "SELECT document_id ,  template_id ,  Document_Description FROM Documents WHERE document_name  =  \"Robbin CV\"",
+      "pred_sql": "SELECT \n    Document_ID, \n    Template_ID, \n    Document_Description\nFROM Documents\nWHERE Document_Name = 'Robbin CV';",
+      "em": 0,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "easy",
+      "complexity_score": 0.0,
+      "latency_s": 14.968536376953125,
+      "error": null
+    },
+    {
+      "db_id": "cre_Doc_Template_Mgt",
+      "question": "Return the document id, template id, and description for the document with the name Robbin CV.",
+      "gold_sql": "SELECT document_id ,  template_id ,  Document_Description FROM Documents WHERE document_name  =  \"Robbin CV\"",
+      "pred_sql": "SELECT \n    Document_ID, \n    Template_ID, \n    Document_Description\nFROM Documents\nWHERE Document_Name = 'Robbin CV';",
+      "em": 0,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "easy",
+      "complexity_score": 0.0,
+      "latency_s": 12.970960140228271,
+      "error": null
+    },
+    {
+      "db_id": "cre_Doc_Template_Mgt",
+      "question": "How many different templates do all document use?",
+      "gold_sql": "SELECT count(DISTINCT template_id) FROM Documents",
+      "pred_sql": "SELECT count(DISTINCT Template_ID) \nFROM Documents;",
+      "em": 1,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "easy",
+      "complexity_score": 0.8,
+      "latency_s": 12.755220890045166,
+      "error": null
+    },
+    {
+      "db_id": "cre_Doc_Template_Mgt",
+      "question": "Count the number of different templates used for documents.",
+      "gold_sql": "SELECT count(DISTINCT template_id) FROM Documents",
+      "pred_sql": "SELECT count(DISTINCT Template_ID) \nFROM Documents;",
+      "em": 1,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "easy",
+      "complexity_score": 0.8,
+      "latency_s": 12.883009910583496,
+      "error": null
+    }
+  ],
+  "errors": [],
+  "failed_cases": [],
+  "config": {
+    "spider_dir": "E:/spider/spider_data",
+    "db_id": "cre_Doc_Template_Mgt",
+    "limit": 10,
+    "mode": "api",
+    "llm_model": null
+  }
+}

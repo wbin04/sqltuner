@@ -23,7 +23,7 @@ from app.core.prompts import (SCHEMA_CLARIFICATION_SYSTEM_PROMPT,
                               get_sql_verification_prompt)
 
 from app.repositories.config_repository import config_repository
-from app.services.llm_backends import OllamaBackend, GroqBackend
+from app.services.llm_backends import OllamaBackend, GroqBackend, SQLCoderProxyBackend
 from app.services.llm_backends.base import BaseLLMBackend
 from sqlglot import exp as sqlglot_exp
 
@@ -53,6 +53,19 @@ class LLMService:
             logger.info(
                 "[LLM] Using Groq backend — coder=%s, chat=%s",
                 self.coder_model, self.chat_model,
+            )
+        elif service == "sqlcoderproxy":
+            self._backend = SQLCoderProxyBackend(
+                base_url=settings.SQLCODER_PROXY_URL,
+                api_key=settings.SQLCODER_PROXY_API_KEY,
+            )
+            self.coder_model = settings.SQLCODER_PROXY_MODEL_NAME
+            self.chat_model = settings.SQLCODER_PROXY_CHAT_MODEL_NAME
+            logger.info(
+                "[LLM] Using SQLCoderProxy backend — url=%s, coder=%s, chat=%s",
+                settings.SQLCODER_PROXY_URL,
+                self.coder_model,
+                self.chat_model,
             )
         else:
             self._backend = OllamaBackend(base_url=self.base_url)
@@ -764,7 +777,7 @@ class LLMService:
         pass1_explanation = pass1_result.get("explanation", "").strip()
         pass2_explanation = pass2_result.get("explanation", "").strip()
         if pass2_explanation and pass2_explanation != pass1_explanation:
-            combined_explanation = f"{pass1_explanation} | Verification: {pass2_explanation}"
+            combined_explanation = f"{pass1_explanation}\n\n**Verification Pass:**\n{pass2_explanation}"
         else:
             combined_explanation = pass1_explanation
 
@@ -806,7 +819,7 @@ class LLMService:
 
                 pass3_explanation = pass3_result.get("explanation", "").strip()
                 if pass3_explanation:
-                    combined_explanation += f" | Targeted fix: {pass3_explanation}"
+                    combined_explanation += f"\n\n**Targeted Fix Pass:**\n{pass3_explanation}"
 
                 logger.info("[OPTIMIZE] Pass 3 applied %d fix(es)", len(pass3_changes))
             else:
@@ -1033,6 +1046,21 @@ class LLMService:
             model=self.chat_model,
             prompt=prompt,
             temperature=0.4
+        )
+
+    async def translate_markdown(self, text: str, target_language: str = "vi") -> str:
+        lang_name = "Vietnamese" if target_language == "vi" else "English"
+        system_prompt = (
+            f"You are a professional IT translator. Translate the following text into {lang_name}. "
+            "MAINTAIN all Markdown formatting, code blocks, lists, and bold text exactly as they are. "
+            "DO NOT translate SQL keywords or code inside code blocks. "
+            "ONLY return the translated text, no extra explanation."
+        )
+        return await self._call_ollama(
+            model=self.chat_model,
+            prompt=text,
+            system_prompt=system_prompt,
+            temperature=0.1
         )
 
     async def check_schema_clarification(

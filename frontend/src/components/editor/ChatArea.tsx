@@ -3,15 +3,77 @@
  * Main workbench with chat stream, SQL blocks, and action bar
  */
 import { useState, useEffect, useRef } from 'react';
-import { Send, Sparkles, Loader2 } from 'lucide-react';
+import { Send, Sparkles, Loader2, Languages } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { SchemaGeneratedData } from '../../services/chatService';
 import { SchemaBlock } from './SchemaBlock';
 import { ClarificationBlock } from './ClarificationBlock';
 import { format } from 'date-fns';
 import { SQLBlock } from './SQLBlock';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 const CLARIFICATION_MARKER = 'Before designing the schema, I have a few questions:';
+
+/**
+ * Cleans up LLM markdown by:
+ * 1. Stripping ```sql ... ``` code blocks (rendered separately)
+ * 2. Tightening loose lists (removing \n\n between items) to prevent <p> wrapping inside <li>
+ */
+function cleanMarkdown(content: string): string {
+  let cleaned = content.replace(/```sql[\s\S]*?```/gi, '');
+  // Tighten loose lists
+  cleaned = cleaned.replace(/\n\s*\n(?=\s*[-*+]\s)/g, '\n');
+  return cleaned.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function ChatMarkdownContent({ content }: { content: string }) {
+  const [translated, setTranslated] = useState<string | null>(null);
+  const [isTranslating, setIsTranslating] = useState(false);
+  const [lang, setLang] = useState<'en' | 'vi'>('en');
+
+  const handleTranslate = async () => {
+    if (lang === 'vi') {
+      setLang('en');
+      return;
+    }
+    if (translated) {
+      setLang('vi');
+      return;
+    }
+
+    setIsTranslating(true);
+    try {
+      const { chatService } = await import('../../services/chatService');
+      const res = await chatService.translateMarkdown({
+        text: cleanMarkdown(content),
+        target_language: 'vi'
+      });
+      setTranslated(res.translated_text);
+      setLang('vi');
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsTranslating(false);
+    }
+  };
+
+  return (
+    <div className="relative group/msg pr-8 min-h-[24px]">
+      <button
+        onClick={handleTranslate}
+        disabled={isTranslating}
+        className="absolute -top-1 -right-2 p-1.5 rounded bg-surface-highlight-DEFAULT/50 dark:bg-surface-highlight-dark/50 text-text-muted-DEFAULT dark:text-text-muted-dark hover:text-primary dark:hover:text-primary-dark transition-colors opacity-0 group-hover/msg:opacity-100 disabled:opacity-50"
+        title="Translate"
+      >
+        {isTranslating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Languages className="w-4 h-4" />}
+      </button>
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+        {lang === 'vi' && translated ? translated : cleanMarkdown(content)}
+      </ReactMarkdown>
+    </div>
+  );
+}
 
 interface Message {
   id: string;
@@ -196,12 +258,34 @@ export function ChatArea({
                             </p>
                           </div>
                         ) : (
-                          <p className={cn(
-                            'text-sm whitespace-pre-wrap',
-                            message.role === 'assistant' && 'text-text-main-DEFAULT dark:text-text-main-dark'
+                          <div className={cn(
+                            'text-sm',
+                            message.role === 'assistant' && [
+                              'prose prose-sm dark:prose-invert max-w-none',
+                              // Typography overrides for spacing
+                              'prose-p:my-1 prose-p:leading-relaxed',
+                              'prose-ul:my-1 prose-ol:my-1 prose-li:my-0',
+                              'prose-headings:my-2',
+                              // Force text colors to be sharp (black/white instead of gray)
+                              'text-black dark:text-white',
+                              'prose-p:text-black dark:prose-p:text-white',
+                              'prose-li:text-black dark:prose-li:text-white',
+                              'prose-strong:text-black dark:prose-strong:text-white',
+                              // Inline code styling
+                              'prose-code:px-1.5 prose-code:py-0.5',
+                              'prose-code:bg-primary/10 dark:prose-code:bg-primary/20',
+                              'prose-code:text-primary dark:prose-code:text-primary-dark',
+                              'prose-code:rounded-md prose-code:font-medium',
+                              'prose-code:before:content-none prose-code:after:content-none'
+                            ],
+                            message.role === 'user' && 'whitespace-pre-wrap text-white'
                           )}>
-                            {message.content}
-                          </p>
+                            {message.role === 'assistant' ? (
+                              <ChatMarkdownContent content={message.content} />
+                            ) : (
+                              <p>{message.content}</p>
+                            )}
+                          </div>
                         )}
                       </div>
 

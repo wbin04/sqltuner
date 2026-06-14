@@ -217,7 +217,7 @@ export function AdminEvalPage() {
                       !isLoaded && "opacity-50 cursor-not-allowed"
                     )}>
                     {isRunning ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
-                    {isRunning ? (evalProgress[db.db_id] ? `${evalProgress[db.db_id].current}/${evalProgress[db.db_id].total}` : 'Running...') : 'Evaluate'}
+                    {isRunning ? (evalProgress[db.db_id] ? `${evalProgress[db.db_id].current}/${evalProgress[db.db_id].total}` : 'Starting...') : 'Evaluate'}
                   </button>
 
                   {st?.has_results && (

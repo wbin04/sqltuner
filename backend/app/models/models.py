@@ -224,8 +224,10 @@ class PerformanceAnalysis(Base):
             ondelete="CASCADE"),
         nullable=False,
         unique=True)
-    execution_time_ms = Column(Float)
-    total_cost = Column(Float)
+    execution_time_ms = Column(Float)   # giữ nguyên (legacy)
+    total_cost = Column(Float)          # giữ nguyên (legacy)
+    original_time_ms = Column(Float)    # MỚI: thời gian query gốc (ms)
+    optimized_time_ms = Column(Float)   # MỚI: thời gian query sau optimize (ms)
     explain_plan = Column(JSONB, nullable=False)
     index_recommendation = Column(Text)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())

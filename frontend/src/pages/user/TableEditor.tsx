@@ -25,7 +25,7 @@ export function SchemaEditor() {
   const { workspaceId, conversationId } = useParams<{ workspaceId: string; conversationId?: string }>();
   const navigate = useNavigate();
   const { workspace, isLoading, isError } = useWorkspace(workspaceId!);
-  
+
   const [schema, setSchema] = useState<SimulationSchema>({
     is_simulation: true,
     tables: [],
@@ -38,7 +38,7 @@ export function SchemaEditor() {
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showUnsavedModal, setShowUnsavedModal] = useState(false);
-  
+
   const [isImporting, setIsImporting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [showImportConfirm, setShowImportConfirm] = useState(false);
@@ -52,22 +52,22 @@ export function SchemaEditor() {
   useEffect(() => {
     if (!workspace) return;
 
-    const loadedSchema = workspace.meta_schema && 
-      typeof workspace.meta_schema === 'object' && 
+    const loadedSchema = workspace.meta_schema &&
+      typeof workspace.meta_schema === 'object' &&
       'tables' in workspace.meta_schema
-        ? (workspace.meta_schema as any)
-        : { tables: [] };
-    
+      ? (workspace.meta_schema as any)
+      : { tables: [] };
+
     // Generate IDs for all tables and columns, restore FK relationships
     const backendTables = (loadedSchema.tables || []) as BackendTable[];
     const tableIdMap = new Map<string, string>();
     const columnIdMap = new Map<string, Map<string, string>>();
-    
+
     // First pass: Generate all IDs
     const tablesWithIds = backendTables.map(table => {
       const tableId = table.id || uuidv4();
       tableIdMap.set(table.name, tableId);
-      
+
       const colMap = new Map<string, string>();
       const columns = table.columns.map(col => {
         const colId = col.id || uuidv4();
@@ -81,9 +81,9 @@ export function SchemaEditor() {
           default: col.default,
         };
       });
-      
+
       columnIdMap.set(table.name, colMap);
-      
+
       // Process indexes: convert column names to column IDs
       const indexes = (table.indexes || []).map(idx => ({
         id: idx.id || uuidv4(),
@@ -93,7 +93,7 @@ export function SchemaEditor() {
           .filter((id): id is string => !!id),
         unique: idx.unique || false,
       }));
-      
+
       return {
         id: tableId,
         name: table.name,
@@ -103,18 +103,18 @@ export function SchemaEditor() {
         sample_data: table.sample_data || []
       };
     });
-    
+
     // Second pass: Restore FK relationships
     const schemaWithIds: SimulationSchema = {
       is_simulation: true,
       tables: tablesWithIds.map(table => {
         const columnsWithFKs = table.columns.map(col => {
           const fkDef = table.foreign_keys.find(fk => fk.column === col.name);
-          
+
           if (fkDef) {
             const refTableId = tableIdMap.get(fkDef.ref_table);
             const refColId = columnIdMap.get(fkDef.ref_table)?.get(fkDef.ref_column);
-            
+
             if (refTableId && refColId) {
               return {
                 ...col,
@@ -125,10 +125,10 @@ export function SchemaEditor() {
               };
             }
           }
-          
+
           return col;
         });
-        
+
         return {
           id: table.id,
           name: table.name,
@@ -138,13 +138,13 @@ export function SchemaEditor() {
         };
       })
     };
-    
+
     setSchema(schemaWithIds);
-    
+
     // Store initial schema for comparison
     initialSchemaRef.current = JSON.stringify(schemaWithIds);
     setHasUnsavedChanges(false);
-    
+
     // Select first table if available
     if (schemaWithIds.tables && schemaWithIds.tables.length > 0 && !selectedTableId) {
       setSelectedTableId(schemaWithIds.tables[0].id);
@@ -155,7 +155,7 @@ export function SchemaEditor() {
   useEffect(() => {
     async function loadTableData() {
       if (!workspace || !selectedTableId) return;
-      
+
       const selectedTable = schema.tables.find(t => t.id === selectedTableId);
       if (!selectedTable) return;
 
@@ -206,7 +206,7 @@ export function SchemaEditor() {
   // Track changes in schema
   useEffect(() => {
     if (!initialSchemaRef.current) return;
-    
+
     const currentSchemaStr = JSON.stringify(schema);
     const hasChanges = currentSchemaStr !== initialSchemaRef.current;
     setHasUnsavedChanges(hasChanges);
@@ -239,7 +239,7 @@ export function SchemaEditor() {
   // Memoize diagram schema to ensure new object on every schema change
   const diagramSchema = useMemo(() => {
     if (!workspace || !schema.tables.length) return null;
-    
+
     return {
       database_name: workspace.name,
       db_type: workspace.db_type || 'simulation',
@@ -315,11 +315,11 @@ export function SchemaEditor() {
       };
 
       await workspaceService.updateSimulationSchema(workspaceId, payload);
-      
+
       // Update initial schema ref after successful save
       initialSchemaRef.current = JSON.stringify(currentSchema);
       setHasUnsavedChanges(false);
-      
+
       toast.success('Schema saved successfully!', {
         position: 'top-right',
         autoClose: 3000,
@@ -581,7 +581,7 @@ export function SchemaEditor() {
               onClick={() => setIsGenerateModalOpen(true)}
               className={cn(
                 'flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-white',
-                'bg-purple-600 hover:bg-purple-700 transition-colors'
+                'bg-blue-600 hover:bg-blue-700 transition-colors'
               )}
             >
               <Sparkles className="w-4 h-4" />
@@ -726,7 +726,7 @@ export function SchemaEditor() {
         </main>
       </div>
 
-      
+
       <GenerateSchemaModal
         isOpen={isGenerateModalOpen}
         onClose={() => setIsGenerateModalOpen(false)}
@@ -746,14 +746,14 @@ export function SchemaEditor() {
           // First pass: Create table ID map including both existing and new tables
           const tableNameToIdMap = new Map<string, string>();
           const tableIdToColumnsMap = new Map<string, Map<string, string>>();
-          
+
           // Map existing tables
           schema.tables.forEach(t => {
             tableNameToIdMap.set(t.name, t.id);
             const colMap = new Map(t.columns.map(c => [c.name, c.id]));
             tableIdToColumnsMap.set(t.id, colMap);
           });
-          
+
           // Generate IDs for new tables
           updatedSchema.tables.forEach(t => {
             if (!tableNameToIdMap.has(t.name)) {
@@ -763,20 +763,20 @@ export function SchemaEditor() {
               tableIdToColumnsMap.set(newTableId, new Map());
             }
           });
-          
+
           // Process existing tables and new tables
           const processedTables: SimulationTable[] = [];
-          
+
           for (const updatedTable of updatedSchema.tables) {
             const existingTable = schema.tables.find(t => t.name === updatedTable.name);
             const tableId = tableNameToIdMap.get(updatedTable.name)!;
             const columnIdMap = tableIdToColumnsMap.get(tableId)!;
-            
+
             if (existingTable) {
               // Update existing table
               const columnsWithFKs = existingTable.columns.map(col => {
                 const fkDef = updatedTable.foreign_keys?.find(fk => fk.column === col.name);
-                
+
                 if (fkDef) {
                   const refTableId = tableNameToIdMap.get(fkDef.ref_table);
                   const refTable = schema.tables.find(t => t.id === refTableId);
@@ -804,21 +804,21 @@ export function SchemaEditor() {
                 .map(col => {
                   const colId = uuidv4();
                   columnIdMap.set(col.name, colId);
-                  
+
                   // Check if this new column has a foreign key
                   const fkDef = updatedTable.foreign_keys?.find(fk => fk.column === col.name);
                   let fk_target = null;
-                  
+
                   if (fkDef) {
                     const refTableId = tableNameToIdMap.get(fkDef.ref_table);
                     let refColId: string | undefined;
-                    
+
                     // Try to get ref column ID from existing table
                     const refTable = schema.tables.find(t => t.id === refTableId);
                     if (refTable) {
                       refColId = refTable.columns.find(c => c.name === fkDef.ref_column)?.id;
                     }
-                    
+
                     // If ref table is also new, we need to get the column ID from the updated schema
                     if (!refColId && refTableId) {
                       const refUpdatedTable = updatedSchema.tables.find(t => t.name === fkDef.ref_table);
@@ -835,12 +835,12 @@ export function SchemaEditor() {
                         }
                       }
                     }
-                    
+
                     if (refTableId && refColId) {
                       fk_target = { table_id: refTableId, column_id: refColId };
                     }
                   }
-                  
+
                   return {
                     id: colId,
                     name: col.name,
@@ -852,7 +852,7 @@ export function SchemaEditor() {
                 });
 
               // Handle removed columns
-              const remainingColumns = columnsWithFKs.filter(col => 
+              const remainingColumns = columnsWithFKs.filter(col =>
                 updatedTable.columns.some(c => c.name === col.name)
               );
 
@@ -865,21 +865,21 @@ export function SchemaEditor() {
               const newTableColumns = updatedTable.columns.map(col => {
                 const colId = uuidv4();
                 columnIdMap.set(col.name, colId);
-                
+
                 // Check if this column has a foreign key
                 const fkDef = updatedTable.foreign_keys?.find(fk => fk.column === col.name);
                 let fk_target = null;
-                
+
                 if (fkDef) {
                   const refTableId = tableNameToIdMap.get(fkDef.ref_table);
                   let refColId: string | undefined;
-                  
+
                   // Try to get ref column ID from existing table
                   const refTable = schema.tables.find(t => t.id === refTableId);
                   if (refTable) {
                     refColId = refTable.columns.find(c => c.name === fkDef.ref_column)?.id;
                   }
-                  
+
                   // If ref table is also new, get/generate the column ID
                   if (!refColId && refTableId) {
                     const refTableColMap = tableIdToColumnsMap.get(refTableId);
@@ -892,12 +892,12 @@ export function SchemaEditor() {
                       }
                     }
                   }
-                  
+
                   if (refTableId && refColId) {
                     fk_target = { table_id: refTableId, column_id: refColId };
                   }
                 }
-                
+
                 return {
                   id: colId,
                   name: col.name,
@@ -907,7 +907,7 @@ export function SchemaEditor() {
                   fk_target,
                 };
               });
-              
+
               processedTables.push({
                 id: tableId,
                 name: updatedTable.name,
@@ -917,7 +917,7 @@ export function SchemaEditor() {
               });
             }
           }
-          
+
           const newSchema: SimulationSchema = {
             ...schema,
             tables: processedTables,

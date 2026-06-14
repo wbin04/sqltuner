@@ -15,8 +15,8 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = "sqltuner"
     DATABASE_URL: Optional[str] = None
 
-    # LLM Service mode: "ollama" (local) or "groq" (cloud)
-    LLM_SERVICE: str = "groq"
+    # LLM Service mode: "ollama" (local) | "groq" (cloud) | "sqlcoderproxy" (HF proxy)
+    LLM_SERVICE: str = "sqlcoderproxy"
 
     # Ollama settings (used when LLM_SERVICE=ollama)
     OLLAMA_BASE_URL: str = "http://localhost:11434"
@@ -27,6 +27,13 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     GROQ_MODEL_NAME: str = "meta-llama/llama-4-scout-17b-16e-instruct"
     GROQ_CHAT_MODEL_NAME: str = "meta-llama/llama-4-scout-17b-16e-instruct"
+
+    # SQLCoderProxy settings (used when LLM_SERVICE=sqlcoderproxy)
+    # A LiteLLM proxy deployed on Hugging Face Spaces (OpenAI-compatible)
+    SQLCODER_PROXY_URL: str = "https://whehehe04-sqlcoderproxy.hf.space/v1"
+    SQLCODER_PROXY_API_KEY: str = "binproxy"
+    SQLCODER_PROXY_MODEL_NAME: str = "sqlcoder"
+    SQLCODER_PROXY_CHAT_MODEL_NAME: str = "sqlcoder"
 
     BACKEND_CORS_ORIGINS: Union[str, List[str]] = "http://localhost:5173"
 

@@ -33,7 +33,9 @@ export interface HistoryDetail {
   ai_response?: string;
   result_status?: ResultStatus;
   execution_time_ms?: number;
-  total_cost?: number;
+  total_cost?: number;        // backward compat (planner cost)
+  original_time_ms?: number | null;   // MỚI: actual exec time of original query (ms)
+  optimized_time_ms?: number | null;  // MỚI: actual exec time of optimized query (ms)
   explain_plan?: Record<string, any>;
   index_recommendation?: string;
   conversation_id: string;

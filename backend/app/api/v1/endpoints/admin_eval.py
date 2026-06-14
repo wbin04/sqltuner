@@ -122,31 +122,122 @@ def _build_meta_schema_from_spider(table_info: Dict, db_path: str) -> Dict:
         if t == "boolean": return "boolean"
         return "text"
 
-    table_columns: Dict[int, List] = defaultdict(list)
-    for col_idx, (table_idx, col_name) in enumerate(column_names):
+    # ── Step 1: Build initial col_idx -> pg_type map ─────────────────────────
+    col_pg_type: Dict[int, str] = {}
+    for col_idx, (table_idx, _col_name) in enumerate(column_names):
         if table_idx == -1:
             continue
         raw_type = column_types[col_idx] if col_idx < len(column_types) else "text"
-        pg_type = map_spider_type(raw_type)
-        table_columns[table_idx].append({
-            "col_idx": col_idx, "name": col_name,
-            "type": pg_type,
-            "is_pk": col_idx in primary_keys, "is_fk": col_idx in fk_map,
-        })
+        col_pg_type[col_idx] = map_spider_type(raw_type)
 
+    # ── Step 2: Load sample data (needed for FK type harmonization) ───────────
     sample_data_map: Dict[str, List] = {}
     try:
         conn = sqlite3.connect(db_path, timeout=5)
         conn.row_factory = sqlite3.Row
         for tname in table_names:
             try:
-                cur = conn.execute(f'SELECT * FROM "{tname}" LIMIT 3')
+                cur = conn.execute(f'SELECT * FROM "{tname}" LIMIT 50')
                 sample_data_map[tname] = [dict(r) for r in cur.fetchall()]
             except Exception:
                 sample_data_map[tname] = []
         conn.close()
     except Exception:
         pass
+
+    def _col_is_all_numeric(col_idx: int) -> bool:
+        """Return True if every non-null value in this column can be parsed as int."""
+        tidx, cname = column_names[col_idx]
+        if tidx < 0 or tidx >= len(table_names):
+            return False
+        rows = sample_data_map.get(table_names[tidx], [])
+        if not rows:
+            return False
+        for row in rows:
+            val = row.get(cname)
+            if val is None:
+                continue
+            try:
+                int(str(val).strip())
+            except (ValueError, TypeError):
+                return False
+        return True
+
+    # ── Step 3: Harmonize FK type pairs ──────────────────────────────────────
+    # SQLite is loosely typed: text "1" = integer 1 works in JOINs.
+    # PostgreSQL requires strict type matching → "operator does not exist: text = numeric".
+    # Resolution:
+    #   • If the text-side FK column stores only numeric strings → promote to numeric.
+    #   • Otherwise → demote the numeric side to text.
+    for fk_idx, ref_idx in foreign_keys:
+        fk_type = col_pg_type.get(fk_idx)
+        ref_type = col_pg_type.get(ref_idx)
+        if fk_type is None or ref_type is None or fk_type == ref_type:
+            continue
+        if fk_type == "text" and ref_type == "numeric":
+            if _col_is_all_numeric(fk_idx):
+                col_pg_type[fk_idx] = "numeric"
+            else:
+                col_pg_type[ref_idx] = "text"
+        elif fk_type == "numeric" and ref_type == "text":
+            if _col_is_all_numeric(ref_idx):
+                col_pg_type[ref_idx] = "numeric"
+            else:
+                col_pg_type[fk_idx] = "text"
+
+    # ── Step 4: Promote text columns with mostly-numeric data ─────────────────
+    # Spider labels some columns as 'text' that actually store numbers with
+    # occasional sentinel strings ('?', 'null') for missing values.
+    # Examples: cars_data.MPG='18', cars_data.Horsepower='130' (but '?' for unknowns).
+    # If typed as text in PostgreSQL: ORDER BY horsepower gives lexicographic order
+    # ('100' < '46'), AVG/MAX return wrong results or fail.
+    # Fix: detect these columns and promote to numeric; non-numeric values
+    # become NULL during seeding (handled in _sanitize_row_data).
+    NUMERIC_THRESHOLD = 0.7  # 70% of non-null values must be numeric
+
+    def _col_is_mostly_numeric(col_idx: int) -> bool:
+        tidx, cname = column_names[col_idx]
+        if tidx < 0 or tidx >= len(table_names):
+            return False
+        rows = sample_data_map.get(table_names[tidx], [])
+        if not rows:
+            return False
+        numeric_count = total_count = 0
+        for row in rows:
+            val = row.get(cname)
+            if val is None:
+                continue
+            total_count += 1
+            try:
+                float(str(val).strip())
+                numeric_count += 1
+            except (ValueError, TypeError):
+                pass
+        return total_count > 0 and (numeric_count / total_count) >= NUMERIC_THRESHOLD
+
+    for col_idx, (table_idx, _col_name) in enumerate(column_names):
+        if table_idx == -1:
+            continue
+        if col_pg_type.get(col_idx) != "text":
+            continue  # already promoted or non-text
+        if col_idx in primary_keys:
+            continue  # never change PK types
+        if col_idx in fk_map or col_idx in {ref for _, ref in foreign_keys}:
+            continue  # FK harmonization already handled these
+        if _col_is_mostly_numeric(col_idx):
+            col_pg_type[col_idx] = "numeric"
+
+    # ── Step 5: Build table_columns using harmonized types ────────────────────
+    table_columns: Dict[int, List] = defaultdict(list)
+    for col_idx, (table_idx, col_name) in enumerate(column_names):
+        if table_idx == -1:
+            continue
+        pg_type = col_pg_type.get(col_idx, "text")
+        table_columns[table_idx].append({
+            "col_idx": col_idx, "name": col_name,
+            "type": pg_type,
+            "is_pk": col_idx in primary_keys, "is_fk": col_idx in fk_map,
+        })
 
     tables = []
     for t_idx, tname in enumerate(table_names):
@@ -175,8 +266,44 @@ def _build_meta_schema_from_spider(table_info: Dict, db_path: str) -> Dict:
 
 # ── Metrics (from evaluation/run.py) ──────────────────────────────────────────
 
+def _normalize_sql_quotes(sql: str) -> str:
+    """
+    Convert double-quoted string literals in SQL to single-quoted literals.
+    Spider's Gold SQL uses MySQL/SQLite dialect where double-quotes are used
+    for string values (e.g. LIKE "%w%", WHERE name = "Robbin CV").
+    In PostgreSQL, double-quotes denote identifiers — this causes
+    ProgrammingError: column "%w%" does not exist.
+    
+    This function safely converts double-quoted strings to single-quoted
+    strings, while preserving double-quoted identifiers (table/column names).
+    Heuristic: a double-quoted token is a string literal if it contains
+    non-identifier characters (spaces, %, special chars) or appears after
+    SQL operators (=, LIKE, IN, >, <, !=, etc.).
+    """
+    # Pattern: operator/keyword followed by optional whitespace then "..."
+    # Covers: = "val", LIKE "%x%", IN ("a", "b"), > "x", etc.
+    operator_pattern = re.compile(
+        r'((?:=|!=|<>|<=|>=|<|>|\bLIKE\b|\bNOT LIKE\b|\bIN\b|\bNOT IN\b|\bBETWEEN\b|\bAND\b|\bOR\b|\(|,)\s*)'
+        r'"((?:[^"]|"")*)"',
+        re.IGNORECASE
+    )
+    
+    def replace_string_literal(m):
+        prefix = m.group(1)
+        inner = m.group(2)
+        # Escape any single quotes inside the value
+        inner_escaped = inner.replace("'", "''")
+        return f"{prefix}'{inner_escaped}'"
+    
+    return operator_pattern.sub(replace_string_literal, sql)
+
+
 async def _execution_accuracy_with_reason_sandbox(pred_sql, gold_sql, db, meta_schema):
     from app.services.postgres_sandbox_service import postgres_sandbox_service
+    
+    # Normalize Gold SQL: Spider uses double-quotes for string literals
+    # (MySQL/SQLite dialect). PostgreSQL requires single-quotes.
+    gold_sql_pg = _normalize_sql_quotes(gold_sql)
     
     async def _execute(sql):
         try:
@@ -190,7 +317,7 @@ async def _execution_accuracy_with_reason_sandbox(pred_sql, gold_sql, db, meta_s
             return None, str(e)
 
     pred_rows, pred_err = await _execute(pred_sql)
-    gold_rows, gold_err = await _execute(gold_sql)
+    gold_rows, gold_err = await _execute(gold_sql_pg)
 
     if gold_err:
         return 0, f"gold_sql_error: {gold_err}"
@@ -342,14 +469,33 @@ def _extract_sql_from_llm(text: str) -> Optional[str]:
 
 
 def _format_schema_for_prompt(meta_schema: Dict) -> str:
+    """
+    Format meta_schema for LLM prompt. Includes column types so the model
+    can distinguish numeric IDs from text names (ModelId:INT vs Model:TEXT).
+    """
+    def _abbrev_type(t: str) -> str:
+        t = (t or "text").upper()
+        if any(x in t for x in ["NUMERIC", "FLOAT", "REAL", "DECIMAL"]):
+            return "NUM"
+        if "INT" in t:
+            return "INT"
+        if "BOOL" in t:
+            return "BOOL"
+        if any(x in t for x in ["TIMESTAMP", "DATE", "TIME"]):
+            return "DATE"
+        return "TEXT"
+
     lines = []
     for table in meta_schema.get("tables", []):
-        cols = ", ".join(c["name"] for c in table["columns"])
+        cols = ", ".join(
+            f"{c['name']}:{_abbrev_type(c.get('type', 'text'))}"
+            for c in table["columns"]
+        )
         fks = table.get("foreign_keys", [])
         fk_str = ""
         if fks:
             fk_str = " | FK: " + ", ".join(
-                f"{fk['column']}→{fk['ref_table']}.{fk['ref_column']}" for fk in fks
+                f"{fk['column']}->{fk['ref_table']}.{fk['ref_column']}" for fk in fks
             )
         lines.append(f"- {table['name']}({cols}){fk_str}")
     return "\n".join(lines)
@@ -447,13 +593,20 @@ async def list_spider_databases(
     for entry in sorted(db_dir.iterdir()):
         if entry.is_dir():
             db_id = entry.name
+            q_count = question_counts.get(db_id, 0)
+            # Only show databases that have questions in dev.json
+            # (dev.json uses 20 out of 166 databases; the rest are train/test only)
+            if q_count == 0:
+                continue
             sqlite_path = entry / f"{db_id}.sqlite"
             results.append(SpiderDBInfo(
                 db_id=db_id,
-                question_count=question_counts.get(db_id, 0),
+                question_count=q_count,
                 has_sqlite=sqlite_path.exists(),
             ))
 
+    # Sort by question count descending for better usability
+    results.sort(key=lambda x: x.question_count, reverse=True)
     return results
 
 
@@ -586,29 +739,12 @@ async def run_evaluation_for_db(
         db_questions = db_questions[:req.limit]
 
     table_info = tables_map.get(req.db_id, {})
-    db_path = _get_db_path(spider_dir, req.db_id)
-
-    if not os.path.exists(db_path):
-        raise HTTPException(status_code=404, detail=f"SQLite file not found: {db_path}")
-
-    meta_schema = _build_meta_schema_from_spider(table_info, db_path)
-    schema_text = _format_schema_for_prompt(meta_schema)
-
     table_names = table_info.get("table_names_original", [])
     column_names_list = [c for _, c in table_info.get("column_names_original", [])]
 
-    system_prompt = (
-        "You are an expert SQL assistant. Generate ONLY the SQL query.\n"
-        "Database type: SQLite\n"
-        f"Schema:\n{schema_text}\n\n"
-        "Rules:\n"
-        "- Output ONLY the SQL query inside ```sql ... ``` block\n"
-        "- Use exact table and column names from the schema\n"
-        "- No explanations, no comments"
-    )
-
-    results, errors = [], []
-
+    # ── Use stored meta_schema from PostgreSQL (built & FK-harmonized by load-schema) ──
+    # Do NOT re-read SQLite here; the FK type harmonization and sample data are
+    # already persisted in the DBConnection record.
     from uuid import UUID as PyUUID
     from datetime import timezone
 
@@ -622,6 +758,34 @@ async def run_evaluation_for_db(
         )
     )
     connection = existing_conn.scalar_one_or_none()
+
+    if not connection or not connection.meta_schema:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Schema for '{req.db_id}' not loaded yet. "
+                "Please run 'Load Schema' first so the FK-harmonized schema is available."
+            ),
+        )
+
+    meta_schema = connection.meta_schema
+    schema_text = _format_schema_for_prompt(meta_schema)
+
+    system_prompt = (
+        "You are an expert SQL assistant. Generate ONLY the SQL query.\n"
+        "Database type: PostgreSQL\n"
+        f"Schema:\n{schema_text}\n\n"
+        "Column type legend: INT=integer, NUM=numeric/float, TEXT=string, DATE=timestamp\n\n"
+        "Rules:\n"
+        "- Output ONLY the SQL query inside ```sql ... ``` block\n"
+        "- Use exact table and column names from the schema\n"
+        "- Use single-quoted string literals (e.g. WHERE name = 'value')\n"
+        "- Use FK hints to determine correct JOIN columns\n"
+        "- Only JOIN columns of the same type (INT with INT, TEXT with TEXT)\n"
+        "- No explanations, no comments"
+    )
+
+    results, errors = [], []
     
     conversation_id = None
     if connection:
@@ -634,14 +798,15 @@ async def run_evaluation_for_db(
         )
         conversation_id = conv.id
 
-    EVAL_PROGRESS[req.db_id] = {"current": 0, "total": len(db_questions)}
+    EVAL_PROGRESS[req.db_id] = {"current": 0, "total": len(db_questions), "status": "starting"}
 
     for i, item in enumerate(db_questions):
-        EVAL_PROGRESS[req.db_id]["current"] = i + 1
         question = item["question"]
         gold_sql = item["query"]
         hardness = item.get("query_complexity", "unknown")
 
+        EVAL_PROGRESS[req.db_id]["current"] = i + 1
+        EVAL_PROGRESS[req.db_id]["status"] = f"Q{i+1}: {question[:40]}..."
         logger.info("[ADMIN_EVAL] [%d/%d] %s: %s", i + 1, len(db_questions), req.db_id, question[:60])
 
         if conversation_id:
@@ -661,22 +826,21 @@ async def run_evaluation_for_db(
         llm_response = None
         pred_sql = None
         try:
-            from app.api.v1.endpoints.chat import _handle_chat_mode
-            from app.schemas.sql import ChatCompletionRequest
-            
-            # Prevent hitting Groq's 30 RPM limit by adding a 5s delay between requests
+            # Small delay between requests to avoid rate-limiting
             await asyncio.sleep(5)
 
-            req_obj = ChatCompletionRequest(
-                connection_id=connection.id,
-                conversation_id=conversation_id,
-                message=question,
-                chat_mode="chat"
+            # Call LLM directly with the evaluation system_prompt (which includes
+            # column types like ModelId:INT vs Model:TEXT and FK join hints).
+            # We do NOT use _handle_chat_mode because it builds its own prompt via
+            # get_chat_generate_sql_system_prompt/_format_tables_compact which omits
+            # column types, causing the LLM to generate wrong JOINs.
+            llm_response = await llm_service.chat(
+                prompt=question,
+                system_prompt=system_prompt,
+                temperature=0.1,
+                max_tokens=2048,
             )
-
-            chat_resp = await _handle_chat_mode(req_obj, connection, conversation_id, db)
-            pred_sql = chat_resp.sql_generated
-            llm_response = chat_resp.content
+            pred_sql = _extract_sql_from_llm(llm_response)
         except Exception as e:
             logger.error("[ADMIN_EVAL] LLM error: %s", e)
             pred_sql = None

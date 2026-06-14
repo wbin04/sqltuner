@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 class ExplainResult:
     plan: Dict[str, Any]
     total_cost: float
+    actual_total_time_ms: Optional[float] = None   # MỚI: Actual Total Time từ EXPLAIN ANALYZE
+    planning_time_ms: Optional[float] = None        # MỚI: Planning Time (bonus)
 
 
 @dataclass
@@ -187,17 +189,18 @@ class ExplainPlanAnalyzer:
 
             with engine.connect() as conn:
                 if connection.db_type == DBType.POSTGRES:
-                    plan_data, total_cost = (
+                    plan_data, total_cost, actual_time_ms, planning_time_ms = (
                         ExplainPlanAnalyzer._execute_postgres_explain(
                             conn, sql_query
                         )
                     )
                 elif connection.db_type == DBType.MYSQL:
-                    plan_data, total_cost = (
+                    plan_data, total_cost, actual_time_ms = (
                         ExplainPlanAnalyzer._execute_mysql_explain(
                             conn, sql_query
                         )
                     )
+                    planning_time_ms = None
                 else:
                     logger.warning(
                         f"[OPTIMIZE] Unsupported DB: {connection.db_type}"
@@ -205,15 +208,34 @@ class ExplainPlanAnalyzer:
                     return None
 
             engine.dispose()
-            return ExplainResult(plan=plan_data, total_cost=float(total_cost))
+            return ExplainResult(
+                plan=plan_data,
+                total_cost=float(total_cost),
+                actual_total_time_ms=actual_time_ms,
+                planning_time_ms=planning_time_ms,
+            )
 
         except Exception as e:
             logger.error(f"[OPTIMIZE] EXPLAIN failed: {str(e)}")
             return None
 
     @staticmethod
-    def _execute_postgres_explain(conn, sql_query: str) -> tuple[Dict, float]:
-        explain_query = f"EXPLAIN (ANALYZE, FORMAT JSON) {sql_query}"
+    def _execute_postgres_explain(
+        conn, sql_query: str
+    ) -> tuple[Dict, float, Optional[float], Optional[float]]:
+        """Chạy EXPLAIN (ANALYZE, FORMAT JSON) và trả về plan, cost, actual_time_ms, planning_time_ms.
+
+        Lưu ý: chỉ dùng ANALYZE với SELECT để tránh side-effect trên DML.
+        """
+        sql_upper = sql_query.strip().upper()
+        use_analyze = sql_upper.startswith("SELECT") or sql_upper.startswith("WITH")
+
+        if use_analyze:
+            explain_query = f"EXPLAIN (ANALYZE, FORMAT JSON) {sql_query}"
+        else:
+            # DML: dùng EXPLAIN không ANALYZE, actual_time không có
+            explain_query = f"EXPLAIN (FORMAT JSON) {sql_query}"
+
         result_proxy = conn.execute(text(explain_query))
         explain_output = result_proxy.fetchone()[0]
 
@@ -222,12 +244,29 @@ class ExplainPlanAnalyzer:
             if isinstance(explain_output, str)
             else explain_output
         )
-        total_cost = plan_data[0]["Plan"]["Total Cost"] if plan_data else 0.0
 
-        return plan_data, total_cost
+        root_plan = plan_data[0]["Plan"] if plan_data else {}
+        total_cost = root_plan.get("Total Cost", 0.0)
+
+        # Actual Total Time: thời gian thực (ms) từ root node
+        actual_total_time_ms = None
+        if use_analyze:
+            actual_loops = root_plan.get("Actual Loops", 1) or 1
+            raw_time = root_plan.get("Actual Total Time", None)
+            if raw_time is not None:
+                # Nhân với loops để ra tổng thời gian
+                actual_total_time_ms = raw_time * actual_loops
+
+        # Planning Time là field riêng ở top-level output (ngoài Plan)
+        planning_time_ms = plan_data[0].get("Planning Time", None) if plan_data else None
+
+        return plan_data, total_cost, actual_total_time_ms, planning_time_ms
 
     @staticmethod
-    def _execute_mysql_explain(conn, sql_query: str) -> tuple[Dict, float]:
+    def _execute_mysql_explain(conn, sql_query: str) -> tuple[Dict, float, Optional[float]]:
+        """Run EXPLAIN FORMAT=JSON (for plan cost) then EXPLAIN ANALYZE (MySQL 8.0+) for actual time."""
+        import re
+        # 1. Planner cost from FORMAT=JSON
         explain_query = f"EXPLAIN FORMAT=JSON {sql_query}"
         result_proxy = conn.execute(text(explain_query))
         explain_output = result_proxy.fetchone()[0]
@@ -237,13 +276,30 @@ class ExplainPlanAnalyzer:
             if isinstance(explain_output, str)
             else explain_output
         )
-        total_cost = (
+        total_cost = float(
             plan_data.get("query_block", {})
             .get("cost_info", {})
             .get("query_cost", 0.0)
         )
 
-        return plan_data, total_cost
+        # 2. Actual time from EXPLAIN ANALYZE (MySQL 8.0+, text output)
+        actual_time_ms = None
+        try:
+            result_proxy2 = conn.execute(text(f"EXPLAIN ANALYZE {sql_query}"))
+            rows = result_proxy2.fetchall()
+            if rows:
+                # First row of the tree is the root node
+                root_line = rows[0][0] if rows[0] else ""
+                # Pattern: (actual time=X..Y rows=Z loops=N)
+                m = re.search(r'actual time=([\d.]+)\.\.([\d.]+)\s+rows=\d+\s+loops=(\d+)', root_line)
+                if m:
+                    end_time = float(m.group(2))  # per-loop time in ms
+                    loops = int(m.group(3))
+                    actual_time_ms = end_time * loops
+        except Exception as e:
+            logger.debug(f"[OPTIMIZE] MySQL EXPLAIN ANALYZE not available: {e}")
+
+        return plan_data, total_cost, actual_time_ms
 
     @staticmethod
     def extract_bottlenecks(
@@ -395,14 +451,19 @@ class QueryLogManager:
         query_log: QueryLog,
         explain_plan: Optional[Dict[str, Any]],
         original_cost: Optional[float],
+        original_time_ms: Optional[float],   # MỚI
+        optimized_time_ms: Optional[float],  # MỚI
         index_recommendation: Optional[str],
         optimized_sql: str,
+        **kwargs
     ) -> Optional[str]:
         try:
             performance_analysis = PerformanceAnalysis(
                 query_log_id=query_log.id,
-                execution_time_ms=None,
+                execution_time_ms=kwargs.get('execution_time_ms'),
                 total_cost=original_cost,
+                original_time_ms=original_time_ms,     # MỚI
+                optimized_time_ms=optimized_time_ms,   # MỚI
                 explain_plan=explain_plan,
                 index_recommendation=index_recommendation,
             )
@@ -474,12 +535,16 @@ class OptimizationService:
         if explain_result:
             explain_plan = explain_result.plan
             original_cost = explain_result.total_cost
+            original_time_ms = explain_result.actual_total_time_ms  # MỚI
+            planning_time_ms = explain_result.planning_time_ms      # MỚI
             bottlenecks = ExplainPlanAnalyzer.extract_bottlenecks(
                 {"plan": explain_plan}, connection.db_type
             )
         else:
             explain_plan = None
             original_cost = None
+            original_time_ms = None   # MỚI
+            planning_time_ms = None   # MỚI
             bottlenecks = []
 
         # Step 3.5: Static SQL analysis (no DB required)
@@ -495,16 +560,21 @@ class OptimizationService:
             connection, sql_query, connection_id, static_issues
         )
 
+        import asyncio
+        await asyncio.sleep(5)
+
         # Step 5: Build response
         response = self._build_response(
             llm_result,
             original_cost,
+            original_time_ms,   # MỚI
             bottlenecks,
             sql_query,
             static_issues,
         )
 
         # Step 6: Save to database if query log exists
+        # (optimized_time_ms sẽ được endpoint tính sau khi chạy EXPLAIN trên optimized SQL)
         if query_log:
             response["query_log_id"] = await (
                 QueryLogManager.save_performance_analysis(
@@ -512,8 +582,11 @@ class OptimizationService:
                     query_log,
                     explain_plan,
                     original_cost,
+                    original_time_ms,   # MỚI
+                    None,               # optimized_time_ms: endpoint sẽ update sau
                     response["index_recommendation"],
                     response["optimized_sql"],
+                    execution_time_ms=(time.time() - start_total) * 1000
                 )
             )
 
@@ -584,6 +657,7 @@ class OptimizationService:
         self,
         llm_result: Dict[str, Any],
         original_cost: Optional[float],
+        original_time_ms: Optional[float],  # MỚI
         bottlenecks: list[str],
         sql_query: str,
         static_issues: Optional[list[SqlIssue]] = None,
@@ -608,6 +682,7 @@ class OptimizationService:
 
         return {
             "original_cost": original_cost,
+            "original_time_ms": original_time_ms,  # MỚI
             "bottlenecks": all_bottlenecks,
             "optimized_sql": optimized_sql.strip(),
             "index_recommendation": (

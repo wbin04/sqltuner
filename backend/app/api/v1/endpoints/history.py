@@ -49,6 +49,8 @@ class HistoryDetailResponse(BaseModel):
     result_status: Optional[str] = None
     execution_time_ms: Optional[float] = None
     total_cost: Optional[float] = None
+    original_time_ms: Optional[float] = None    # MỚI
+    optimized_time_ms: Optional[float] = None   # MỚI
     explain_plan: Optional[dict] = None
     index_recommendation: Optional[str] = None
     conversation_id: str
@@ -170,6 +172,14 @@ async def get_history_detail(
         ),
         total_cost=(
             log.performance_analysis.total_cost
+            if log.performance_analysis else None
+        ),
+        original_time_ms=(
+            log.performance_analysis.original_time_ms
+            if log.performance_analysis else None
+        ),
+        optimized_time_ms=(
+            log.performance_analysis.optimized_time_ms
             if log.performance_analysis else None
         ),
         explain_plan=(
