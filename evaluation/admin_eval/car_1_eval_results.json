@@ -1,0 +1,270 @@
+{
+  "timestamp": "2026-06-30T21:33:53.834722",
+  "total_evaluated": 15,
+  "total_errors": 0,
+  "overall": {
+    "EM (%)": 53.33,
+    "EX (%)": 86.67,
+    "SL (Soft Label %)": 86.67,
+    "SL_Linkage (%)": 97.04,
+    "avg_latency_s": 4.339
+  },
+  "by_hardness": {
+    "easy": {
+      "count": 4,
+      "em": 100.0,
+      "ex": 100.0,
+      "sl": 100.0
+    },
+    "medium": {
+      "count": 6,
+      "em": 33.33,
+      "ex": 100.0,
+      "sl": 100.0
+    },
+    "hard": {
+      "count": 5,
+      "em": 40.0,
+      "ex": 60.0,
+      "sl": 60.0
+    }
+  },
+  "detailed_results": [
+    {
+      "db_id": "car_1",
+      "question": "How many continents are there?",
+      "gold_sql": "SELECT count(*) FROM CONTINENTS;",
+      "pred_sql": "SELECT count(*) FROM continents;",
+      "em": 1,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "easy",
+      "complexity_score": 0.3,
+      "latency_s": 14.081100702285767,
+      "error": null
+    },
+    {
+      "db_id": "car_1",
+      "question": "What is the number of continents?",
+      "gold_sql": "SELECT count(*) FROM CONTINENTS;",
+      "pred_sql": "SELECT count(*) FROM continents;",
+      "em": 1,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "easy",
+      "complexity_score": 0.3,
+      "latency_s": 2.653251886367798,
+      "error": null
+    },
+    {
+      "db_id": "car_1",
+      "question": "How many countries does each continent have? List the continent id, continent name and the number of countries.",
+      "gold_sql": "SELECT T1.ContId ,  T1.Continent ,  count(*) FROM CONTINENTS AS T1 JOIN COUNTRIES AS T2 ON T1.ContId  =  T2.Continent GROUP BY T1.ContId;",
+      "pred_sql": "SELECT\n  T1.ContId,\n  T1.Continent,\n  COUNT(T2.CountryId)\nFROM continents AS T1\nJOIN countries AS T2\n  ON T1.ContId = T2.Continent\nGROUP BY\n  T1.ContId,\n  T1.Continent;",
+      "em": 0,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "medium",
+      "complexity_score": 1.8,
+      "latency_s": 2.8241569995880127,
+      "error": null
+    },
+    {
+      "db_id": "car_1",
+      "question": "For each continent, list its id, name, and how many countries it has?",
+      "gold_sql": "SELECT T1.ContId ,  T1.Continent ,  count(*) FROM CONTINENTS AS T1 JOIN COUNTRIES AS T2 ON T1.ContId  =  T2.Continent GROUP BY T1.ContId;",
+      "pred_sql": "SELECT\n  T1.ContId,\n  T1.Continent,\n  COUNT(T2.CountryId)\nFROM continents AS T1\nJOIN countries AS T2\n  ON T1.ContId = T2.Continent\nGROUP BY\n  T1.ContId,\n  T1.Continent;",
+      "em": 0,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "medium",
+      "complexity_score": 1.8,
+      "latency_s": 2.7546186447143555,
+      "error": null
+    },
+    {
+      "db_id": "car_1",
+      "question": "How many countries are listed?",
+      "gold_sql": "SELECT count(*) FROM COUNTRIES;",
+      "pred_sql": "SELECT count(*) FROM countries;",
+      "em": 1,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "easy",
+      "complexity_score": 0.3,
+      "latency_s": 2.5891430377960205,
+      "error": null
+    },
+    {
+      "db_id": "car_1",
+      "question": "How many countries exist?",
+      "gold_sql": "SELECT count(*) FROM COUNTRIES;",
+      "pred_sql": "SELECT count(*) FROM countries;",
+      "em": 1,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "easy",
+      "complexity_score": 0.3,
+      "latency_s": 2.6833486557006836,
+      "error": null
+    },
+    {
+      "db_id": "car_1",
+      "question": "How many models does each car maker produce? List maker full name, id and the number.",
+      "gold_sql": "SELECT T1.FullName ,  T1.Id ,  count(*) FROM CAR_MAKERS AS T1 JOIN MODEL_LIST AS T2 ON T1.Id  =  T2.Maker GROUP BY T1.Id;",
+      "pred_sql": "SELECT\n  T1.FullName,\n  T1.Id,\n  COUNT(T2.ModelId)\nFROM car_makers AS T1\nJOIN model_list AS T2\n  ON T1.Id = T2.Maker\nGROUP BY\n  T1.FullName,\n  T1.Id;",
+      "em": 0,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "medium",
+      "complexity_score": 1.8,
+      "latency_s": 2.9288976192474365,
+      "error": null
+    },
+    {
+      "db_id": "car_1",
+      "question": "What is the full name of each car maker, along with its id and how many models it produces?",
+      "gold_sql": "SELECT T1.FullName ,  T1.Id ,  count(*) FROM CAR_MAKERS AS T1 JOIN MODEL_LIST AS T2 ON T1.Id  =  T2.Maker GROUP BY T1.Id;",
+      "pred_sql": "SELECT\n  T1.FullName,\n  T1.Id,\n  COUNT(T2.ModelId)\nFROM car_makers AS T1\nJOIN model_list AS T2\n  ON T1.Id = T2.Maker\nGROUP BY\n  T1.Id,\n  T1.FullName;",
+      "em": 0,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "medium",
+      "complexity_score": 1.8,
+      "latency_s": 2.8143177032470703,
+      "error": null
+    },
+    {
+      "db_id": "car_1",
+      "question": "Which model of the car has the minimum horsepower?",
+      "gold_sql": "SELECT T1.Model FROM CAR_NAMES AS T1 JOIN CARS_DATA AS T2 ON T1.MakeId  =  T2.Id ORDER BY T2.horsepower ASC LIMIT 1;",
+      "pred_sql": "SELECT T2.Model\nFROM cars_data AS T1\nJOIN car_names AS T2 ON T1.Id = T2.MakeId\nORDER BY T1.Horsepower ASC\nLIMIT 1;",
+      "em": 1,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "medium",
+      "complexity_score": 1.8,
+      "latency_s": 10.98526930809021,
+      "error": null
+    },
+    {
+      "db_id": "car_1",
+      "question": "What is the model of the car with the smallest amount of horsepower?",
+      "gold_sql": "SELECT T1.Model FROM CAR_NAMES AS T1 JOIN CARS_DATA AS T2 ON T1.MakeId  =  T2.Id ORDER BY T2.horsepower ASC LIMIT 1;",
+      "pred_sql": "SELECT T2.Model\nFROM cars_data AS T1\nJOIN car_names AS T2 ON T1.Id = T2.MakeId\nORDER BY T1.Horsepower ASC\nLIMIT 1;",
+      "em": 1,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "medium",
+      "complexity_score": 1.8,
+      "latency_s": 4.585821866989136,
+      "error": null
+    },
+    {
+      "db_id": "car_1",
+      "question": "Find the model of the car whose weight is below the average weight.",
+      "gold_sql": "SELECT T1.model FROM CAR_NAMES AS T1 JOIN CARS_DATA AS T2 ON T1.MakeId  =  T2.Id WHERE T2.Weight  <  (SELECT avg(Weight) FROM CARS_DATA)",
+      "pred_sql": "SELECT T2.Model\nFROM cars_data AS T1\nJOIN car_names AS T2 ON T1.Id = T2.MakeId\nWHERE T1.Weight < (SELECT AVG(Weight) FROM cars_data)",
+      "em": 1,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "hard",
+      "complexity_score": 4.3,
+      "latency_s": 2.959111452102661,
+      "error": null
+    },
+    {
+      "db_id": "car_1",
+      "question": "What is the model for the car with a weight smaller than the average?",
+      "gold_sql": "SELECT T1.model FROM CAR_NAMES AS T1 JOIN CARS_DATA AS T2 ON T1.MakeId  =  T2.Id WHERE T2.Weight  <  (SELECT avg(Weight) FROM CARS_DATA)",
+      "pred_sql": "SELECT\n  T1.Model\nFROM model_list AS T1\nJOIN car_names AS T2\n  ON T1.Model = T2.Model\nJOIN cars_data AS T3\n  ON T2.MakeId = T3.Id\nWHERE\n  T3.Weight < (\n    SELECT\n      AVG(Weight)\n    FROM cars_data\n  );",
+      "em": 0,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "hard",
+      "complexity_score": 4.3,
+      "latency_s": 2.9232211112976074,
+      "error": null
+    },
+    {
+      "db_id": "car_1",
+      "question": "Find the name of the makers that produced some cars in the year of 1970?",
+      "gold_sql": "SELECT DISTINCT T1.Maker FROM CAR_MAKERS AS T1 JOIN MODEL_LIST AS T2 ON T1.Id  =  T2.Maker JOIN CAR_NAMES AS T3 ON T2.model  =  T3.model JOIN CARS_DATA AS T4 ON T3.MakeId  =  T4.id WHERE T4.year  =  '1970';",
+      "pred_sql": "SELECT DISTINCT\n  T3.Maker\nFROM cars_data AS T1\nJOIN car_names AS T2\n  ON T1.Id = T2.MakeId\nJOIN car_makers AS T3\n  ON T2.Make = T3.FullName\nWHERE\n  T1.Year = 1970;",
+      "em": 0,
+      "ex": 0,
+      "sl": 0.0,
+      "sl_linkage": 0.7777777777777778,
+      "hardness": "hard",
+      "complexity_score": 3.5,
+      "latency_s": 3.013345718383789,
+      "error": "empty_result"
+    },
+    {
+      "db_id": "car_1",
+      "question": "What is the name of the different car makers who produced a car in 1970?",
+      "gold_sql": "SELECT DISTINCT T1.Maker FROM CAR_MAKERS AS T1 JOIN MODEL_LIST AS T2 ON T1.Id  =  T2.Maker JOIN CAR_NAMES AS T3 ON T2.model  =  T3.model JOIN CARS_DATA AS T4 ON T3.MakeId  =  T4.id WHERE T4.year  =  '1970';",
+      "pred_sql": "SELECT DISTINCT\n  T3.Maker\nFROM cars_data AS T1\nJOIN car_names AS T2\n  ON T1.Id = T2.MakeId\nJOIN car_makers AS T3\n  ON T2.Make = T3.FullName\nWHERE\n  T1.Year = 1970;",
+      "em": 0,
+      "ex": 0,
+      "sl": 0.0,
+      "sl_linkage": 0.7777777777777778,
+      "hardness": "hard",
+      "complexity_score": 3.5,
+      "latency_s": 3.2671754360198975,
+      "error": "empty_result"
+    },
+    {
+      "db_id": "car_1",
+      "question": "Find the make and production time of the cars that were produced in the earliest year?",
+      "gold_sql": "SELECT T2.Make ,  T1.Year FROM CARS_DATA AS T1 JOIN CAR_NAMES AS T2 ON T1.Id  =  T2.MakeId WHERE T1.Year  =  (SELECT min(YEAR) FROM CARS_DATA);",
+      "pred_sql": "SELECT\n  T2.Make,\n  T1.Year\nFROM cars_data AS T1\nJOIN car_names AS T2\n  ON T1.Id = T2.MakeId\nWHERE\n  T1.Year = (\n    SELECT\n      MIN(Year)\n    FROM cars_data\n  );",
+      "em": 1,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "hard",
+      "complexity_score": 4.3,
+      "latency_s": 4.023869276046753,
+      "error": null
+    }
+  ],
+  "errors": [],
+  "failed_cases": [
+    {
+      "db_id": "car_1",
+      "question": "Find the name of the makers that produced some cars in the year of 1970?",
+      "gold_sql": "SELECT DISTINCT T1.Maker FROM CAR_MAKERS AS T1 JOIN MODEL_LIST AS T2 ON T1.Id  =  T2.Maker JOIN CAR_NAMES AS T3 ON T2.model  =  T3.model JOIN CARS_DATA AS T4 ON T3.MakeId  =  T4.id WHERE T4.year  =  '1970';",
+      "pred_sql": "SELECT DISTINCT\n  T3.Maker\nFROM cars_data AS T1\nJOIN car_names AS T2\n  ON T1.Id = T2.MakeId\nJOIN car_makers AS T3\n  ON T2.Make = T3.FullName\nWHERE\n  T1.Year = 1970;",
+      "sl": 0.0,
+      "error": "empty_result"
+    },
+    {
+      "db_id": "car_1",
+      "question": "What is the name of the different car makers who produced a car in 1970?",
+      "gold_sql": "SELECT DISTINCT T1.Maker FROM CAR_MAKERS AS T1 JOIN MODEL_LIST AS T2 ON T1.Id  =  T2.Maker JOIN CAR_NAMES AS T3 ON T2.model  =  T3.model JOIN CARS_DATA AS T4 ON T3.MakeId  =  T4.id WHERE T4.year  =  '1970';",
+      "pred_sql": "SELECT DISTINCT\n  T3.Maker\nFROM cars_data AS T1\nJOIN car_names AS T2\n  ON T1.Id = T2.MakeId\nJOIN car_makers AS T3\n  ON T2.Make = T3.FullName\nWHERE\n  T1.Year = 1970;",
+      "sl": 0.0,
+      "error": "empty_result"
+    }
+  ],
+  "config": {
+    "spider_dir": "E:/spider/spider_data",
+    "db_id": "car_1",
+    "limit": 15,
+    "mode": "api",
+    "llm_model": null
+  }
+}

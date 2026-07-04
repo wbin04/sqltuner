@@ -6,46 +6,46 @@
     participant Backend as Backend
     participant DB as Database
 
-    Note over User, AI: Bắt đầu luồng Tối ưu hóa truy vấn (Optimize SQL)
+    Note over User, AI: Optimize SQL Flow Started
     
-    User->>UI: Bấm nút "Optimize" trên khối mã SQL
-    UI->>Backend: Gửi API yêu cầu Tối ưu hóa (Connection ID, SQL)
+    User->>UI: Click "Optimize" button on the SQL code block
+    UI->>Backend: Send Optimization request API (Connection ID, SQL)
     
     activate Backend
-    Backend->>Backend: Khởi tạo Dịch vụ Tối ưu (Optimization Service)
+    Backend->>Backend: Initialize Optimization Service
     
-    %% Bước 1: Đánh giá chi phí truy vấn gốc
-    opt Nếu không phải môi trường giả lập (Real DB)
-        Backend->>DB: Thực thi "EXPLAIN <sql_gốc>" để đo lường
-        DB-->>Backend: Trả về Original Cost & Cấu trúc thực thi (Plan)
-        Backend->>Backend: Phân tích Plan để tìm ra "Nút thắt cổ chai" (Bottlenecks)
+    %% Step 1: Evaluate original query cost
+    opt If not Simulation Environment (Real DB)
+        Backend->>DB: Execute "EXPLAIN <original_sql>" for measurement
+        DB-->>Backend: Return Original Cost & Execution Plan
+        Backend->>Backend: Analyze Plan to find Bottlenecks
     end
     
-    Backend->>Backend: Phân tích tĩnh tĩnh truy vấn (Static Analysis) để tìm Anti-pattern
+    Backend->>Backend: Static Analysis of query to find Anti-patterns
 
-    %% Bước 2: Gọi AI để tối ưu
-    Backend->>AI: Gửi SQL gốc + Lược đồ DB (Schema) + Bottlenecks
+    %% Step 2: Call AI for optimization
+    Backend->>AI: Send Original SQL + DB Schema + Bottlenecks
     activate AI
-    AI-->>Backend: Trả về SQL Mới + Gợi ý đánh Index + Lời giải thích
+    AI-->>Backend: Return New SQL + Index Suggestion + Explanation
     deactivate AI
     
-    %% Bước 3: Đánh giá chi phí truy vấn mới
-    opt Nếu có yêu cầu kèm Giải thích & Là Real DB
-        Backend->>DB: Thực thi "EXPLAIN <sql_mới>" để đo lường
-        DB-->>Backend: Trả về Optimized Cost
-        Backend->>Backend: Tính toán tỷ lệ cải thiện hiệu năng (Improvement Percent)
+    %% Step 3: Evaluate new query cost
+    opt If requested with Explanation & is Real DB
+        Backend->>DB: Execute "EXPLAIN <new_sql>" for measurement
+        DB-->>Backend: Return Optimized Cost
+        Backend->>Backend: Calculate Improvement Percent
     end
     
-    Backend-->>UI: Trả về kết quả (SQL Cũ & Mới, Bottlenecks, % Cải thiện, Index)
+    Backend-->>UI: Return results (Old & New SQL, Bottlenecks, Improvement %, Index)
     deactivate Backend
     
-    UI->>UI: Mở Popup Cửa sổ Tối ưu (Optimization Modal)
-    UI-->>User: Hiển thị So sánh trực quan (Before / After)
+    UI->>UI: Open Optimization Modal Popup
+    UI-->>User: Show Visual Comparison (Before / After)
 
-    %% Tùy chọn Áp dụng (Tương tác thêm)
-    opt Người dùng chấp nhận tối ưu
-        User->>UI: Bấm "Apply" trên Modal
-        UI->>UI: Đóng Modal & Đưa SQL mới kèm Index sinh tự động vào Chat
-        UI->>Backend: Gửi yêu cầu Thực thi (Execute) với SQL mới (Quay lại luồng Execute)
+    %% Optional Apply Interaction
+    opt User accepts optimization
+        User->>UI: Click "Apply" on Modal
+        UI->>UI: Close Modal & Insert new SQL with generated Index into Chat
+        UI->>Backend: Send Execute request with new SQL (Return to Execute Flow)
     end
 ```

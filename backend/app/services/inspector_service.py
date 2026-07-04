@@ -1,4 +1,5 @@
 import logging
+import os
 
 from typing import Any, Dict, List
 from uuid import UUID
@@ -118,8 +119,9 @@ class DatabaseInspectorService:
 
         password = decrypt_password(connection.db_password)
 
+        _running_in_docker = os.environ.get("RUNNING_IN_DOCKER", "false").lower() == "true"
         resolved_host = connection.host
-        if connection.host in LOCALHOSTS:
+        if _running_in_docker and connection.host in LOCALHOSTS:
             resolved_host = 'host.docker.internal'
 
         if connection.db_type == DBType.POSTGRES:

@@ -8,7 +8,7 @@ class ChatCompletionRequest(BaseModel):
     connection_id: UUID = Field(..., description="Database connection ID")
     conversation_id: Optional[UUID] = Field(
         None, description="Conversation ID (optional for new conversations)")
-    message: str = Field(..., description="User message", max_length=5000)
+    message: str = Field(..., description="User message", max_length=32000)
     clarification_answers: Optional[List[Dict[str, Any]]] = Field(
         default=None,
         description="Answers from clarification step: [{q: str, answer: str}]"
@@ -47,7 +47,7 @@ class ChatCompletionResponse(BaseModel):
 
 class SQLExecuteRequest(BaseModel):
     connection_id: UUID = Field(..., description="Database connection ID")
-    sql: str = Field(..., description="SQL query to execute", max_length=10000)
+    sql: str = Field(..., description="SQL query to execute", max_length=32000)
 
 
 class SQLExecuteResponse(BaseModel):
@@ -71,7 +71,7 @@ class SQLExecuteResponse(BaseModel):
 
 class SQLExplainPlanRequest(BaseModel):
     connection_id: UUID = Field(..., description="Database connection ID")
-    sql: str = Field(..., description="SQL query to explain", max_length=10000)
+    sql: str = Field(..., description="SQL query to explain", max_length=32000)
 
 
 class SQLExplainPlanResponse(BaseModel):
@@ -91,9 +91,20 @@ class SQLOptimizeRequest(BaseModel):
         None, description="Conversation ID for logging (optional)")
     sql_query: str = Field(...,
                            description="SQL query to optimize",
-                           max_length=10000)
+                           max_length=32000)
     include_explain: bool = Field(
         default=True, description="Include EXPLAIN analysis")
+
+
+class StatsComparison(BaseModel):
+    metric_type: str                        # "execution_time" | "planner_cost"
+    original_time_ms: Optional[float] = None
+    optimized_time_ms: Optional[float] = None
+    improvement_percent: float
+    speedup_factor: Optional[float] = None  # ví dụ: 4.0 = nhanh hơn 4x
+    # Backward compat
+    old_cost: Optional[float] = None
+    new_cost: Optional[float] = None
 
 
 class SQLOptimizeResponse(BaseModel):
@@ -104,14 +115,14 @@ class SQLOptimizeResponse(BaseModel):
     rewrite_type: Optional[str] = None
     changes_made: Optional[List[str]] = None
     bottlenecks: Optional[List[str]] = None
-    stats_comparison: Optional[Dict[str, Any]] = None
+    stats_comparison: Optional[StatsComparison] = None
     query_log_id: Optional[UUID] = None
 
 
 class SQLExplainRequest(BaseModel):
     sql_query: str = Field(...,
                            description="SQL query to explain",
-                           max_length=10000)
+                           max_length=32000)
 
 
 class SQLExplainResponse(BaseModel):
@@ -131,3 +142,12 @@ class HealthResponse(BaseModel):
 class DatabaseSchemaResponse(BaseModel):
     raw_schema: dict
     formatted_schema: str
+
+
+class TranslateRequest(BaseModel):
+    text: str = Field(..., description="Markdown text to translate")
+    target_language: Literal["vi", "en"] = Field(default="vi")
+
+
+class TranslateResponse(BaseModel):
+    translated_text: str

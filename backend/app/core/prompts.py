@@ -37,20 +37,111 @@ in the ANALYSIS CHECKLIST below. If it does, you MUST return the original SQL un
 3. SUBQUERY CHECK (critical): Does WHERE/CTE use IN (SELECT ...)? Count nesting depth. Flatten ALL nested IN (SELECT...) into CTEs with INNER JOINs. A 3-level IN (SELECT ... IN (SELECT ... IN (SELECT ...))) must be rewritten as a single CTE with 2 JOINs.
 4. FUNCTION ON COLUMN CHECK: Is a function wrapping a column in WHERE (e.g. YEAR(col), LOWER(col))? Rewrite to range/direct comparison.
 5. LIKE LEADING WILDCARD: Does WHERE use LIKE '%value%'? Flag it — cannot use B-tree index. Only suggest GIN/full-text if the table is large.
-6. DISTINCT CHECK: Is DISTINCT used? Check if it hides a bad JOIN. Suggest GROUP BY if appropriate.
+6. DISTINCT CHECK: Is SELECT DISTINCT used?
+    Step 1 — Check if it came from rule 11 (filter-first CTE with UNION): remove it.
+    Step 2 — Check structural trigger: does the query satisfy ALL of:
+      (a) SELECT DISTINCT on the result
+      (b) 2+ tables JOINed through the SAME FK key on the driving table
+          (e.g. JOIN t ON e.emp_no = t.emp_no  JOIN de ON e.emp_no = de.emp_no)
+      (c) No OR condition spanning multiple tables (that would use rule 11)
+    If ALL 3 hold → DISTINCT hides JOIN row multiplication. Fix with EXISTS:
+      SELECT pk, col1, col2 FROM driving_table a
+      WHERE EXISTS (SELECT 1 FROM table_b b WHERE b.fk = a.pk AND b.filter = ...)
+        AND EXISTS (SELECT 1 FROM table_c c WHERE c.fk = a.pk AND c.filter = ...)
+    FORBIDDEN: Do NOT replace DISTINCT with GROUP BY when there is no aggregate
+    function — GROUP BY without aggregate has identical cost to DISTINCT and
+    does NOT fix the row multiplication problem.
+    Step 3 — If DISTINCT is used with aggregate (COUNT/SUM/etc): keep it or
+    rewrite with GROUP BY + aggregate as appropriate.
 7. OR CONDITION CHECK: Are OR conditions used on indexed columns? Suggest UNION ALL rewrite if beneficial.
 8. CORRELATED SUBQUERY CHECK (critical — scan ALL CTEs and WHERE): Look for ANY subquery whose WHERE clause references a column alias from an OUTER query (e.g. WHERE order_id = od.order_id, WHERE t.col = outer.col). This includes subqueries inside CTEs, not just in the main WHERE. Fix: replace the entire CTE/subquery with a window function approach: ROW_NUMBER() OVER (PARTITION BY outer_key ORDER BY target_col ASC/DESC) and filter WHERE rn = 1.
 9. CTE CORRECTNESS (critical — check all CTEs with aggregates): In ANY CTE that uses MAX() or MIN() alongside GROUP BY, check: does GROUP BY include columns beyond the partition key (e.g. GROUP BY order_id, title)? If yes, the CTE WILL produce multiple rows per partition key when two different values of the extra column share the same max/min value → duplicate rows in the final result. Fix: replace GROUP BY + MAX/MIN with DISTINCT ON (partition_key) ORDER BY partition_key, sort_col DESC/ASC. Also check for (col1, col2) IN (SELECT col1, MAX(col2)...) — this tuple-IN pattern has the same duplicate problem → rewrite with DISTINCT ON.
 10. CTE DISTINCT CHECK (critical — check all CTEs used in JOINs): When a CTE is created by flattening nested IN subqueries (rule 3) or by joining multiple tables, and the CTE's result is JOINed back to the main query, check: can the CTE produce multiple rows per join key? If a single parent row maps to multiple child rows through the JOINs (e.g. one order has 2 Pizza items → 2 rows in CTE), the JOIN will multiply the final result. Fix: add SELECT DISTINCT on the join key column in the CTE.
+11. FILTER-FIRST CHECK (critical — check OR conditions spanning multiple tables): When a query uses OR conditions where each branch touches a DIFFERENT table (e.g. (cond on table_b) OR (cond on table_c)), and both branches JOIN back to a large central table: DO NOT generate a UNION of two full JOINs. Instead extract each filter into a CTE selecting ONLY the join key, UNION those CTEs, then JOIN the central table ONCE at the end.
+    ANTI-PATTERN — never generate this for OR-across-tables:
+      SELECT cols FROM big_table A JOIN table_b B ON A.key=B.key WHERE cond_B
+      UNION
+      SELECT cols FROM big_table A JOIN table_c C ON A.key=C.key WHERE cond_C
+    CORRECT PATTERN — always generate this:
+      WITH filtered_keys AS (
+          SELECT key FROM table_b WHERE cond_B
+          UNION
+          SELECT key FROM table_c WHERE cond_C
+      )
+      SELECT cols FROM filtered_keys fk JOIN big_table A ON fk.key = A.key;
+    IMPORTANT: Do NOT add DISTINCT to the outer SELECT. UNION already
+    deduplicates the key set; since the join key is a PK in big_table,
+    each key produces exactly one row — outer DISTINCT wastes a sort step.
+12. PAGINATION CHECK: Does the query use LIMIT with OFFSET >= 1000?
+    SKIP THIS RULE ENTIRELY if OFFSET < 1000 — proceed to next rule.
+    Only for OFFSET >= 1000: Rewrite using the "Deferred Join" pattern.
+    Fix: Rewrite the query using the "Deferred Join" pattern. Extract the sort columns and primary keys into a subquery (or CTE) that applies the ORDER BY, LIMIT, and OFFSET. Then, INNER JOIN this subquery back to the main table to fetch the rest of the heavy columns. 
+    Note: In the `explanation`, you MUST advise the user to consider "Keyset/Cursor Pagination" at the application level for optimal performance.
+13. EARLY AGGREGATION CHECK: Does the query JOIN a large fact table, then GROUP BY 
+    a mix of FK key + non-key columns (e.g. name, title) from a dimension table?
+    
+    TRIGGER CONDITIONS — ALL must be true:
+    (a) Query has aggregate function (SUM/AVG/COUNT/MIN/MAX) + GROUP BY
+    (b) GROUP BY includes the FK join key AND extra non-key columns from the 
+        joined dimension table (e.g. GROUP BY emp_no, first_name, last_name)
+    (c) The aggregate can be computed on the fact table alone using only the FK key
+        — i.e. the aggregate function does NOT reference columns from the dimension table
+    (d) The fact table is large (row_count > 100000) OR row_count is unknown but 
+        the table is clearly a fact/transaction table (salaries, orders, order_detail, 
+        transactions, logs) joined to a small dimension table (employees, departments, 
+        products, categories)
+    
+    DO NOT APPLY if:
+    - GROUP BY uses only FK key columns with no extra non-key columns 
+      (planner already handles this efficiently)
+    - The aggregate references columns from the dimension table 
+      (e.g. SUM(e.base_salary) — cannot separate)
+    - row_count is 0 (test/empty schema — skip to avoid false positives)
+    
+    FIX PATTERN:
+    Step 1 — Extract aggregate into a CTE/subquery using ONLY the FK key:
+        WITH agg AS (
+            SELECT fk_col, AGG(fact_col) AS result
+            FROM fact_table
+            WHERE <conditions>
+            GROUP BY fk_col          ← FK key only, no VARCHAR columns
+        )
+    Step 2 — JOIN the aggregated result to the dimension table to fetch non-key columns:
+        SELECT d.col1, d.col2, a.result
+        FROM agg a
+        JOIN dimension_table d ON a.fk_col = d.pk_col
+    
+    WHY THIS WORKS:
+    - Aggregating on a single INTEGER FK key is significantly cheaper than aggregating 
+      on INTEGER + VARCHAR + VARCHAR (less memory, faster hashing)
+    - The dimension table JOIN happens after cardinality is already reduced
+    - Verified: 3.3x speedup on employees/salaries schema 
+      (2.781s late aggregation → 0.844s early aggregation)
+    
+    CHANGES TO REPORT:
+    - "Extracted aggregation into CTE using only FK key (emp_no) before joining 
+       dimension table — avoids GROUP BY on VARCHAR columns"
+    - "Moved non-key columns (first_name, last_name) to outer JOIN instead of GROUP BY"
+    
+    rewrite_type: "early_aggregation" (single fix) or "multiple" (combined with other rules)
 
 ### OUTPUT FORMAT — respond ONLY with this JSON structure:
 {
     "optimized_sql": "rewritten SQL, or original if no rewrite needed",
     "index_suggestion": "One or more CREATE INDEX statements separated by newlines, or null if not needed",
-    "rewrite_type": "none | select_columns | subquery_to_join | function_on_column | leading_wildcard | distinct_to_group | union_rewrite | multiple",
+    "rewrite_type": "none | select_columns | subquery_to_join | function_on_column | leading_wildcard | distinct_to_group | union_rewrite | filter_first_cte | early_aggregation | deferred_join | multiple",
     "changes_made": ["list of specific changes made"],
-    "explanation": "max 3 sentences: what was changed, why, and expected impact"
+    "explanation": "MUST be written in English only. Use markdown formatting: use **bold** for key terms, `backticks` for table/column names, and line breaks for readability. Structure: first paragraph explains what was changed and why (2-3 sentences). If there are multiple changes, use a bullet list."
 }
+
+### LANGUAGE RULE: ALL text fields (explanation, changes_made items) MUST be written in English only. Never use Vietnamese or any other language.
+### MARKDOWN RULE: The explanation field MUST use markdown formatting (bold, inline code, bullet lists) for rich display. Do NOT use plain text.
+
+### OUTPUT CONSISTENCY RULES — check before returning:
+- If changes_made is non-empty OR optimized_sql differs from the input → rewrite_type MUST NOT be "none"
+- If rewrite_type is "none" → changes_made MUST be [] and index_suggestion MUST be null
+- If LIKE '%value%' is detected → always note it in explanation; suggest GIN index if row_count > 10000 or unknown
+- rewrite_type "multiple" must be used when more than one rule was applied
 
 ### EXAMPLES:
 
@@ -149,6 +240,30 @@ Response:
     "changes_made": ["Replaced GROUP BY (order_id, title) + MAX() with DISTINCT ON (order_id) ORDER BY food_price DESC (rule 9)", "Added DISTINCT to category_orders CTE to prevent row multiplication when one order has multiple matching items (rule 10)", "Replaced correlated subquery (SELECT MIN(food_id) WHERE order_id = od.order_id) with ROW_NUMBER() OVER PARTITION (rule 8)"],
     "explanation": "Three CTE issues fixed: (1) GROUP BY with non-key column + MAX causes duplicates → DISTINCT ON guarantees one row per order. (2) category_orders without DISTINCT multiplies rows when one order has 2+ Pizza/Drink items → DISTINCT on join key. (3) Correlated MIN subquery runs once per row → ROW_NUMBER() computes in a single pass."
 }
+
+Example 9 - OR conditions spanning multiple tables → filter-first CTE (rule 11):
+Input SQL: SELECT DISTINCT e.emp_no, e.first_name, e.last_name FROM employees e JOIN dept_emp de ON e.emp_no = de.emp_no JOIN titles t ON e.emp_no = t.emp_no WHERE (de.dept_no = 'd007' AND de.to_date = '9999-01-01') OR (t.title = 'Manager' AND t.to_date = '9999-01-01')
+Schema: Table employees(emp_no PK, first_name, last_name), Table dept_emp(emp_no PK FK→employees.emp_no, dept_no PK, from_date, to_date) [Indexes: dept_no(dept_no)], Table titles(emp_no PK FK→employees.emp_no, title PK, from_date PK, to_date)
+Response:
+{
+    "optimized_sql": "WITH target_emp_ids AS (\n  SELECT emp_no FROM dept_emp WHERE dept_no = 'd007' AND to_date = '9999-01-01'\n  UNION\n  SELECT emp_no FROM titles WHERE title = 'Manager' AND to_date = '9999-01-01'\n)\nSELECT e.emp_no, e.first_name, e.last_name\nFROM target_emp_ids te\nJOIN employees e ON te.emp_no = e.emp_no",
+    "index_suggestion": "CREATE INDEX idx_dept_emp_lookup ON dept_emp (dept_no, to_date, emp_no);\nCREATE INDEX idx_titles_lookup ON titles (title, to_date, emp_no);",
+    "rewrite_type": "filter_first_cte",
+    "changes_made": ["Extracted OR filter branches into a CTE selecting only emp_no (join key)", "UNION in CTE deduplicates on a single integer column instead of 3 output columns", "Joined employees table once at the end instead of twice (once per UNION branch)", "Removed DISTINCT — no longer needed as UNION already deduplicates the key set"],
+    "explanation": "The OR condition spans dept_emp and titles, so a naive UNION would JOIN employees twice and deduplicate across 3 columns. Extracting the filter into a CTE first collects all matching emp_no values (deduplicated cheaply as integers), then employees is joined once. Combined covering indexes on dept_emp(dept_no, to_date, emp_no) and titles(title, to_date, emp_no) allow index-only scans for the filter CTEs."
+}
+
+Example 10 - Large OFFSET Pagination → Deferred Join (rule 12):
+Input SQL: SELECT emp_no, first_name, last_name, hire_date FROM employees ORDER BY hire_date DESC, emp_no DESC LIMIT 50 OFFSET 500000
+Schema: Table employees(emp_no PK, first_name, last_name, hire_date, gender, birth_date) [Indexes: employees_pkey(emp_no), idx_employees_hire_date(hire_date)]
+Response:
+{
+    "optimized_sql": "SELECT e.emp_no, e.first_name, e.last_name, e.hire_date\nFROM employees e\nINNER JOIN (\n    SELECT emp_no\n    FROM employees\n    ORDER BY hire_date DESC, emp_no DESC\n    LIMIT 50 OFFSET 500000\n) AS lim ON e.emp_no = lim.emp_no\nORDER BY e.hire_date DESC, e.emp_no DESC",
+    "index_suggestion": "CREATE INDEX idx_employees_hire_date_emp_no ON employees (hire_date, emp_no);",
+    "rewrite_type": "deferred_join",
+    "changes_made": ["Wrapped the original query in a Deferred Join pattern to optimize the large OFFSET"],
+    "explanation": "Standard OFFSET forces the database to scan and discard 500,000 full rows. The Deferred Join uses an index to quickly find the 50 target IDs, then joins back to fetch the heavy text columns (first_name, last_name). For ultimate performance, consider changing your application logic to use Keyset/Cursor Pagination (e.g., WHERE hire_date < last_seen_date) instead of OFFSET."
+}
 """
 
 def get_sql_optimization_prompt(
@@ -204,7 +319,7 @@ If the SQL passes all checks, return it unchanged.
     "index_suggestion": "CREATE INDEX statements separated by newlines, or null",
     "rewrite_type": "none | multiple",
     "changes_made": ["list of fixes applied in this verification pass"],
-    "explanation": "what was fixed and why",
+    "explanation": "MUST be in English and use markdown formatting (bold, inline code, bullet lists). Explain what was fixed and why. Do NOT explicitly mention 'rule numbers' or 'checklist items' by name (e.g., do not say 'failed Checklist Rule 5'). Simply describe the SQL logical flaw and the fix.",
     "all_checks_passed": true/false
 }
 """
@@ -268,7 +383,7 @@ function_on_column → A function wraps a column in WHERE (e.g. EXTRACT(YEAR FRO
     "index_suggestion": null,
     "rewrite_type": "multiple",
     "changes_made": ["list of specific fixes applied"],
-    "explanation": "what was fixed and why"
+    "explanation": "MUST be in English and use markdown formatting (bold, inline code, bullet lists). Explain what was fixed and why."
 }
 """
 
@@ -315,6 +430,7 @@ Your task is to explain the meaning and logic of the following SQL query in clea
 1. Provide a concise explanation that is easy to understand for non-technical users.
 2. DO NOT rewrite or return any SQL code.
 3. Only return the explanation text.
+4. MUST be written in English only. Never use Vietnamese or any other language.
 
 ### SQL Query to Explain:
 {sql_query}
@@ -444,6 +560,7 @@ RESPONSE RULES:
 - For questions about performance: suggest using the Optimize or Explain buttons
 - Keep all responses under 100 words unless a detailed explanation is needed
 - Do NOT generate SQL unless explicitly asked
+- LANGUAGE RULE: MUST reply in English ONLY, regardless of the language the user uses.
 
 CRITICAL — SQL GENERATION FROM NATURAL LANGUAGE:
 If the user asks about data in natural language (even without SQL keywords),
@@ -916,7 +1033,8 @@ def get_chat_check_system_prompt(db_type: str) -> str:
     return f"""You are a {db_type} SQL Syntax Expert.
 Your task is to fix syntax errors in a user's SQL query.
 Return ONLY the corrected SQL query inside a markdown block. Do not include any explanations.
-If the user's input is incomplete (e.g. missing FROM or WHERE parts), complete it based on standard SQL syntax to make it runnable, even if using generic table/column names."""
+If the user's input is incomplete (e.g. missing FROM or WHERE parts), complete it based on standard SQL syntax to make it runnable, even if using generic table/column names.
+LANGUAGE RULE: Any text generated MUST be in English only."""
 
 
 def get_chat_check_user_prompt(raw_sql: str) -> str:
@@ -933,12 +1051,16 @@ Your task is to generate optimized, runnable SQL queries based on the user's req
 
 {schema_text}
 
+Column type legend (if abbreviated): INT=integer, NUM=numeric/float, TEXT=string, DATE=timestamp/date
+
 ### INSTRUCTIONS:
 1. You must respond with the SQL query inside a markdown block (` ```sql ... ``` `).
 2. You can also provide a brief explanation of the query before or after the markdown block.
 3. Ensure the syntax strictly follows {dialect} conventions.
 4. Use the exact table and column names provided in the schema.
-5. Pay close attention to the Sample Values in the schema (if provided). Use them to understand the actual data format (e.g. if a column contains "Còn hàng", compare as string; if boolean contains "1", use that).
+5. Pay close attention to the Sample Values in the schema (if provided). Use them to understand the actual data format.
+6. Use FK hints to determine correct JOIN columns. Only JOIN columns of the same or compatible types (INT with INT, TEXT with TEXT).
+7. LANGUAGE RULE: All explanations and text MUST be written in English ONLY, regardless of the language the user uses.
 """
 
 SQL_FIX_SYSTEM_PROMPT = """
@@ -954,6 +1076,7 @@ CRITICAL RULES:
 - Fix ONLY what the error requires — do not rewrite unrelated parts of the query
 - Always output the fixed SQL in a ```sql code block
 - After the code block, explain in 1-2 sentences what was wrong and what you changed
+- LANGUAGE RULE: The explanation MUST be written in English ONLY, regardless of the language the user uses.
 """
 
 def get_sql_fix_system_prompt(dialect: str) -> str:

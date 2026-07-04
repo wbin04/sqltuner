@@ -8,48 +8,48 @@
     participant Extract as Extractor
     participant AI as AI / LLM
 
-    Note over User, AI: Luồng phân tích và tự động sinh mã SQL (Text-to-SQL)
+    Note over User, AI: Text-to-SQL Parsing and Auto-generation Flow
     
-    User->>UI: Nhập yêu cầu tự nhiên <br/>(VD: "Lấy doanh thu tháng 3 của bảng orders")
-    UI->>Backend: API POST `/completion` (request.message, connection_id)
+    User->>UI: Input natural language request <br/>(e.g., "Get March revenue from orders table")
+    UI->>Backend: POST API `/completion` (request.message, connection_id)
     
     activate Backend
-    Backend->>DB: Lấy thông tin Workspace (Connection) từ DB
+    Backend->>DB: Fetch Workspace info (Connection) from DB
     activate DB
-    DB-->>Backend: Trả về Object chứa `meta_schema` (JSON của toàn bộ Database)
+    DB-->>Backend: Return Object containing `meta_schema` (JSON of whole Database)
     deactivate DB
     
-    %% Quá trình trích xuất lược đồ
-    Note over Backend, Extract: Bắt đầu quá trình trích xuất và tối ưu Context
+    %% Schema Extraction Process
+    Note over Backend, Extract: Start Context Extraction and Optimization Process
     
-    Backend->>Extract: Đưa câu văn của User và toàn bộ meta_schema vào
+    Backend->>Extract: Input User's text and the complete meta_schema
     activate Extract
     
-    Extract->>Extract: Quét (Matching) từ khoá để tìm tên bảng được nhắc đến (Mentioned Tables)
+    Extract->>Extract: Scan (Matching) keywords to find Mentioned Tables
     
-    alt Nếu tìm thấy bảng cụ thể (Ví dụ: "orders")
-        Extract->>Extract: Xây dựng Detailed Schema (Giới hạn tối đa 10 bảng liên quan nhất kèm ĐẦY ĐỦ Cột & Khóa ngoại)
-    else Không nhắc đến bảng cụ thể
-        Extract->>Extract: Xây dựng Compact Schema (Liệt kê tất cả các bảng nhưng ở dạng cú pháp thu gọn để tiết kiệm token)
+    alt If specific table found (e.g., "orders")
+        Extract->>Extract: Build Detailed Schema (Limit to max 10 most relevant tables with FULL Columns & Foreign Keys)
+    else No specific table mentioned
+        Extract->>Extract: Build Compact Schema (List all tables but in a concise format to save tokens)
     end
     
-    Extract-->>Backend: Trả về Chuỗi Schema Text đã được format tối ưu hóa
+    Extract-->>Backend: Return optimized formatted Schema Text string
     deactivate Extract
     
-    %% Tạo Prompt
-    Backend->>Backend: Ghép Schema Text + System Prompt (Quy tắc SQL) + Lịch sử Chat -> Final Prompt
+    %% Prompt Creation
+    Backend->>Backend: Combine Schema Text + System Prompt (SQL Rules) + Chat History -> Final Prompt
     
-    %% Gọi AI
-    Backend->>AI: Gửi Final Prompt để phân tích
+    %% Call AI
+    Backend->>AI: Send Final Prompt for analysis
     activate AI
-    AI-->>Backend: Trả về nội dung phản hồi có chứa khối mã ```sql ... ```
+    AI-->>Backend: Return response content containing code block ```sql ... ```
     deactivate AI
     
-    Backend->>Backend: Phân tách (Parse) để bóc tách câu lệnh SQL từ raw text
+    Backend->>Backend: Parse to extract SQL statement from raw text
     
-    Backend-->>UI: Trả về JSON (Message Content, sql_generated)
+    Backend-->>UI: Return JSON (Message Content, sql_generated)
     deactivate Backend
     
-    UI->>UI: Render giao diện Component tin nhắn mới
-    UI-->>User: Hiển thị khối mã SQL (Visual SQL Block) với nút "Execute"
+    UI->>UI: Render new message Component UI
+    UI-->>User: Display Visual SQL Block with "Execute" button
 ```

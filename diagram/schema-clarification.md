@@ -6,44 +6,44 @@
     participant Backend as Backend
     participant AI as AI / LLM
 
-    Note over User, AI: Bắt đầu luồng Khử Mơ Hồ (Clarification) Thiết kế Schema
+    Note over User, AI: Schema Clarification Design Flow Started
     
-    User->>UI: Yêu cầu tạo mới cấu trúc csdl (Vd: "Tạo DB quản lý bán hàng")
-    UI->>Backend: Gửi Text (Tạo cuộc hội thoại mới)
-    
-    activate Backend
-    Backend->>Backend: Detect Intent: Là yêu cầu thiết kế Schema
-    
-    %% Phase 1: Kiểm tra có cần làm rõ yêu cầu không
-    Backend->>AI: Gửi Prompt Phân Tích (Hỏi AI xem Requirement này đã đủ chưa?)
-    activate AI
-    AI-->>Backend: Thiếu thông tin! Trả về danh sách câu hỏi làm rõ (Kèm Options)
-    deactivate AI
-    
-    Backend-->>UI: Trả về Message đặc biệt (Có chứa cờ "Before designing the schema...")
-    deactivate Backend
-    
-    UI->>UI: Parser phát hiện cờ Clarification -> Ẩn Text thường
-    UI->>UI: Render Component "ClarificationBlock" tương tác
-    UI-->>User: Hiển thị các câu hỏi trắc nghiệm/Tự luận để người dùng chọn
-
-    %% Người dùng Cung Cấp Thông tin Bổ Sung
-    Note over User, UI: Người dùng Cung Cấp Thông tin Bổ Sung
-
-    User->>UI: Trả lời/Chọn Options cho từng câu & Nhấn Submit
-    UI->>Backend: Gửi API `/chat` chứa mảng "clarification_answers"
+    User->>UI: Request to create new database structure (e.g., "Create a sales management DB")
+    UI->>Backend: Send Text (Create new conversation)
     
     activate Backend
-    %% Phase 2: Áp dụng câu trả lời vào sinh cấu trúc thật
-    Backend->>AI: Gửi Prompt Sinh Schema (Yêu cầu gốc + Bộ câu trả lời đã thu thập)
+    Backend->>Backend: Detect Intent: Is Schema Design Request
+    
+    %% Phase 1: Check if clarification is needed
+    Backend->>AI: Send Analysis Prompt (Ask AI if the Requirement is sufficient?)
     activate AI
-    AI-->>Backend: Phân tích sâu 2 lớp & Trả về Cấu trúc Json (Tables, Columns, Refs) hoàn chỉnh
+    AI-->>Backend: Missing info! Return list of clarification questions (With Options)
     deactivate AI
     
-    Backend-->>UI: Trả về cấu trúc Schema Generated Data
+    Backend-->>UI: Return special Message (Containing flag "Before designing the schema...")
     deactivate Backend
     
-    UI->>UI: Cập nhật giao diện: Đóng/Minimize Form Câu Hỏi (Báo success)
-    UI->>UI: Render Component "Schema Block" 
-    UI-->>User: Hiển thị giao diện danh sách Bảng & Cho phép "Apply to Sandbox"
+    UI->>UI: Parser detects Clarification flag -> Hide normal Text
+    UI->>UI: Render interactive "ClarificationBlock" Component
+    UI-->>User: Display multiple-choice/essay questions for user selection
+
+    %% User Provides Additional Information
+    Note over User, UI: User Provides Additional Information
+
+    User->>UI: Answer/Select Options for each question & Click Submit
+    UI->>Backend: Send POST `/chat` API containing "clarification_answers" array
+    
+    activate Backend
+    %% Phase 2: Apply answers to generate actual structure
+    Backend->>AI: Send Schema Generation Prompt (Original request + Collected answer set)
+    activate AI
+    AI-->>Backend: Deep 2-layer analysis & Return complete JSON Structure (Tables, Columns, Refs)
+    deactivate AI
+    
+    Backend-->>UI: Return Schema Generated Data structure
+    deactivate Backend
+    
+    UI->>UI: Update UI: Close/Minimize Question Form (Success message)
+    UI->>UI: Render "Schema Block" Component 
+    UI-->>User: Display Table list interface & Allow "Apply to Sandbox"
 ```

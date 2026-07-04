@@ -11,6 +11,7 @@ import re
 import time
 from datetime import datetime, timezone
 from functools import lru_cache
+from app.core.config import settings
 from typing import Any, Dict, Optional
 from uuid import UUID
 
@@ -32,7 +33,7 @@ from app.models.models import ChatRole, User
 from app.repositories.connection_repository import connection_repository
 from app.repositories.conversation_repository import conversation_repository
 from app.repositories.query_log_repository import query_log_repository
-from app.schemas.sql import ChatCompletionRequest, ChatCompletionResponse
+from app.schemas.sql import ChatCompletionRequest, ChatCompletionResponse, TranslateRequest, TranslateResponse
 from app.services.llm_service import llm_service
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,19 +48,65 @@ SCHEMA_DESIGN_MIN_WORDS_FOR_DIRECT_GENERATE = 12
 # Schema formatting helpers
 # ---------------------------------------------------------------------------
 
-@lru_cache(maxsize=128)
 def _cached_format_schema(schema_json: str, limit_tables: int, mentioned_table_names: tuple) -> str:
+    """Format schema for LLM prompt.
+    Cached with lru_cache only when ENABLE_QUERY_CACHE=True (opt-in).
+    Default (False): always rebuild so the LLM receives the freshest schema.
+    """
     meta_schema = json.loads(schema_json)
     all_tables = meta_schema.get("tables", [])
     mentioned_tables = None
     if mentioned_table_names:
-        mentioned_tables = [t for t in all_tables if t.get("name") in mentioned_table_names]
+        names_lower = {n.lower() for n in mentioned_table_names}
+        mentioned_tables = [t for t in all_tables if t.get("name", "").lower() in names_lower]
     return format_schema_for_prompt(meta_schema, limit_tables, mentioned_tables)
+
+
+if settings.ENABLE_QUERY_CACHE:
+    _cached_format_schema = lru_cache(maxsize=128)(_cached_format_schema)
 
 
 def extract_mentioned_tables(message: str, all_tables: list) -> list:
     message_lower = message.lower()
     return [t for t in all_tables if t.get("name", "").lower() in message_lower]
+
+
+def _expand_tables_by_fk(seed_tables: list, all_tables: list) -> list:
+    """BFS từ seed_tables theo FK (2 chiều) để kéo toàn bộ bảng liên quan.
+
+    Ví dụ: seed=[student] → discover has_pet (FK → student) → discover pets (FK → has_pet)
+    Đảm bảo LLM luôn thấy đủ schema kể cả khi bảng trung gian không được đề cập.
+    """
+    if not seed_tables:
+        return []
+
+    table_by_name = {t.get("name", "").lower(): t for t in all_tables}
+    visited: set = set()
+    queue = list(seed_tables)
+
+    while queue:
+        table = queue.pop(0)
+        tname = table.get("name", "").lower()
+        if tname in visited:
+            continue
+        visited.add(tname)
+
+        # Outgoing FKs: bảng này trỏ tới bảng nào
+        for fk in table.get("foreign_keys", []):
+            ref = fk.get("ref_table", "").lower()
+            if ref and ref not in visited and ref in table_by_name:
+                queue.append(table_by_name[ref])
+
+        # Incoming FKs: bảng nào trỏ vào bảng này
+        for t in all_tables:
+            if t.get("name", "").lower() in visited:
+                continue
+            for fk in t.get("foreign_keys", []):
+                if fk.get("ref_table", "").lower() == tname:
+                    queue.append(t)
+                    break
+
+    return [t for t in all_tables if t.get("name", "").lower() in visited]
 
 
 def format_schema_for_prompt(meta_schema: dict, limit_tables: int = 10, mentioned_tables: list = None) -> str:
@@ -101,21 +148,39 @@ def _format_tables_detailed(tables: list) -> str:
 
 
 def _format_tables_compact(tables: list) -> str:
+    def _abbrev_type(t: str) -> str:
+        t = (t or "text").upper()
+        if any(x in t for x in ["NUMERIC", "FLOAT", "REAL", "DECIMAL"]):
+            return "NUM"
+        if "INT" in t:
+            return "INT"
+        if "BOOL" in t:
+            return "BOOL"
+        if any(x in t for x in ["TIMESTAMP", "DATE", "TIME"]):
+            return "DATE"
+        return "TEXT"
+
     lines = ["Database Schema (all tables):"]
     for table in tables:
         table_name = table.get("name", "unknown")
         columns = table.get("columns", [])
-        col_names = [c.get("name", "") for c in columns]
+        
+        col_strs = []
+        for c in columns:
+            cname = c.get("name", "")
+            ctype = _abbrev_type(c.get("type", c.get("data_type", "text")))
+            col_strs.append(f"{cname}:{ctype}")
+            
         fks = table.get("foreign_keys", [])
         fk_info = ""
         if fks:
             fk_parts = [
-                f"{fk.get('column')}→{fk.get('ref_table', fk.get('referenced_table', ''))}.{fk.get('ref_column', fk.get('referenced_column', ''))}"
+                f"{fk.get('column')}->{fk.get('ref_table', fk.get('referenced_table', ''))}.{fk.get('ref_column', fk.get('referenced_column', ''))}"
                 for fk in fks
             ]
             fk_info = f" | FK: {', '.join(fk_parts)}"
         
-        lines.append(f"- {table_name}({', '.join(col_names)}){fk_info}")
+        lines.append(f"- {table_name}({', '.join(col_strs)}){fk_info}")
         
         sample_data = table.get("sample_data", [])
         if sample_data:
@@ -264,9 +329,65 @@ async def _handle_check_mode(
     raw_sql = _strip_sql_markdown(message)
     is_valid, errors, cleaned_sql = _check_syntax(raw_sql, dialect_key)
 
-    # ── Fast path: valid syntax → no LLM ──────────────────────────────────
+    # ── Fast path: valid syntax → check semantic if schema is available ──
     if is_valid:
-        logger.info("[CHECK] Syntax valid — skipping LLM")
+        all_tables = connection.meta_schema.get("tables", []) if connection.meta_schema else []
+        mentioned_tables = _extract_tables_from_sql(raw_sql, all_tables)
+        
+        if mentioned_tables:
+            logger.info("[CHECK] Syntax valid but schema exists — calling LLM for semantic validation")
+            schema_text = _format_tables_with_samples(mentioned_tables)
+            system_prompt = f"""You are a {db_type_value} SQL Expert.
+Your task is to validate the SQL query against the provided schema and sample data.
+Verify that:
+1. All table names used in the query exist in the schema.
+2. All column names exist in their respective tables (e.g. check if rating_food has store_id, etc.).
+3. JOIN conditions use correct columns that exist in the schema.
+
+If there are NO semantic errors (the query is 100% correct and matches the schema):
+Return exactly this format:
+**Status:** Valid
+**Issue:** None
+
+```sql
+[original SQL]
+```
+
+If there are semantic errors (e.g., column does not exist, table does not exist):
+Return this format:
+**Status:** Fixed
+**Issue:** [Explain what column or table was missing or wrong]
+
+```sql
+[corrected SQL]
+```
+Do not include any other conversational filler or explanation outside the format above."""
+            
+            user_prompt = f"""Database Schema:\n{schema_text}\n\nSQL Query to validate:\n```sql\n{raw_sql}\n```"""
+            
+            try:
+                t0 = time.time()
+                llm_response = await llm_service.chat(
+                    prompt=user_prompt,
+                    system_prompt=system_prompt,
+                    temperature=0.1,
+                    max_tokens=4096,
+                )
+                logger.info("[CHECK] Semantic LLM check took %.2fs", time.time() - t0)
+                
+                fixed_sql = _extract_sql_block(llm_response)
+                await _save_assistant_message(db, conversation_id, llm_response, sql_generated=fixed_sql)
+                return ChatCompletionResponse(
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=llm_response,
+                    sql_generated=fixed_sql,
+                    is_schema_design=False,
+                )
+            except Exception as e:
+                logger.error("[CHECK] Semantic LLM check failed: %s. Falling back to default valid.", str(e))
+        
+        logger.info("[CHECK] Syntax valid — skipping LLM (no matching tables or error)")
         content = f"**Status:** Valid\n**Issue:** None\n\n```sql\n{cleaned_sql}\n```"
         await _save_assistant_message(db, conversation_id, content, sql_generated=cleaned_sql)
         return ChatCompletionResponse(
@@ -293,7 +414,7 @@ async def _handle_check_mode(
             prompt=user_prompt,
             system_prompt=system_prompt,
             temperature=0.1,
-            max_tokens=512,
+            max_tokens=1024,  # Tăng từ 512 — đủ cho fix SQL trung bình
         )
         logger.info("[CHECK] LLM fix took %.2fs", time.time() - t0)
     except Exception as e:
@@ -345,7 +466,7 @@ async def _handle_fix_mode(
         prompt=user_prompt,
         system_prompt=system_prompt,
         temperature=0.1,
-        max_tokens=1024,
+        max_tokens=2048,  # Tăng từ 1024 — đủ cho fix SQL CTE phức tạp
     )
 
     fixed_sql = _extract_sql_block(llm_response)
@@ -374,7 +495,19 @@ async def _handle_chat_mode(
 
     # Build schema context
     all_tables = connection.meta_schema.get("tables", []) if connection.meta_schema else []
+
+    # Step 1: find tables directly mentioned by name in the message
     mentioned_tables = extract_mentioned_tables(message, all_tables)
+
+    # Step 2: BFS-expand via FK relationships (both directions) so join tables
+    # like has_pet / bridge tables are included even if not named in the question.
+    if mentioned_tables:
+        mentioned_tables = _expand_tables_by_fk(mentioned_tables, all_tables)
+        logger.info(
+            "[CHAT] schema tables after FK expansion: %s",
+            [t.get('name') for t in mentioned_tables],
+        )
+
     schema_json = json.dumps(connection.meta_schema or {})
     mentioned_names = tuple(sorted([t.get("name") for t in mentioned_tables])) if mentioned_tables else ()
     schema_text = _cached_format_schema(schema_json, 10, mentioned_names)
@@ -389,11 +522,14 @@ async def _handle_chat_mode(
             prompt=message,
             system_prompt=system_prompt,
             temperature=0.2,
-            max_tokens=1024,
+            max_tokens=4096,  # Tăng từ 1024 — đủ cho SQL CTE nhiều tầng, báo cáo BI
         )
         logger.info("[CHAT] LLM took %.2fs", time.time() - t0)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"LLM service error: {str(e)}")
+
+    import asyncio
+    await asyncio.sleep(5)
 
     sql_generated = _extract_sql_block(llm_response)
     detected_sql = llm_service._extract_sql_from_message(message)
@@ -599,6 +735,22 @@ async def chat_completion(
 
     # Default: "chat"
     return await _handle_chat_mode(request, connection, conversation_id, db)
+
+
+@router.post("/translate", response_model=TranslateResponse)
+async def translate_text(
+    request: TranslateRequest,
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        translated = await llm_service.translate_markdown(
+            text=request.text,
+            target_language=request.target_language
+        )
+        return TranslateResponse(translated_text=translated)
+    except Exception as e:
+        logger.error(f"[TRANSLATE] Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ---------------------------------------------------------------------------

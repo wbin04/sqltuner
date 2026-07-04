@@ -1,8 +1,8 @@
-import { 
-  LayoutDashboard, 
-  Database, 
-  Zap, 
-  Settings, 
+import {
+  LayoutDashboard,
+  Database,
+  Zap,
+  Settings,
   FileText,
   LogOut
 } from 'lucide-react';
@@ -24,7 +24,7 @@ interface MenuItem {
 }
 
 const menuItems: MenuItem[] = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, path: '/' },
+  { id: 'overview', label: 'Overview', icon: LayoutDashboard, path: '/overview' },
   { id: 'workspaces', label: 'Workspaces', icon: Database, path: '/workspaces' },
   { id: 'history', label: 'History', icon: FileText, path: '/history' },
   { id: 'settings', label: 'Settings', icon: Settings, path: '/settings' },
@@ -46,11 +46,11 @@ export function MainLayout({ children, onLogout }: MainLayoutProps) {
         {/* Logo */}
         <div className="p-6 border-b border-border dark:border-border-dark">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-primary dark:from-primary-dark to-secondary dark:to-secondary-dark rounded-lg flex items-center justify-center">
+            <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
               <Zap className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h1 className="text-xl font-bold bg-gradient-to-r from-primary dark:from-primary-dark to-secondary dark:to-secondary-dark bg-clip-text text-transparent">
+              <h1 className="text-xl font-bold bg-blue-600 bg-clip-text text-transparent">
                 SQLTuner
               </h1>
               <p className="text-xs text-text-muted-DEFAULT dark:text-text-muted-dark">AI-Powered SQL</p>
@@ -74,13 +74,13 @@ export function MainLayout({ children, onLogout }: MainLayoutProps) {
                   isActive && 'bg-surface-highlight-DEFAULT dark:bg-surface-highlight-dark border border-primary/30 dark:border-primary-dark/30'
                 )}
               >
-                <Icon 
+                <Icon
                   className={cn(
                     'w-5 h-5 transition-colors',
                     isActive ? 'text-primary dark:text-primary-dark' : 'text-text-muted-DEFAULT dark:text-text-muted-dark group-hover:text-primary dark:group-hover:text-primary-dark'
-                  )} 
+                  )}
                 />
-                <span 
+                <span
                   className={cn(
                     'font-medium transition-colors',
                     isActive ? 'text-text-main-DEFAULT dark:text-text-main-dark' : 'text-text-muted-DEFAULT dark:text-text-muted-dark group-hover:text-text-main-DEFAULT dark:group-hover:text-text-main-dark'
@@ -101,7 +101,7 @@ export function MainLayout({ children, onLogout }: MainLayoutProps) {
               <p className="text-sm font-medium text-text-main-DEFAULT dark:text-text-main-dark">{user?.email?.split('@')[0] || 'user'}</p>
               <p className="text-xs text-text-muted-DEFAULT dark:text-text-muted-dark">User</p>
             </div>
-            <button 
+            <button
               onClick={onLogout}
               className="text-text-muted-DEFAULT dark:text-text-muted-dark hover:text-red-500 dark:hover:text-red-400 transition-colors"
               title="Logout"

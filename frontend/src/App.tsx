@@ -12,11 +12,14 @@ import { HistoryPage } from './pages/user/HistoryPage';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { FeedbackReview } from './pages/admin/FeedbackReview';
 import { UserManagement } from './pages/admin/UserManagement';
+import { ConnectionsManagement } from './pages/admin/ConnectionsManagement';
+import { EvaluationPage } from './pages/admin/EvaluationPage';
+import { AdminEvalPage } from './pages/admin/AdminEvalPage';
 import { SchemaEditor } from './pages/user/TableEditor';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
-type AdminPage = 'dashboard' | 'users' | 'feedback' | 'connections' | 'settings';
+type AdminPage = 'overview' | 'users' | 'feedback' | 'connections' | 'evaluation' | 'eval-runner' | 'settings';
 
 function LoginRoute() {
   const { isAuthenticated, user } = useAuth();
@@ -24,7 +27,7 @@ function LoginRoute() {
 
   if (isAuthenticated) {
     if (location.pathname === '/login') {
-      return <Navigate to={user?.role === 'admin' ? '/admin' : '/workspaces'} replace />;
+      return <Navigate to={user?.role === 'admin' ? '/admin' : '/overview'} replace />;
     }
     return null;
   }
@@ -33,7 +36,7 @@ function LoginRoute() {
 }
 
 function AppContent() {
-  const [currentAdminPage, setCurrentAdminPage] = useState<AdminPage>('dashboard');
+  const [currentAdminPage, setCurrentAdminPage] = useState<AdminPage>('overview');
   const { isAuthenticated, isLoading, logout, user } = useAuth();
 
   const ProtectedUserLayout = () => {
@@ -67,7 +70,7 @@ function AppContent() {
     }
     // Check if user is admin
     if (user?.role !== 'admin') {
-      return <Navigate to="/workspaces" replace />;
+      return <Navigate to="/overview" replace />;
     }
     return (
       <AdminLayout 
@@ -82,19 +85,24 @@ function AppContent() {
 
   const renderAdminPage = () => {
     switch (currentAdminPage) {
-      case 'dashboard':
+      case 'overview':
         return <AdminDashboard />;
       case 'users':
         return <UserManagement />;
       case 'feedback':
         return <FeedbackReview />;
       case 'connections':
+        return <ConnectionsManagement />;
+      case 'evaluation':
+        return <EvaluationPage />;
+      case 'eval-runner':
+        return <AdminEvalPage />;
       case 'settings':
         return (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
               <h2 className="text-2xl font-bold text-text-main-DEFAULT dark:text-text-main-dark mb-2">
-                {currentAdminPage.charAt(0).toUpperCase() + currentAdminPage.slice(1)}
+                System Config
               </h2>
               <p className="text-text-muted-DEFAULT dark:text-text-muted-dark">Coming soon...</p>
             </div>
@@ -114,7 +122,7 @@ function AppContent() {
       
       {/* User Routes */}
       <Route element={<ProtectedUserLayout />}>
-        <Route path="/dashboard" element={<DashboardHome />} />
+        <Route path="/overview" element={<DashboardHome />} />
         <Route path="/workspaces" element={<WorkspacesPage />} />
         <Route path="/history" element={<HistoryPage />} />
         <Route path="/settings" element={
@@ -155,7 +163,7 @@ function AppContent() {
         )
       } />
 
-      <Route path="/" element={<Navigate to="/workspaces" replace />} />
+      <Route path="/" element={<Navigate to="/overview" replace />} />
     </Routes>
   );
 }

@@ -1,5 +1,5 @@
 import { ReactNode } from 'react';
-import { LayoutDashboard, Users, Brain, Database, Settings, LogOut } from 'lucide-react';
+import { LayoutDashboard, Users, Brain, Database, Settings, LogOut, FlaskConical, PlayCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ThemeToggle } from '../components/ui/ThemeToggle';
 
@@ -12,28 +12,30 @@ interface AdminLayoutProps {
 
 export function AdminLayout({ children, currentPage, onNavigate, onLogout }: AdminLayoutProps) {
   const menuItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+    { id: 'evaluation', label: 'Evaluation Dashboard', icon: FlaskConical },
     { id: 'users', label: 'User Management', icon: Users },
-    { id: 'feedback', label: 'AI Training (RLHF)', icon: Brain },
     { id: 'connections', label: 'DB Connections', icon: Database },
+    { id: 'eval-runner', label: 'Evaluation Runner', icon: PlayCircle },
+    { id: 'feedback', label: 'AI Training (RLHF)', icon: Brain },
     { id: 'settings', label: 'System Config', icon: Settings },
   ];
 
   return (
     <div className="flex h-screen bg-background-light dark:bg-background-dark">
       {/* Sidebar */}
-      <aside className="w-64 bg-purple-50 dark:bg-purple-950/20 border-r border-purple-200 dark:border-purple-800/30 flex flex-col">
+      <aside className="w-64 bg-blue-50 dark:bg-slate-900/60 border-r border-blue-200 dark:border-slate-700/50 flex flex-col">
         {/* Logo */}
-        <div className="p-6 border-b border-purple-200 dark:border-purple-800/30">
+        <div className="p-6 border-b border-blue-200 dark:border-slate-700/50">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl flex items-center justify-center shadow-lg">
+            <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/25">
               <Settings className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h1 className="text-lg font-bold text-purple-900 dark:text-purple-100">
+              <h1 className="text-lg font-bold text-slate-900 dark:text-slate-100">
                 Admin Portal
               </h1>
-              <p className="text-xs text-purple-600 dark:text-purple-400">SQLTuner</p>
+              <p className="text-xs text-blue-600 dark:text-blue-400">SQLTuner</p>
             </div>
           </div>
         </div>
@@ -43,7 +45,7 @@ export function AdminLayout({ children, currentPage, onNavigate, onLogout }: Adm
           {menuItems.map((item) => {
             const Icon = item.icon;
             const isActive = currentPage === item.id;
-            
+
             return (
               <button
                 key={item.id}
@@ -51,8 +53,8 @@ export function AdminLayout({ children, currentPage, onNavigate, onLogout }: Adm
                 className={cn(
                   'w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all',
                   isActive
-                    ? 'bg-purple-500 text-white shadow-lg shadow-purple-500/30'
-                    : 'text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/30'
+                    ? 'bg-primary dark:bg-primary-dark text-white shadow-lg shadow-blue-500/30'
+                    : 'text-slate-700 dark:text-slate-300 hover:bg-blue-100 dark:hover:bg-slate-800/60'
                 )}
               >
                 <Icon className="w-5 h-5" />
@@ -63,16 +65,16 @@ export function AdminLayout({ children, currentPage, onNavigate, onLogout }: Adm
         </nav>
 
         {/* Admin User Section */}
-        <div className="p-4 border-t border-purple-200 dark:border-purple-800/30">
-          <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-purple-100 dark:bg-purple-900/30">
+        <div className="p-4 border-t border-blue-200 dark:border-slate-700/50">
+          <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-blue-100 dark:bg-slate-800/60">
             <ThemeToggle />
             <div className="flex-1">
-              <p className="text-sm font-medium text-purple-900 dark:text-purple-100">Admin</p>
-              <p className="text-xs text-purple-600 dark:text-purple-400">admin@gmail.com</p>
+              <p className="text-sm font-medium text-slate-900 dark:text-slate-100">Admin</p>
+              <p className="text-xs text-blue-600 dark:text-blue-400">admin@gmail.com</p>
             </div>
-            <button 
+            <button
               onClick={onLogout}
-              className="text-purple-600 dark:text-purple-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+              className="text-slate-500 dark:text-slate-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
               title="Logout"
             >
               <LogOut className="w-4 h-4" />
@@ -94,11 +96,11 @@ export function AdminLayout({ children, currentPage, onNavigate, onLogout }: Adm
           </div>
           <div className="flex items-center gap-4">
             <div className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark">
-              {new Date().toLocaleDateString('en-US', { 
-                weekday: 'short', 
-                year: 'numeric', 
-                month: 'short', 
-                day: 'numeric' 
+              {new Date().toLocaleDateString('en-US', {
+                weekday: 'short',
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric'
               })}
             </div>
           </div>

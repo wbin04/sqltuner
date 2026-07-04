@@ -6,47 +6,47 @@
     participant Backend as Backend
     participant DB as Database
 
-    Note over User, DB: Bắt đầu luồng Giải thích truy vấn (Explain Plan)
+    Note over User, DB: Explain Query Plan Flow Started
     
-    User->>UI: Bấm nút "Explain" trên khối mã SQL
-    UI->>UI: Mở Explain Modal & Chuyển trạng thái "Đang phân tích..."
-    UI->>Backend: Gửi API yêu cầu phân tích (Connection ID, câu lệnh SQL)
+    User->>UI: Click "Explain" button on the SQL code block
+    UI->>UI: Open Explain Modal & Switch state to "Analyzing..."
+    UI->>Backend: Send Analysis request API (Connection ID, SQL statement)
     
     activate Backend
-    Backend->>DB: Yêu cầu lấy thông tin thông số kết nối (Workspace/Connection)
-    DB-->>Backend: Trả về thông số kết nối (Kèm Schema nếu là Simulation)
+    Backend->>DB: Request connection parameters (Workspace/Connection)
+    DB-->>Backend: Return connection parameters (With Schema if Simulation)
     
-    alt Là môi trường Simulation (Giả lập Sandbox)
-        Note over Backend, DB: --- Phân tích trên SQLite in-memory ---
-        Backend->>Backend: Khởi tạo Storage Database (sqlite:///:memory:)
-        Backend->>DB: Dựng lại toàn bộ Schema Ảo và Đổ dữ liệu mẫu (Seeding)
+    alt Is Simulation Environment (Sandbox)
+        Note over Backend, DB: --- Analysis on in-memory SQLite ---
+        Backend->>Backend: Initialize Storage Database (sqlite:///:memory:)
+        Backend->>DB: Rebuild entire Virtual Schema and Data Seeding
         
         activate DB
-        Backend->>DB: Thực thi "EXPLAIN QUERY PLAN <sql>"
-        DB-->>Backend: Trả về kết quả Plan thô của SQLite
-        Backend->>DB: Thực thi thật "<sql>" để lấy thời gian chạy và số dòng
-        DB-->>Backend: Trả về Runtime Stats
+        Backend->>DB: Execute "EXPLAIN QUERY PLAN <sql>"
+        DB-->>Backend: Return raw SQLite Plan results
+        Backend->>DB: Actual execute "<sql>" to get runtime and row count
+        DB-->>Backend: Return Runtime Stats
         deactivate DB
         
-    else Là môi trường CSDL Thật (MySQL / PostgreSQL)
-        Note over Backend, DB: --- Phân tích trên CSDL Live Server ---
-        Backend->>DB: Kết nối trực tiếp tới CSDL Thật thông qua SQLAlchemy
+    else Is Real DB Environment (MySQL / PostgreSQL)
+        Note over Backend, DB: --- Analysis on Live Server DB ---
+        Backend->>DB: Connect directly to Real DB via SQLAlchemy
         
         activate DB
-        Backend->>DB: Thực thi lệnh "EXPLAIN <sql>"
-        DB-->>Backend: Trả về kế hoạch thực thi chung (Query Plan)
+        Backend->>DB: Execute "EXPLAIN <sql>"
+        DB-->>Backend: Return general execution plan (Query Plan)
         
-        opt Hỗ trợ EXPLAIN ANALYZE
-            Backend->>DB: Thực thi lệnh "EXPLAIN ANALYZE <sql>"
-            DB-->>Backend: Trả về thống kê thực thi chi tiết lúc Run-time
+        opt Support EXPLAIN ANALYZE
+            Backend->>DB: Execute "EXPLAIN ANALYZE <sql>"
+            DB-->>Backend: Return detailed runtime execution statistics
         end
         deactivate DB
     end
     
-    Backend->>Backend: Xử lý và Gom nhóm dữ liệu giải thích định dạng chuẩn
-    Backend-->>UI: Trả về JSON (Plan Columns, Rows, Cờ Hỗ trợ Analyze, Thời gian chạy)
+    Backend->>Backend: Process and Group standard formatted explanation data
+    Backend-->>UI: Return JSON (Plan Columns, Rows, Analyze Support Flag, Runtime)
     deactivate Backend
     
-    UI->>UI: Tắt màn hình Load & Cập nhật UI
-    UI-->>User: Hiển thị Explain Details (Các bước thực thi, Cost, Thời gian thực tế)
+    UI->>UI: Close Loading Screen & Update UI
+    UI-->>User: Display Explain Details (Execution steps, Cost, Actual Runtime)
 ```

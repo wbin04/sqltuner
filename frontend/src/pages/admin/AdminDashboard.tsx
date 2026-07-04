@@ -1,75 +1,117 @@
-import { Users, Database, Clock, MessageSquare } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Users, Database, Clock, MessageSquare, RefreshCw, AlertCircle } from 'lucide-react';
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-
-// Mock Data
-const statsData = [
-  {
-    title: 'Total Users',
-    value: '1,234',
-    icon: Users,
-    change: '+12% from last month',
-    color: 'from-blue-500 to-blue-600',
-  },
-  {
-    title: 'Queries Today',
-    value: '8,547',
-    icon: Database,
-    change: '+23% from yesterday',
-    color: 'from-green-500 to-green-600',
-  },
-  {
-    title: 'Avg Response Time',
-    value: '1.2s',
-    icon: Clock,
-    change: '-8% improvement',
-    color: 'from-orange-500 to-orange-600',
-  },
-  {
-    title: 'Pending Reviews',
-    value: '42',
-    icon: MessageSquare,
-    change: '12 new today',
-    color: 'from-purple-500 to-purple-600',
-  },
-];
-
-const queriesPerHourData = [
-  { hour: '00:00', queries: 120 },
-  { hour: '03:00', queries: 80 },
-  { hour: '06:00', queries: 150 },
-  { hour: '09:00', queries: 450 },
-  { hour: '12:00', queries: 680 },
-  { hour: '15:00', queries: 520 },
-  { hour: '18:00', queries: 380 },
-  { hour: '21:00', queries: 240 },
-];
-
-const satisfactionData = [
-  { date: 'Mon', thumbsUp: 120, thumbsDown: 15 },
-  { date: 'Tue', thumbsUp: 150, thumbsDown: 12 },
-  { date: 'Wed', thumbsUp: 180, thumbsDown: 20 },
-  { date: 'Thu', thumbsUp: 165, thumbsDown: 10 },
-  { date: 'Fri', thumbsUp: 200, thumbsDown: 18 },
-  { date: 'Sat', thumbsUp: 140, thumbsDown: 8 },
-  { date: 'Sun', thumbsUp: 110, thumbsDown: 5 },
-];
+import { adminService, DashboardResponse } from '../../services/adminService';
 
 export function AdminDashboard() {
+  const [data, setData] = useState<DashboardResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchDashboard = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const resp = await adminService.getDashboard();
+      setData(resp);
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || 'Failed to load dashboard data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDashboard();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="p-6 flex items-center justify-center h-full">
+        <div className="flex flex-col items-center gap-3">
+          <RefreshCw className="w-8 h-8 text-primary dark:text-primary-dark animate-spin" />
+          <p className="text-text-muted-DEFAULT dark:text-text-muted-dark">Loading overview...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-6 flex items-center justify-center h-full">
+        <div className="flex flex-col items-center gap-3 text-center">
+          <AlertCircle className="w-8 h-8 text-red-500" />
+          <p className="text-red-600 dark:text-red-400">{error}</p>
+          <button
+            onClick={fetchDashboard}
+            className="px-4 py-2 bg-primary dark:bg-primary-dark text-white rounded-lg hover:bg-primary-hover dark:hover:bg-primary-dark-hover transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!data) return null;
+
+  const { stats, queries_per_hour, satisfaction_trend, recent_activity } = data;
+
+  const statsCards = [
+    {
+      title: 'Total Users',
+      value: stats.total_users.toLocaleString(),
+      subtext: `${stats.active_users} active`,
+      icon: Users,
+      color: 'from-blue-500 to-blue-600',
+    },
+    {
+      title: 'Total Queries',
+      value: stats.total_queries.toLocaleString(),
+      subtext: `${stats.total_conversations} conversations`,
+      icon: Database,
+      color: 'from-cyan-500 to-teal-500',
+    },
+    {
+      title: 'DB Connections',
+      value: stats.total_connections.toLocaleString(),
+      subtext: 'across all users',
+      icon: Clock,
+      color: 'from-emerald-500 to-green-600',
+    },
+    {
+      title: 'Feedbacks',
+      value: stats.total_feedbacks.toLocaleString(),
+      subtext: `👍 ${stats.thumbs_up}  👎 ${stats.thumbs_down}`,
+      icon: MessageSquare,
+      color: 'from-indigo-500 to-blue-600',
+    },
+  ];
+
   return (
     <div className="p-6 space-y-6">
       {/* Page Header */}
-      <div>
-        <h1 className="text-3xl font-bold text-text-main-DEFAULT dark:text-text-main-dark">
-          System Overview
-        </h1>
-        <p className="text-text-muted-DEFAULT dark:text-text-muted-dark mt-1">
-          Monitor your SQLTuner platform performance
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-text-main-DEFAULT dark:text-text-main-dark">
+            System Overview
+          </h1>
+          <p className="text-text-muted-DEFAULT dark:text-text-muted-dark mt-1">
+            Monitor your SQLTuner platform performance
+          </p>
+        </div>
+        <button
+          onClick={fetchDashboard}
+          className="px-3 py-2 bg-surface-light dark:bg-surface-dark border border-border-DEFAULT dark:border-border-dark rounded-lg hover:bg-blue-50 dark:hover:bg-slate-800 transition-colors text-text-muted-DEFAULT dark:text-text-muted-dark"
+          title="Refresh"
+        >
+          <RefreshCw className="w-4 h-4" />
+        </button>
       </div>
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {statsData.map((stat) => {
+        {statsCards.map((stat) => {
           const Icon = stat.icon;
           return (
             <div
@@ -88,8 +130,8 @@ export function AdminDashboard() {
                 <p className="text-3xl font-bold text-text-main-DEFAULT dark:text-text-main-dark mb-2">
                   {stat.value}
                 </p>
-                <p className="text-xs text-green-600 dark:text-green-400">
-                  {stat.change}
+                <p className="text-xs text-blue-600 dark:text-blue-400">
+                  {stat.subtext}
                 </p>
               </div>
             </div>
@@ -102,10 +144,10 @@ export function AdminDashboard() {
         {/* Queries per Hour Chart */}
         <div className="bg-surface-light dark:bg-surface-dark rounded-xl border border-border-DEFAULT dark:border-border-dark p-6">
           <h3 className="text-lg font-semibold text-text-main-DEFAULT dark:text-text-main-dark mb-4">
-            Queries per Hour (Today)
+            Queries per Hour (Last 24h)
           </h3>
           <ResponsiveContainer width="100%" height={300}>
-            <AreaChart data={queriesPerHourData}>
+            <AreaChart data={queries_per_hour}>
               <defs>
                 <linearGradient id="colorQueries" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
@@ -145,10 +187,10 @@ export function AdminDashboard() {
         {/* User Satisfaction Chart */}
         <div className="bg-surface-light dark:bg-surface-dark rounded-xl border border-border-DEFAULT dark:border-border-dark p-6">
           <h3 className="text-lg font-semibold text-text-main-DEFAULT dark:text-text-main-dark mb-4">
-            User Satisfaction Trend (This Week)
+            User Satisfaction Trend (Last 7 Days)
           </h3>
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={satisfactionData}>
+            <BarChart data={satisfaction_trend}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" className="dark:stroke-slate-700" />
               <XAxis 
                 dataKey="date" 
@@ -167,8 +209,8 @@ export function AdminDashboard() {
                   color: '#fff'
                 }}
               />
-              <Bar dataKey="thumbsUp" fill="#10b981" radius={[8, 8, 0, 0]} />
-              <Bar dataKey="thumbsDown" fill="#ef4444" radius={[8, 8, 0, 0]} />
+              <Bar dataKey="thumbs_up" name="Thumbs Up" fill="#10b981" radius={[8, 8, 0, 0]} />
+              <Bar dataKey="thumbs_down" name="Thumbs Down" fill="#ef4444" radius={[8, 8, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
           <div className="flex items-center justify-center gap-6 mt-4">
@@ -193,33 +235,34 @@ export function AdminDashboard() {
         <h3 className="text-lg font-semibold text-text-main-DEFAULT dark:text-text-main-dark mb-4">
           Recent Activity
         </h3>
-        <div className="space-y-3">
-          {[
-            { user: 'john@example.com', action: 'submitted feedback', time: '2 minutes ago' },
-            { user: 'sarah@example.com', action: 'executed query optimization', time: '5 minutes ago' },
-            { user: 'mike@example.com', action: 'connected new database', time: '12 minutes ago' },
-            { user: 'emma@example.com', action: 'corrected SQL suggestion', time: '18 minutes ago' },
-          ].map((activity, idx) => (
-            <div 
-              key={idx}
-              className="flex items-center justify-between py-3 px-4 rounded-lg hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 bg-gradient-to-br from-primary to-secondary dark:from-primary-dark dark:to-secondary-dark rounded-full flex items-center justify-center text-white text-xs font-bold">
-                  {activity.user.charAt(0).toUpperCase()}
+        {recent_activity.length === 0 ? (
+          <p className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark text-center py-8">
+            No recent activity found
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {recent_activity.map((activity, idx) => (
+              <div 
+                key={idx}
+                className="flex items-center justify-between py-3 px-4 rounded-lg hover:bg-surface-highlight-light dark:hover:bg-surface-highlight-dark transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 bg-gradient-to-br from-primary to-cyan-500 dark:from-primary-dark dark:to-cyan-400 rounded-full flex items-center justify-center text-white text-xs font-bold">
+                    {activity.user_email.charAt(0).toUpperCase()}
+                  </div>
+                  <div>
+                    <p className="text-sm text-text-main-DEFAULT dark:text-text-main-dark">
+                      <span className="font-medium">{activity.user_email}</span> {activity.action}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm text-text-main-DEFAULT dark:text-text-main-dark">
-                    <span className="font-medium">{activity.user}</span> {activity.action}
-                  </p>
-                </div>
+                <span className="text-xs text-text-muted-DEFAULT dark:text-text-muted-dark">
+                  {activity.time}
+                </span>
               </div>
-              <span className="text-xs text-text-muted-DEFAULT dark:text-text-muted-dark">
-                {activity.time}
-              </span>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

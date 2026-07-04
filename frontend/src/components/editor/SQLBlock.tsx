@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Play, Zap, FileText, Copy, Check, AlignLeft, Loader2, Edit2, X, Save, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { formatSql } from '../../utils/sqlFormatter';
@@ -30,8 +30,12 @@ export function SQLBlock({
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editSqlValue, setEditSqlValue] = useState(displaySql);
   const [isSaving, setIsSaving] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
+  // Default expanded = true so SQL is always fully shown
+  const [isExpanded, setIsExpanded] = useState(true);
+  const [isOverflowing, setIsOverflowing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const COLLAPSE_HEIGHT = 300;
 
   // Auto-format SQL whenever it changes from backend/props
   useEffect(() => {
@@ -39,13 +43,27 @@ export function SQLBlock({
     setDisplaySql(formatted);
   }, [sql]);
 
-  // Auto-resize textarea
-  useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
+  // Auto-resize textarea and detect overflow
+  const updateSize = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    // Reset to measure true scrollHeight
+    el.style.height = 'auto';
+    const scrollH = el.scrollHeight;
+    const overflows = scrollH > COLLAPSE_HEIGHT;
+    setIsOverflowing(overflows);
+    if (isExpanded || !overflows) {
+      el.style.height = scrollH + 'px';
+      el.style.overflow = 'hidden';
+    } else {
+      el.style.height = COLLAPSE_HEIGHT + 'px';
+      el.style.overflow = 'hidden';
     }
-  }, [displaySql, isExpanded]);
+  }, [isExpanded]);
+
+  useEffect(() => {
+    updateSize();
+  }, [displaySql, isExpanded, updateSize]);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(displaySql);
@@ -141,38 +159,38 @@ export function SQLBlock({
           value={displaySql}
           onChange={handleChange}
           className={cn(
-            'w-full font-mono text-sm resize-none overflow-hidden',
+            'w-full font-mono text-sm resize-none',
             'bg-transparent text-text-main-DEFAULT dark:text-text-main-dark',
             'focus:outline-none focus:ring-0',
             'border-0 p-0',
-            'selection:bg-primary/20 selection:text-primary dark:selection:bg-primary-dark/30 dark:selection:text-primary-dark',
-            !isExpanded && 'max-h-[300px]'
+            'selection:bg-primary/20 selection:text-primary dark:selection:bg-primary-dark/30 dark:selection:text-primary-dark'
           )}
           spellCheck={false}
-          style={{ minHeight: '100px' }}
+          style={{ minHeight: '80px', overflow: 'hidden' }}
         />
-        
-        {!isExpanded && textareaRef.current && textareaRef.current.scrollHeight > 300 && (
+
+        {/* Fade overlay when collapsed */}
+        {isOverflowing && !isExpanded && (
           <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-background dark:from-background-dark to-transparent pointer-events-none" />
         )}
       </div>
 
-      {/* Expand/Collapse Toggle */}
-      {textareaRef.current && textareaRef.current.scrollHeight > 300 && (
-        <div className="flex justify-center -mt-3 relative z-10 pb-3">
+      {/* Expand/Collapse Toggle — only shown when SQL overflows */}
+      {isOverflowing && (
+        <div className="flex justify-center -mt-2 relative z-10 pb-3">
           <button
-            onClick={() => setIsExpanded(!isExpanded)}
+            onClick={() => setIsExpanded(prev => !prev)}
             className="flex items-center gap-1 px-3 py-1 text-xs font-medium rounded-full bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-text-muted-DEFAULT dark:text-text-muted-dark hover:text-text-main-DEFAULT dark:hover:text-text-main-dark transition-colors shadow-sm"
           >
             {isExpanded ? (
               <>
                 <ChevronUp className="w-3 h-3" />
-                Show Less
+                Collapse SQL
               </>
             ) : (
               <>
                 <ChevronDown className="w-3 h-3" />
-                Show More
+                Show full SQL
               </>
             )}
           </button>

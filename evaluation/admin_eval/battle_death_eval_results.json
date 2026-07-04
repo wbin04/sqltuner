@@ -1,0 +1,306 @@
+{
+  "timestamp": "2026-05-01T16:58:35.929666",
+  "total_evaluated": 16,
+  "total_errors": 0,
+  "overall": {
+    "EM (%)": 68.75,
+    "EX (%)": 75.0,
+    "SL (Soft Label %)": 93.75,
+    "SL_Linkage (%)": 98.44,
+    "avg_latency_s": 7.106
+  },
+  "by_hardness": {
+    "easy": {
+      "count": 10,
+      "em": 70.0,
+      "ex": 80.0,
+      "sl": 100.0
+    },
+    "medium": {
+      "count": 2,
+      "em": 50.0,
+      "ex": 50.0,
+      "sl": 100.0
+    },
+    "hard": {
+      "count": 3,
+      "em": 66.67,
+      "ex": 66.67,
+      "sl": 66.67
+    },
+    "extra_hard": {
+      "count": 1,
+      "em": 100.0,
+      "ex": 100.0,
+      "sl": 100.0
+    }
+  },
+  "detailed_results": [
+    {
+      "db_id": "battle_death",
+      "question": "How many ships ended up being 'Captured'?",
+      "gold_sql": "SELECT count(*) FROM ship WHERE disposition_of_ship  =  'Captured'",
+      "pred_sql": "SELECT COUNT(id) \nFROM ship \nWHERE disposition_of_ship = 'Captured';",
+      "em": 0,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "easy",
+      "complexity_score": 0.3,
+      "latency_s": 5.8497326374053955,
+      "error": null
+    },
+    {
+      "db_id": "battle_death",
+      "question": "List the name and tonnage ordered by in descending alphaetical order for the names.",
+      "gold_sql": "SELECT name ,  tonnage FROM ship ORDER BY name DESC",
+      "pred_sql": "SELECT name, tonnage \nFROM ship \nORDER BY name DESC;",
+      "em": 1,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "easy",
+      "complexity_score": 0.5,
+      "latency_s": 5.464202880859375,
+      "error": null
+    },
+    {
+      "db_id": "battle_death",
+      "question": "List the name, date and result of each battle.",
+      "gold_sql": "SELECT name ,  date FROM battle",
+      "pred_sql": "SELECT \n    name, \n    date, \n    result \nFROM \n    battle;",
+      "em": 0,
+      "ex": 0,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "easy",
+      "complexity_score": 0.0,
+      "latency_s": 5.423333406448364,
+      "error": "value_mismatch"
+    },
+    {
+      "db_id": "battle_death",
+      "question": "What is maximum and minimum death toll caused each time?",
+      "gold_sql": "SELECT max(killed) ,  min(killed) FROM death",
+      "pred_sql": "SELECT \n    MAX(killed) AS max_death_toll,\n    MIN(killed) AS min_death_toll\nFROM \n    death;",
+      "em": 1,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "easy",
+      "complexity_score": 0.6,
+      "latency_s": 6.594964027404785,
+      "error": null
+    },
+    {
+      "db_id": "battle_death",
+      "question": "What is the average number of injuries caused each time?",
+      "gold_sql": "SELECT avg(injured) FROM death",
+      "pred_sql": "SELECT AVG(injured) AS average_injuries\nFROM death;",
+      "em": 1,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "easy",
+      "complexity_score": 0.3,
+      "latency_s": 6.381900310516357,
+      "error": null
+    },
+    {
+      "db_id": "battle_death",
+      "question": "What are the death and injury situations caused by the ship with tonnage 't'?",
+      "gold_sql": "SELECT T1.killed ,  T1.injured FROM death AS T1 JOIN ship AS t2 ON T1.caused_by_ship_id  =  T2.id WHERE T2.tonnage  =  't'",
+      "pred_sql": "SELECT \n    d.id, \n    d.note, \n    d.killed, \n    d.injured, \n    s.name AS ship_name, \n    s.location AS ship_location, \n    s.ship_type AS ship_type\nFROM \n    death d\nJOIN \n    ship s ON d.caused_by_ship_id = s.id\nWHERE \n    s.tonnage = 't';",
+      "em": 0,
+      "ex": 0,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "easy",
+      "complexity_score": 1.0,
+      "latency_s": 6.894580602645874,
+      "error": "value_mismatch"
+    },
+    {
+      "db_id": "battle_death",
+      "question": "What are the name and results of the battles when the bulgarian commander is not 'Boril'",
+      "gold_sql": "SELECT name ,  RESULT FROM battle WHERE bulgarian_commander != 'Boril'",
+      "pred_sql": "SELECT name, result \nFROM battle \nWHERE bulgarian_commander != 'Boril';",
+      "em": 1,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "easy",
+      "complexity_score": 0.0,
+      "latency_s": 16.136931657791138,
+      "error": null
+    },
+    {
+      "db_id": "battle_death",
+      "question": "What are the different ids and names of the battles that lost any 'Brig' type shipes?",
+      "gold_sql": "SELECT DISTINCT T1.id ,  T1.name FROM battle AS T1 JOIN ship AS T2 ON T1.id  =  T2.lost_in_battle WHERE T2.ship_type  =  'Brig'",
+      "pred_sql": "SELECT DISTINCT b.id, b.name\nFROM battle b\nJOIN ship s ON b.id = s.lost_in_battle\nWHERE s.ship_type = 'Brig';",
+      "em": 1,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "medium",
+      "complexity_score": 1.5,
+      "latency_s": 11.627811908721924,
+      "error": null
+    },
+    {
+      "db_id": "battle_death",
+      "question": "What are the ids and names of the battles that led to more than 10 people killed in total.",
+      "gold_sql": "SELECT T1.id ,  T1.name FROM battle AS T1 JOIN ship AS T2 ON T1.id  =  T2.lost_in_battle JOIN death AS T3 ON T2.id  =  T3.caused_by_ship_id GROUP BY T1.id HAVING sum(T3.killed)  >  10",
+      "pred_sql": "SELECT \n    b.id, \n    b.name\nFROM \n    battle b\nJOIN \n    death d ON b.id = d.caused_by_ship_id\nGROUP BY \n    b.id, \n    b.name\nHAVING \n    SUM(d.killed) > 10;",
+      "em": 0,
+      "ex": 0,
+      "sl": 0.0,
+      "sl_linkage": 0.75,
+      "hardness": "hard",
+      "complexity_score": 3.8,
+      "latency_s": 6.401654481887817,
+      "error": "extra_result"
+    },
+    {
+      "db_id": "battle_death",
+      "question": "What is the ship id and name that caused most total injuries?",
+      "gold_sql": "SELECT T2.id ,  T2.name FROM death AS T1 JOIN ship AS t2 ON T1.caused_by_ship_id  =  T2.id GROUP BY T2.id ORDER BY count(*) DESC LIMIT 1",
+      "pred_sql": "SELECT \n    s.id, \n    s.name, \n    SUM(d.injured) as total_injuries\nFROM \n    death d\nJOIN \n    ship s ON d.caused_by_ship_id = s.id\nGROUP BY \n    s.id, \n    s.name\nORDER BY \n    total_injuries DESC\nLIMIT 1;",
+      "em": 0,
+      "ex": 0,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "medium",
+      "complexity_score": 2.5999999999999996,
+      "latency_s": 7.61948037147522,
+      "error": "value_mismatch"
+    },
+    {
+      "db_id": "battle_death",
+      "question": "What are the distinct battle names which are between bulgarian commander 'Kaloyan' and latin commander 'Baldwin I'?",
+      "gold_sql": "SELECT name FROM battle WHERE bulgarian_commander  =  'Kaloyan' AND latin_commander  =  'Baldwin I'",
+      "pred_sql": "SELECT DISTINCT name \nFROM battle \nWHERE (bulgarian_commander = 'Kaloyan' AND latin_commander = 'Baldwin I') \n   OR (bulgarian_commander = 'Baldwin I' AND latin_commander = 'Kaloyan');",
+      "em": 1,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "easy",
+      "complexity_score": 0.0,
+      "latency_s": 5.849469900131226,
+      "error": null
+    },
+    {
+      "db_id": "battle_death",
+      "question": "How many different results are there for the battles?",
+      "gold_sql": "SELECT count(DISTINCT RESULT) FROM battle",
+      "pred_sql": "SELECT COUNT(DISTINCT result) \nFROM battle;",
+      "em": 1,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "easy",
+      "complexity_score": 0.8,
+      "latency_s": 5.527201175689697,
+      "error": null
+    },
+    {
+      "db_id": "battle_death",
+      "question": "How many battles did not lose any ship with tonnage '225'?",
+      "gold_sql": "SELECT count(*) FROM battle WHERE id NOT IN ( SELECT lost_in_battle FROM ship WHERE tonnage  =  '225' );",
+      "pred_sql": "SELECT COUNT(DISTINCT b.id) \nFROM battle b \nWHERE b.id NOT IN (\n  SELECT s.lost_in_battle \n  FROM ship s \n  WHERE s.tonnage = '225'\n);",
+      "em": 1,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "hard",
+      "complexity_score": 3.3,
+      "latency_s": 6.359968900680542,
+      "error": null
+    },
+    {
+      "db_id": "battle_death",
+      "question": "List the name and date the battle that has lost the ship named 'Lettice' and the ship named 'HMS Atalanta'",
+      "gold_sql": "SELECT T1.name ,  T1.date FROM battle AS T1 JOIN ship AS T2 ON T1.id  =  T2.lost_in_battle WHERE T2.name  =  'Lettice' INTERSECT SELECT T1.name ,  T1.date FROM battle AS T1 JOIN ship AS T2 ON T1.id  =  T2.lost_in_battle WHERE T2.name  =  'HMS Atalanta'",
+      "pred_sql": "SELECT b.name, b.date\nFROM battle b\nJOIN ship s ON b.id = s.lost_in_battle\nWHERE s.name IN ('Lettice', 'HMS Atalanta');",
+      "em": 1,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "extra_hard",
+      "complexity_score": 7.0,
+      "latency_s": 5.915553331375122,
+      "error": null
+    },
+    {
+      "db_id": "battle_death",
+      "question": "Show names, results and bulgarian commanders of the battles with no ships lost in the 'English Channel'.",
+      "gold_sql": "SELECT name ,  RESULT ,  bulgarian_commander FROM battle EXCEPT SELECT T1.name ,  T1.result ,  T1.bulgarian_commander FROM battle AS T1 JOIN ship AS T2 ON T1.id  =  T2.lost_in_battle WHERE T2.location  =  'English Channel'",
+      "pred_sql": "SELECT name, result, bulgarian_commander\nFROM battle\nWHERE id NOT IN (\n  SELECT lost_in_battle\n  FROM ship\n  WHERE location = 'English Channel' AND lost_in_battle IS NOT NULL\n);",
+      "em": 1,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "hard",
+      "complexity_score": 6.0,
+      "latency_s": 6.295497179031372,
+      "error": null
+    },
+    {
+      "db_id": "battle_death",
+      "question": "What are the notes of the death events which has substring 'East'?",
+      "gold_sql": "SELECT note FROM death WHERE note LIKE '%East%'",
+      "pred_sql": "SELECT note \nFROM death \nWHERE note LIKE '%East%';",
+      "em": 1,
+      "ex": 1,
+      "sl": 1.0,
+      "sl_linkage": 1.0,
+      "hardness": "easy",
+      "complexity_score": 0.0,
+      "latency_s": 5.3536460399627686,
+      "error": null
+    }
+  ],
+  "errors": [],
+  "failed_cases": [
+    {
+      "db_id": "battle_death",
+      "question": "List the name, date and result of each battle.",
+      "gold_sql": "SELECT name ,  date FROM battle",
+      "pred_sql": "SELECT \n    name, \n    date, \n    result \nFROM \n    battle;",
+      "sl": 1.0,
+      "error": "value_mismatch"
+    },
+    {
+      "db_id": "battle_death",
+      "question": "What are the death and injury situations caused by the ship with tonnage 't'?",
+      "gold_sql": "SELECT T1.killed ,  T1.injured FROM death AS T1 JOIN ship AS t2 ON T1.caused_by_ship_id  =  T2.id WHERE T2.tonnage  =  't'",
+      "pred_sql": "SELECT \n    d.id, \n    d.note, \n    d.killed, \n    d.injured, \n    s.name AS ship_name, \n    s.location AS ship_location, \n    s.ship_type AS ship_type\nFROM \n    death d\nJOIN \n    ship s ON d.caused_by_ship_id = s.id\nWHERE \n    s.tonnage = 't';",
+      "sl": 1.0,
+      "error": "value_mismatch"
+    },
+    {
+      "db_id": "battle_death",
+      "question": "What are the ids and names of the battles that led to more than 10 people killed in total.",
+      "gold_sql": "SELECT T1.id ,  T1.name FROM battle AS T1 JOIN ship AS T2 ON T1.id  =  T2.lost_in_battle JOIN death AS T3 ON T2.id  =  T3.caused_by_ship_id GROUP BY T1.id HAVING sum(T3.killed)  >  10",
+      "pred_sql": "SELECT \n    b.id, \n    b.name\nFROM \n    battle b\nJOIN \n    death d ON b.id = d.caused_by_ship_id\nGROUP BY \n    b.id, \n    b.name\nHAVING \n    SUM(d.killed) > 10;",
+      "sl": 0.0,
+      "error": "extra_result"
+    },
+    {
+      "db_id": "battle_death",
+      "question": "What is the ship id and name that caused most total injuries?",
+      "gold_sql": "SELECT T2.id ,  T2.name FROM death AS T1 JOIN ship AS t2 ON T1.caused_by_ship_id  =  T2.id GROUP BY T2.id ORDER BY count(*) DESC LIMIT 1",
+      "pred_sql": "SELECT \n    s.id, \n    s.name, \n    SUM(d.injured) as total_injuries\nFROM \n    death d\nJOIN \n    ship s ON d.caused_by_ship_id = s.id\nGROUP BY \n    s.id, \n    s.name\nORDER BY \n    total_injuries DESC\nLIMIT 1;",
+      "sl": 1.0,
+      "error": "value_mismatch"
+    }
+  ],
+  "config": {
+    "spider_dir": "E:/spider/spider_data",
+    "db_id": "battle_death",
+    "limit": null,
+    "mode": "api",
+    "llm_model": null
+  }
+}

@@ -236,6 +236,16 @@ class PostgresSandboxService:
                     sanitized[col_name] = None
                     continue
 
+            # For NUMERIC columns, sentinel strings like '?', 'null', 'N/A' (common in
+            # Spider datasets for missing values) must become NULL — not cause a cast error.
+            if any(t in pg_type for t in ["INT", "FLOAT", "NUMERIC", "DECIMAL", "REAL"]):
+                if isinstance(value, str):
+                    try:
+                        float(value.strip())
+                    except (ValueError, TypeError):
+                        sanitized[col_name] = None
+                        continue
+
             # Parse UUID
             if "UUID" in pg_type:
                 val_str = str(value)

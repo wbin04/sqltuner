@@ -533,9 +533,10 @@ async def optimize_sql(
         )
 
     optimized_cost = None
+    optimized_time_ms = None
     if request.include_explain and connection.db_type != DBType.SIMULATION:
         logger.info(
-            "[OPTIMIZE] Running EXPLAIN on optimized query to compare costs")
+            "[OPTIMIZE] Running EXPLAIN ANALYZE on optimized query")
         try:
             conn_string = build_sync_connection_string(connection)
 
@@ -559,65 +560,129 @@ async def optimize_sql(
 
             with engine.connect() as conn:
                 if connection.db_type == DBType.POSTGRES:
-                    explain_query = f"EXPLAIN (FORMAT JSON) {optimized_sql}"
+                    sql_upper = optimized_sql.strip().upper()
+                    use_analyze = (
+                        sql_upper.startswith("SELECT")
+                        or sql_upper.startswith("WITH")
+                    )
+                    if use_analyze:
+                        explain_query = f"EXPLAIN (ANALYZE, FORMAT JSON) {optimized_sql}"
+                    else:
+                        explain_query = f"EXPLAIN (FORMAT JSON) {optimized_sql}"
+
                     result_proxy = conn.execute(text(explain_query))
                     explain_output = result_proxy.fetchone()[0]
-                    plan_data = json.loads(explain_output) if isinstance(
-                        explain_output, str) else explain_output
+                    plan_data = (
+                        json.loads(explain_output)
+                        if isinstance(explain_output, str)
+                        else explain_output
+                    )
                     optimized_cost = plan_data[0]["Plan"]["Total Cost"]
 
+                    if use_analyze:
+                        root_plan = plan_data[0]["Plan"]
+                        actual_loops = root_plan.get("Actual Loops", 1) or 1
+                        raw_time = root_plan.get("Actual Total Time", None)
+                        if raw_time is not None:
+                            optimized_time_ms = raw_time * actual_loops
+
                 elif connection.db_type == DBType.MYSQL:
-                    explain_query = f"EXPLAIN FORMAT=JSON {optimized_sql}"
-                    result_proxy = conn.execute(text(explain_query))
-                    explain_output = result_proxy.fetchone()[0]
-                    plan_data = json.loads(explain_output) if isinstance(
-                        explain_output, str) else explain_output
-                    optimized_cost = plan_data.get(
-                        "query_block",
-                        {}).get(
-                        "cost_info",
-                        {}).get(
-                        "query_cost",
-                        0.0)
+                    import re as _re
+                    # Try EXPLAIN ANALYZE first (MySQL 8.0+) for actual time
+                    try:
+                        result_proxy2 = conn.execute(text(f"EXPLAIN ANALYZE {optimized_sql}"))
+                        rows2 = result_proxy2.fetchall()
+                        if rows2:
+                            root_line = rows2[0][0] if rows2[0] else ""
+                            m = _re.search(
+                                r'actual time=[\d.]+\.\.([\d.]+)\s+rows=\d+\s+loops=(\d+)',
+                                root_line
+                            )
+                            if m:
+                                optimized_time_ms = float(m.group(1)) * int(m.group(2))
+                    except Exception as _e:
+                        logger.debug(f"[OPTIMIZE] MySQL EXPLAIN ANALYZE unavailable for optimized SQL: {_e}")
+
+                    if optimized_time_ms is None:
+                        # Fallback: planner cost only
+                        explain_query = f"EXPLAIN FORMAT=JSON {optimized_sql}"
+                        result_proxy = conn.execute(text(explain_query))
+                        explain_output = result_proxy.fetchone()[0]
+                        plan_data = json.loads(explain_output) if isinstance(
+                            explain_output, str) else explain_output
+                        optimized_cost = float(
+                            plan_data.get("query_block", {})
+                            .get("cost_info", {})
+                            .get("query_cost", 0.0)
+                        )
 
             engine.dispose()
             logger.info(
-                f"[OPTIMIZE] Optimized query cost: {optimized_cost}"
+                f"[OPTIMIZE] Optimized query cost: {optimized_cost}, "
+                f"time: {optimized_time_ms}ms"
             )
 
         except Exception as e:
             logger.warning(
-                f"[OPTIMIZE] Could not get cost for optimized query: {str(e)}"
-            )
+                f"[OPTIMIZE] Could not get metrics for optimized query: {str(e)}")
 
     stats_comparison = None
-    if original_cost is not None and optimized_cost is not None:
-        try:
-            original_cost_float = float(original_cost)
-            optimized_cost_float = float(optimized_cost)
+    original_time_ms = analysis.get("original_time_ms")
 
-            improvement_percent = 0
-            if original_cost_float > 0:
-                improvement_percent = round(
-                    (
-                        (original_cost_float - optimized_cost_float) /
-                        original_cost_float
-                    ) * 100,
-                    2
-                )
+    if original_time_ms is not None and optimized_time_ms is not None:
+        try:
+            orig_ms = float(original_time_ms)
+            opt_ms = float(optimized_time_ms)
+
+            if orig_ms > 0:
+                speedup_factor = orig_ms / opt_ms if opt_ms > 0 else float("inf")
+                improvement_percent = round(((orig_ms - opt_ms) / orig_ms) * 100, 2)
+            else:
+                speedup_factor = 1.0
+                improvement_percent = 0.0
+
             stats_comparison = {
-                "old_cost": original_cost_float,
-                "new_cost": optimized_cost_float,
-                "improvement_percent": improvement_percent
+                "metric_type": "execution_time",
+                "original_time_ms": round(orig_ms, 3),
+                "optimized_time_ms": round(opt_ms, 3),
+                "improvement_percent": improvement_percent,
+                "speedup_factor": round(speedup_factor, 2),
+                "old_cost": original_cost,
+                "new_cost": optimized_cost,
             }
 
             logger.info(
-                f"[OPTIMIZE] Cost comparison: {original_cost_float} → "
-                f"{optimized_cost_float} ({improvement_percent}% improvement)"
+                f"[OPTIMIZE] Time comparison: {orig_ms:.3f}ms → {opt_ms:.3f}ms "
+                f"({improvement_percent:.1f}% improvement, {speedup_factor:.1f}x faster)"
+            )
+
+        except (ValueError, TypeError) as e:
+            logger.warning(f"[OPTIMIZE] Could not calculate time comparison: {str(e)}")
+
+    elif original_cost is not None and optimized_cost is not None:
+        try:
+            orig_c = float(original_cost)
+            opt_c = float(optimized_cost)
+            improvement_percent = (
+                round(((orig_c - opt_c) / orig_c) * 100, 2) if orig_c > 0 else 0.0
+            )
+
+            stats_comparison = {
+                "metric_type": "planner_cost",
+                "old_cost": orig_c,
+                "new_cost": opt_c,
+                "improvement_percent": improvement_percent,
+                "speedup_factor": None,
+                "original_time_ms": None,
+                "optimized_time_ms": None,
+            }
+
+            logger.info(
+                f"[OPTIMIZE] Cost comparison (fallback): {orig_c} → {opt_c} "
+                f"({improvement_percent}% improvement)"
             )
         except (ValueError, TypeError) as e:
-            logger.warning(
-                f"[OPTIMIZE] Could not calculate cost comparison: {str(e)}")
+            logger.warning(f"[OPTIMIZE] Could not calculate cost comparison: {str(e)}")
 
     return SQLOptimizeResponse(
         original_sql=request.sql_query,

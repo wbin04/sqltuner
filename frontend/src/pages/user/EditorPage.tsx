@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Database, Loader2, AlertCircle, RefreshCw, ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
+import { Database, Loader2, AlertCircle, RefreshCw, ArrowLeft, ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useWorkspace } from '../../hooks/useWorkspace';
 import { useEditorLogic } from '../../hooks/useEditorLogic';
@@ -20,7 +20,7 @@ import { JSONViewerModal } from '../../components/editor/JSONViewerModal';
 import { SchemaGeneratedData } from '../../services/chatService';
 import { workspaceService } from '../../services/workspaceService';
 import { DbType } from '../../types/workspace';
-import { extractErrorMessage, getSQLErrorSuggestion } from '../../utils/sqlErrorHelper';
+import { extractErrorMessage } from '../../utils/sqlErrorHelper';
 import { toast } from 'react-toastify';
 
 export function EditorPage() {
@@ -371,8 +371,29 @@ export function EditorPage() {
                           {extractErrorMessage(editorLogic.executeError)}
                         </div>
 
+                        <div className="mt-4">
+                          <button
+                            onClick={() => {
+                              const errMsg = extractErrorMessage(editorLogic.executeError);
+                              handleSendMessage(
+                                `Fix the execution error for my query.`,
+                                'fix',
+                                errMsg,
+                                activeResultSql || undefined
+                              );
+                            }}
+                            className={cn(
+                              'px-4 py-2 rounded-lg text-sm font-medium text-white flex items-center gap-2',
+                              'bg-red-600 hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-600 transition-all shadow-md hover:shadow-lg'
+                            )}
+                          >
+                            <Sparkles className="w-4 h-4" />
+                            <span>Auto Fix with AI</span>
+                          </button>
+                        </div>
+
                         {/* Show SQL suggestion for common errors */}
-                        {(() => {
+                        {/* {(() => {
                           const suggestion = getSQLErrorSuggestion(editorLogic.executeError);
                           if (!suggestion) return null;
 
@@ -389,7 +410,7 @@ export function EditorPage() {
                               </pre>
                             </div>
                           );
-                        })()}
+                        })()} */}
                       </div>
                     </div>
                   </div>

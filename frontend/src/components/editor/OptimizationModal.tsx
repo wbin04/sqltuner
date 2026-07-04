@@ -2,12 +2,17 @@
  * OptimizationModal Component
  * Unified Inline Diff View - Developer-focused SQL optimization display
  */
-import { X } from 'lucide-react';
+import { X, Languages, Loader2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { format } from 'sql-formatter';
 import * as Diff from 'diff';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { useState, useEffect } from 'react';
+import { chatService } from '../../services/chatService';
 import {
   OptimizationAnalysis,
+  StatsComparison,
   REWRITE_TYPE_COLORS,
   REWRITE_TYPE_LABELS,
   RewriteType,
@@ -34,6 +39,41 @@ export function OptimizationModal({
   onReplaceQuery,
   onNotify,
 }: OptimizationModalProps) {
+  const [translatedExplanation, setTranslatedExplanation] = useState<string | null>(null);
+  const [isTranslating, setIsTranslating] = useState(false);
+  const [lang, setLang] = useState<'en' | 'vi'>('en');
+
+  useEffect(() => {
+    setTranslatedExplanation(null);
+    setLang('en');
+    setIsTranslating(false);
+  }, [analysis?.explanation]);
+
+  const handleTranslate = async () => {
+    if (lang === 'vi') {
+      setLang('en');
+      return;
+    }
+    if (translatedExplanation) {
+      setLang('vi');
+      return;
+    }
+    if (!analysis?.explanation) return;
+
+    setIsTranslating(true);
+    try {
+      const res = await chatService.translateMarkdown({
+        text: analysis.explanation,
+        target_language: 'vi'
+      });
+      setTranslatedExplanation(res.translated_text);
+      setLang('vi');
+    } catch (err) {
+      onNotify?.('Translation failed', 'error');
+    } finally {
+      setIsTranslating(false);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -68,21 +108,67 @@ export function OptimizationModal({
   // Check if there are actual differences
   const hasDifferences = originalSql.trim() !== optimizedSql.trim();
 
-  // Calculate improvement stats
-  const stats = analysis.stats_comparison;
-  const improvement = stats
-    ? `📉 Cost: ${stats.old_cost.toFixed(2)} → ${stats.new_cost.toFixed(2)} (${stats.improvement_percent > 0 ? '-' : '+'}${Math.abs(stats.improvement_percent)}%)`
-    : '';
+  // Helper: format ms with auto unit
+  const formatMs = (ms: number): string => {
+    if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`;
+    if (ms >= 1) return `${ms.toFixed(1)}ms`;
+    return `${(ms * 1000).toFixed(0)}µs`;
+  };
 
-  // Determine badge color based on improvement
-  // Positive improvement_percent = better (green), Negative = worse (red)
-  const improvementColor = stats
-    ? stats.improvement_percent > 0
-      ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300 border border-green-300 dark:border-green-700'
-      : stats.improvement_percent < 0
-        ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 border border-red-300 dark:border-red-700'
-        : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 border border-gray-300 dark:border-gray-600'
-    : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 border border-gray-300 dark:border-gray-600';
+  // Render stats comparison badge
+  const stats: StatsComparison | undefined = analysis.stats_comparison;
+
+  const renderStatsComparison = () => {
+    if (!stats) return null;
+
+    if (
+      stats.metric_type === 'execution_time' &&
+      stats.original_time_ms != null &&
+      stats.optimized_time_ms != null
+    ) {
+      const isImproved = stats.improvement_percent > 0;
+      const badgeColor = isImproved
+        ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300 border border-green-300 dark:border-green-700'
+        : stats.improvement_percent < 0
+          ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 border border-red-300 dark:border-red-700'
+          : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 border border-gray-300 dark:border-gray-600';
+
+      return (
+        <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold ${badgeColor}`}>
+          ⏱ {formatMs(stats.original_time_ms)} → {formatMs(stats.optimized_time_ms)}
+          {stats.speedup_factor != null && stats.speedup_factor !== 1 && (
+            <span>
+              ({isImproved
+                ? `${stats.speedup_factor}x faster`
+                : `${(1 / stats.speedup_factor).toFixed(1)}x slower`})
+            </span>
+          )}
+        </span>
+      );
+    }
+
+    // Fallback: hiển thị cost với label rõ ràng hơn
+    if (
+      stats.metric_type === 'planner_cost' &&
+      stats.old_cost != null &&
+      stats.new_cost != null
+    ) {
+      const isImproved = stats.improvement_percent > 0;
+      const badgeColor = isImproved
+        ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300 border border-green-300 dark:border-green-700'
+        : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 border border-gray-300 dark:border-gray-600';
+
+      return (
+        <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold ${badgeColor}`}>
+          Planner cost: {stats.old_cost.toFixed(0)} → {stats.new_cost.toFixed(0)}
+          {` (${isImproved ? '-' : '+'}${Math.abs(stats.improvement_percent)}%)`}
+          <span className="text-xs opacity-60 ml-0.5">(est.)</span>
+        </span>
+      );
+    }
+
+    return null;
+  };
 
   // Apply fix handler — only replace SQL in editor, index is separate
   const handleApplyFix = () => {
@@ -111,14 +197,8 @@ export function OptimizationModal({
             <h2 className="text-lg font-bold text-text-main-DEFAULT dark:text-text-main-dark">
               Optimization Analysis
             </h2>
-            {stats && (
-              <span className={cn(
-                'px-3 py-1 rounded-full text-xs font-semibold',
-                improvementColor
-              )}>
-                {improvement}
-              </span>
-            )}
+            {renderStatsComparison()}
+
           </div>
           <button
             onClick={onClose}
@@ -130,9 +210,42 @@ export function OptimizationModal({
 
         <div className="px-6 py-4 border-b border-gray-200 dark:border-border-dark bg-surface-highlight-DEFAULT/20 dark:bg-surface-highlight-dark/20 shrink-0 overflow-y-auto max-h-[30vh]">
           {analysis.explanation && (
-            <p className="text-sm text-text-muted-DEFAULT dark:text-text-muted-dark mb-3">
-              {analysis.explanation}
-            </p>
+            <div className={cn(
+              'rounded-xl px-4 py-3 mb-3 relative group',
+              'bg-surface-light dark:bg-surface-dark border border-border-DEFAULT dark:border-border-dark'
+            )}>
+              <button
+                onClick={handleTranslate}
+                disabled={isTranslating}
+                className="absolute top-2 right-2 p-1.5 rounded bg-surface-highlight-DEFAULT/50 dark:bg-surface-highlight-dark/50 text-text-muted-DEFAULT dark:text-text-muted-dark hover:text-primary dark:hover:text-primary-dark transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-50"
+                title="Translate"
+              >
+                {isTranslating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Languages className="w-4 h-4" />}
+              </button>
+              <div className={cn(
+                'text-sm',
+                'prose prose-sm dark:prose-invert max-w-none pr-8',
+                // Typography overrides for spacing — same as ChatArea
+                'prose-p:my-1 prose-p:leading-relaxed',
+                'prose-ul:my-1 prose-ol:my-1 prose-li:my-0',
+                'prose-headings:my-2',
+                // Force text colors to be sharp (black/white) — same as ChatArea
+                'text-black dark:text-white',
+                'prose-p:text-black dark:prose-p:text-white',
+                'prose-li:text-black dark:prose-li:text-white',
+                'prose-strong:text-black dark:prose-strong:text-white',
+                // Inline code styling — same as ChatArea
+                'prose-code:px-1.5 prose-code:py-0.5',
+                'prose-code:bg-primary/10 dark:prose-code:bg-primary/20',
+                'prose-code:text-primary dark:prose-code:text-primary-dark',
+                'prose-code:rounded-md prose-code:font-medium',
+                'prose-code:before:content-none prose-code:after:content-none'
+              )}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {lang === 'vi' && translatedExplanation ? translatedExplanation : analysis.explanation}
+                </ReactMarkdown>
+              </div>
+            </div>
           )}
 
           {analysis.rewrite_type && analysis.rewrite_type !== 'none' && (
@@ -158,8 +271,20 @@ export function OptimizationModal({
               </p>
               <ul className="list-disc list-inside space-y-1">
                 {analysis.changes_made.map((change, idx) => (
-                  <li key={idx} className="text-sm text-gray-600 dark:text-gray-400">
-                    {change}
+                  <li key={idx} className="text-sm text-gray-700 dark:text-gray-300">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        p: ({ children }) => <span>{children}</span>,
+                        code: ({ children }) => (
+                          <code className="px-1 py-0.5 rounded bg-primary/10 dark:bg-primary/20 text-primary dark:text-primary-dark text-xs font-mono">
+                            {children}
+                          </code>
+                        ),
+                      }}
+                    >
+                      {change}
+                    </ReactMarkdown>
                   </li>
                 ))}
               </ul>
@@ -188,7 +313,7 @@ export function OptimizationModal({
           {analysis.index_recommendation && (
             <div className="mt-3">
               <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                📌 Suggested Index (run separately):
+                Suggested Index (run separately):
               </p>
               <div className="relative group">
                 <pre className="bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg p-3 text-xs font-mono text-gray-800 dark:text-gray-200 overflow-x-auto whitespace-pre-wrap">
@@ -292,7 +417,7 @@ export function OptimizationModal({
                         )}>
                           {line.origLineNum || ' '}
                         </span>
-                        
+
                         {/* New Line Number */}
                         <span className={cn(
                           'inline-block w-8 flex-shrink-0 text-right select-none opacity-50 text-xs font-mono border-r border-gray-300 dark:border-gray-700 mr-3 pr-2 ml-2 mt-1',

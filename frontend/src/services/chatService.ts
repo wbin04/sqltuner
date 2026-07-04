@@ -74,6 +74,15 @@ export interface ChatCompletionResponse {
   is_schema_design?: boolean;
 }
 
+export interface TranslateRequest {
+  text: string;
+  target_language: 'vi' | 'en';
+}
+
+export interface TranslateResponse {
+  translated_text: string;
+}
+
 function normalizeSchemaGenerated(
   value: unknown
 ): SchemaGeneratedData | null {
@@ -183,6 +192,17 @@ export const chatService = {
     const response = await axios.patch<{ id: string; sql_generated: string }>(
       `/chat/messages/${messageId}`,
       { sql_generated }
+    );
+    return response.data;
+  },
+
+  /**
+   * Translate markdown text
+   */
+  async translateMarkdown(request: TranslateRequest): Promise<TranslateResponse> {
+    const response = await axios.post<TranslateResponse>(
+      '/chat/translate',
+      request
     );
     return response.data;
   },

@@ -12,6 +12,9 @@ if settings.ENABLE_DATABASE and settings.SQLALCHEMY_DATABASE_URL:
         pool_pre_ping=True,
         pool_recycle=300,
         pool_timeout=10,
+        # query_cache_size=0 disables SQLAlchemy compiled-statement cache so every
+        # request always compiles a fresh query (no "[cached since Xs ago]" log).
+        query_cache_size=500 if settings.ENABLE_QUERY_CACHE else 0,
     )
 
     AsyncSessionLocal = async_sessionmaker(
