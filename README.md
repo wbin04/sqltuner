@@ -2,6 +2,8 @@
 
 AI-powered SQL optimization and analysis system using local LLM with database schema synchronization capabilities.
 
+Datasets: [Spider](https://yale-lily.github.io/spider), [Drive](https://drive.google.com/drive/folders/1e-GxjybtM-DVe_8sb7YdC3UCJVlmroe7?usp=sharing)
+
 ## Tech Stack
 
 **Backend**
